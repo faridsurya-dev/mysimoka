@@ -1,0 +1,71 @@
+export const colors = {
+  brand: {
+    primary900: '#17405C',
+    primary700: '#1F5D85',
+    primary600: '#2477A9',
+    primary500: '#2D9CDB',
+    primary300: '#8DD0F2',
+    primary100: '#E9F6FD',
+  },
+  neutral: {
+    950: '#162534',
+    900: '#1F2D3D',
+    700: '#51606F',
+    500: '#7B8794',
+    300: '#D5DEE6',
+    200: '#E7EDF2',
+    100: '#F2F5F8',
+    50: '#F8FAFB',
+    0: '#FFFFFF',
+  },
+  accent: {
+    amber: '#E2A93B',
+    teal: '#27AE60',
+    red: '#EB5757',
+  },
+  text: {
+    primary: '#1F2D3D',
+    secondary: '#51606F',
+    muted: '#7B8794',
+    inverse: '#FFFFFF',
+  },
+  surface: {
+    app: '#F8FAFB',
+    primary: '#FFFFFF',
+    secondary: '#F2F5F8',
+    muted: '#EDF4F8',
+    inverse: '#17405C',
+  },
+  border: {
+    subtle: '#E7EDF2',
+    strong: '#D5DEE6',
+  },
+  status: {
+    device: {
+      connected: '#27AE60',
+      connecting: '#E2A93B',
+      disconnected: '#7B8794',
+      error: '#EB5757',
+      busy: '#2D9CDB',
+    },
+    sync: {
+      synced: '#27AE60',
+      pending: '#E2A93B',
+      failed: '#EB5757',
+      offline: '#51606F',
+      syncing: '#2D9CDB',
+    },
+    measurement: {
+      complete: '#27AE60',
+      partial: '#E2A93B',
+      idle: '#7B8794',
+      error: '#EB5757',
+    },
+  },
+  feedback: {
+    successBackground: '#EAF8F0',
+    warningBackground: '#FFF6E6',
+    errorBackground: '#FDEEEE',
+    infoBackground: '#EAF5FC',
+  },
+} as const;
