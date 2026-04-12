@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Pressable,
@@ -24,6 +25,7 @@ type StudentItem = {
   measurement: string;
   timestamp: string;
   checked: boolean;
+  syncStatus: 'synced' | 'pending';
   photoUri: string | null;
   heightCm?: string;
   weightKg?: string;
@@ -35,6 +37,7 @@ const INITIAL_STUDENTS: StudentItem[] = [
     measurement: 'TB 128 cm • BB 29 kg',
     timestamp: 'Diukur 10 Apr 2026, 08:45',
     checked: true,
+    syncStatus: 'pending',
     photoUri: null,
     heightCm: '128',
     weightKg: '29',
@@ -44,6 +47,7 @@ const INITIAL_STUDENTS: StudentItem[] = [
     measurement: 'TB 125 cm • BB 27 kg',
     timestamp: 'Diukur 10 Apr 2026, 08:52',
     checked: true,
+    syncStatus: 'synced',
     photoUri: null,
     heightCm: '125',
     weightKg: '27',
@@ -53,6 +57,7 @@ const INITIAL_STUDENTS: StudentItem[] = [
     measurement: 'Belum ada hasil pengukuran',
     timestamp: 'Menunggu input manual',
     checked: false,
+    syncStatus: 'synced',
     photoUri: null,
   },
   {
@@ -60,6 +65,7 @@ const INITIAL_STUDENTS: StudentItem[] = [
     measurement: 'Belum ada hasil pengukuran',
     timestamp: 'Belum diukur pada sesi ini',
     checked: false,
+    syncStatus: 'synced',
     photoUri: null,
   },
 ];
@@ -93,6 +99,9 @@ export function StudentMeasurementScreen({
   const [measurementMode, setMeasurementMode] = useState<'manual' | 'auto'>('manual');
   const [heightValue, setHeightValue] = useState('');
   const [weightValue, setWeightValue] = useState('');
+  const [isUploadingSync, setIsUploadingSync] = useState(false);
+  const [lastUploadedCount, setLastUploadedCount] = useState(0);
+  const [showSyncSuccess, setShowSyncSuccess] = useState(false);
 
   const selectedStudentIndex = selectedStudentName
     ? students.findIndex(student => student.name === selectedStudentName)
@@ -110,6 +119,10 @@ export function StudentMeasurementScreen({
     Number(deviceConnection.heightConnected) + Number(deviceConnection.weightConnected);
   const allDevicesConnected = connectedDevicesCount === 2;
   const measuredStudentsCount = students.filter(student => student.checked).length;
+  const pendingSyncCount = students.filter(
+    student => student.syncStatus === 'pending',
+  ).length;
+  const hasPendingSync = pendingSyncCount > 0;
   const progressValue =
     students.length > 0
       ? measuredStudentsCount / students.length
@@ -185,6 +198,7 @@ export function StudentMeasurementScreen({
               measurement: `TB ${heightDisplay} cm • BB ${weightDisplay} kg`,
               timestamp: measuredAt,
               checked: cleanHeight.length > 0 && cleanWeight.length > 0,
+              syncStatus: 'pending',
               heightCm: cleanHeight,
               weightKg: cleanWeight,
             }
@@ -199,6 +213,33 @@ export function StudentMeasurementScreen({
     setSelectedStudentName(null);
     setHeightValue('');
     setWeightValue('');
+  };
+
+  const simulateUploadToServer = () => {
+    if (!hasPendingSync || isUploadingSync) {
+      return;
+    }
+
+    const uploadCount = pendingSyncCount;
+    setLastUploadedCount(uploadCount);
+    setIsUploadingSync(true);
+    setShowSyncSuccess(false);
+
+    setTimeout(() => {
+      setStudents(previousStudents =>
+        previousStudents.map(student =>
+          student.syncStatus === 'pending'
+            ? { ...student, syncStatus: 'synced' }
+            : student,
+        ),
+      );
+      setIsUploadingSync(false);
+      setShowSyncSuccess(true);
+
+      setTimeout(() => {
+        setShowSyncSuccess(false);
+      }, 2600);
+    }, 1600);
   };
 
   return (
@@ -218,6 +259,44 @@ export function StudentMeasurementScreen({
             <View style={styles.headerIdentityText}>
               <Text style={styles.pageTitle}>Session 10 April 2026</Text>
             </View>
+          </Pressable>
+
+          <Pressable
+            accessibilityLabel="Upload data ke server"
+            accessibilityRole="button"
+            disabled={!hasPendingSync || isUploadingSync}
+            onPress={simulateUploadToServer}
+            style={({ pressed }) => [
+              styles.syncStatusButton,
+              (hasPendingSync || isUploadingSync) && styles.syncStatusButtonActive,
+              pressed &&
+                !(!hasPendingSync || isUploadingSync) &&
+                styles.syncStatusButtonPressed,
+            ]}>
+            {isUploadingSync ? (
+              <ActivityIndicator color={colors.brand.primary700} size="small" />
+            ) : (
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M20 16v2.5A2.5 2.5 0 0 1 17.5 21h-11A2.5 2.5 0 0 1 4 18.5V16"
+                  stroke={hasPendingSync ? colors.brand.primary700 : colors.text.muted}
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                />
+                <Path
+                  d="M12 15V3m0 0-4 4m4-4 4 4"
+                  stroke={hasPendingSync ? colors.brand.primary700 : colors.text.muted}
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+            )}
+            {hasPendingSync ? (
+              <View style={styles.syncStatusBadge}>
+                <Text style={styles.syncStatusBadgeLabel}>{pendingSyncCount}</Text>
+              </View>
+            ) : null}
           </Pressable>
         </View>
 
@@ -240,6 +319,30 @@ export function StudentMeasurementScreen({
       </View>
 
       <Screen contentContainerStyle={styles.content}>
+        {isUploadingSync ? (
+          <View style={styles.pendingInfoCard}>
+            <Text style={styles.pendingInfoTitle}>Mengunggah data ke server...</Text>
+            <Text style={styles.pendingInfoDescription}>
+              Mengirim {lastUploadedCount} data pengukuran dari penyimpanan lokal.
+            </Text>
+          </View>
+        ) : hasPendingSync ? (
+          <View style={styles.pendingInfoCard}>
+            <Text style={styles.pendingInfoTitle}>Data belum tersimpan ke server</Text>
+            <Text style={styles.pendingInfoDescription}>
+              {pendingSyncCount} data pengukuran masih tersimpan lokal. Tekan ikon upload
+              di kanan atas untuk simulasi kirim ke server.
+            </Text>
+          </View>
+        ) : showSyncSuccess ? (
+          <View style={styles.syncSuccessInfoCard}>
+            <Text style={styles.syncSuccessTitle}>Upload server berhasil</Text>
+            <Text style={styles.syncSuccessDescription}>
+              {lastUploadedCount} data lokal sudah dipindahkan ke server.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.sessionDetailCard}>
           <View style={styles.sessionDetailTopRow}>
             <Text style={styles.sessionDetailEyebrow}>Detail Session</Text>
@@ -624,7 +727,10 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border.subtle,
   },
   headerTopRow: {
-    alignItems: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[12],
   },
   headerIdentity: {
     flexDirection: 'row',
@@ -637,6 +743,39 @@ const styles = StyleSheet.create({
   pageTitle: {
     ...typography.headingLg,
     color: colors.text.primary,
+  },
+  syncStatusButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  syncStatusButtonActive: {
+    borderColor: colors.brand.primary300,
+    backgroundColor: colors.brand.primary100,
+  },
+  syncStatusButtonPressed: {
+    opacity: 0.9,
+  },
+  syncStatusBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: spacing[4],
+    backgroundColor: colors.accent.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  syncStatusBadgeLabel: {
+    ...typography.caption,
+    color: colors.text.inverse,
   },
   searchBar: {
     minHeight: 52,
@@ -658,6 +797,38 @@ const styles = StyleSheet.create({
     paddingTop: spacing[16],
     paddingHorizontal: spacing[16],
     gap: spacing[16],
+  },
+  pendingInfoCard: {
+    backgroundColor: colors.feedback.warningBackground,
+    borderWidth: 1,
+    borderColor: colors.accent.amber,
+    borderRadius: radius.md,
+    padding: spacing[12],
+    gap: spacing[4],
+  },
+  pendingInfoTitle: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  pendingInfoDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  syncSuccessInfoCard: {
+    backgroundColor: colors.feedback.successBackground,
+    borderWidth: 1,
+    borderColor: colors.status.device.connected,
+    borderRadius: radius.md,
+    padding: spacing[12],
+    gap: spacing[4],
+  },
+  syncSuccessTitle: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  syncSuccessDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
   sessionDetailCard: {
     backgroundColor: colors.surface.primary,

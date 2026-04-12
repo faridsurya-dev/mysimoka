@@ -6,7 +6,9 @@ import { LoginScreen } from '../screens/auth/login/LoginScreen';
 import { ClassDetailScreen } from '../screens/dashboard/ClassDetailScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
 import { StudentProfileScreen } from '../screens/dashboard/StudentProfileScreen';
+import { StudentSearchResultsScreen } from '../screens/dashboard/StudentSearchResultsScreen';
 import { BatchMeasurementScreen } from '../screens/measurement/BatchMeasurementScreen';
+import { CreateSessionScreen } from '../screens/measurement/CreateSessionScreen';
 import { DeviceManagerScreen } from '../screens/measurement/DeviceManagerScreen';
 import { FaceCropPreviewScreen } from '../screens/measurement/FaceCropPreviewScreen';
 import { FaceIdentificationScreen } from '../screens/measurement/FaceIdentificationScreen';
@@ -14,7 +16,10 @@ import { SessionListScreen } from '../screens/measurement/SessionListScreen';
 import { StudentMeasurementScreen } from '../screens/measurement/StudentMeasurementScreen';
 import { StudentSearchScreen } from '../screens/measurement/StudentSearchScreen';
 import { AccountSettingsScreen } from '../screens/profile/AccountSettingsScreen';
+import { EditEmailScreen } from '../screens/profile/EditEmailScreen';
+import { EditPasswordScreen } from '../screens/profile/EditPasswordScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
+import { EditSchoolProfileScreen } from '../screens/profile/EditSchoolProfileScreen';
 import { ProfileOverviewScreen } from '../screens/profile/ProfileOverviewScreen';
 import { colors, radius, spacing, typography } from '../theme';
 import {
@@ -28,12 +33,14 @@ import {
 const TAB_LABELS: Record<MainTab, string> = {
   dashboard: 'Dashboard',
   measurement: 'Pengukuran',
+  'device-manager': 'Perangkat',
   profile: 'Profil',
 };
 
 const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
   dashboard: colors.brand.primary500,
   measurement: colors.accent.teal,
+  'device-manager': colors.brand.primary700,
   profile: colors.accent.amber,
 };
 
@@ -43,10 +50,16 @@ export function RootNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<MainTab>('dashboard');
   const [dashboardRoute, setDashboardRoute] = useState<DashboardRoute>('dashboard');
+  const [dashboardStudentSearchKeyword, setDashboardStudentSearchKeyword] =
+    useState('');
+  const [studentProfileBackRoute, setStudentProfileBackRoute] = useState<
+    'class-detail' | 'student-search-results'
+  >('class-detail');
   const [measurementRoute, setMeasurementRoute] =
     useState<MeasurementRoute>('session-list');
   const [identifiedStudentName, setIdentifiedStudentName] = useState<string | null>(null);
   const [faceCropPreview, setFaceCropPreview] = useState<FaceCropPreviewPayload | null>(null);
+  const [faceCameraFacing, setFaceCameraFacing] = useState<'back' | 'front'>('back');
   const [profileRoute, setProfileRoute] =
     useState<ProfileRoute>('profile-overview');
 
@@ -54,19 +67,40 @@ export function RootNavigator() {
     return <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />;
   }
 
+  const shouldHideBottomBar =
+    activeTab === 'measurement' &&
+    (measurementRoute === 'face-identification' ||
+      measurementRoute === 'face-crop-preview');
+
   return (
-    <MainAppShell activeTab={activeTab} onChangeTab={tab => setActiveTab(tab)}>
+    <MainAppShell
+      activeTab={activeTab}
+      hideBottomBar={shouldHideBottomBar}
+      onChangeTab={tab => setActiveTab(tab)}>
       {activeTab === 'dashboard'
         ? renderDashboardStack({
             currentSchool: ACTIVE_SCHOOL,
             dashboardRoute,
             onBackToDashboard: () => setDashboardRoute('dashboard'),
             onOpenClassDetail: () => setDashboardRoute('class-detail'),
-            onOpenStudentProfile: () => setDashboardRoute('student-profile'),
+            onOpenStudentFromClass: () => {
+              setStudentProfileBackRoute('class-detail');
+              setDashboardRoute('student-profile');
+            },
+            onOpenStudentFromSearchResults: () => {
+              setStudentProfileBackRoute('student-search-results');
+              setDashboardRoute('student-profile');
+            },
+            onOpenStudentSearchResults: keyword => {
+              setDashboardStudentSearchKeyword(keyword);
+              setDashboardRoute('student-search-results');
+            },
             onStartMeasurementFromClass: () => {
               setActiveTab('measurement');
               setMeasurementRoute('manual');
             },
+            studentSearchKeyword: dashboardStudentSearchKeyword,
+            onBackFromStudentProfile: () => setDashboardRoute(studentProfileBackRoute),
           })
         : null}
 
@@ -74,8 +108,10 @@ export function RootNavigator() {
         ? renderMeasurementStack({
             identifiedStudentName,
             measurementRoute,
+            faceCameraFacing,
+            onFaceCameraFacingChange: setFaceCameraFacing,
             onBackToSessionList: () => setMeasurementRoute('session-list'),
-            onOpenBatch: () => setMeasurementRoute('batch'),
+            onOpenCreateSession: () => setMeasurementRoute('create-session'),
             onOpenFaceIdentification: () => setMeasurementRoute('face-identification'),
             onFaceCropReady: payload => {
               setFaceCropPreview(payload);
@@ -92,12 +128,17 @@ export function RootNavigator() {
           })
         : null}
 
+      {activeTab === 'device-manager' ? <DeviceManagerScreen /> : null}
+
       {activeTab === 'profile'
         ? renderProfileStack({
             profileRoute,
             onBackToProfile: () => setProfileRoute('profile-overview'),
             onOpenEditProfile: () => setProfileRoute('edit-profile'),
+            onOpenEditSchoolProfile: () => setProfileRoute('edit-school-profile'),
             onOpenAccountSettings: () => setProfileRoute('account-settings'),
+            onOpenEditEmail: () => setProfileRoute('edit-email'),
+            onOpenEditPassword: () => setProfileRoute('edit-password'),
             onLogout: () => {
               setIsAuthenticated(false);
               setActiveTab('dashboard');
@@ -116,12 +157,14 @@ export function RootNavigator() {
 type MainAppShellProps = {
   activeTab: MainTab;
   children: React.ReactNode;
+  hideBottomBar?: boolean;
   onChangeTab: (tab: MainTab) => void;
 };
 
 function MainAppShell({
   activeTab,
   children,
+  hideBottomBar = false,
   onChangeTab,
 }: MainAppShellProps) {
   const insets = useSafeAreaInsets();
@@ -130,26 +173,28 @@ function MainAppShell({
     <View style={styles.container}>
       <View style={styles.content}>{children}</View>
 
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing[8] }]}>
-        {(Object.keys(TAB_LABELS) as MainTab[]).map(tab => {
-          const isActive = tab === activeTab;
+      {!hideBottomBar ? (
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing[8] }]}>
+          {(Object.keys(TAB_LABELS) as MainTab[]).map(tab => {
+            const isActive = tab === activeTab;
 
-          return (
-            <Pressable
-              key={tab}
-              onPress={() => onChangeTab(tab)}
-              style={[styles.tabButton, isActive && styles.tabButtonActive]}>
-              <TabIcon
-                color={isActive ? TAB_ACTIVE_COLORS[tab] : colors.text.secondary}
-                tab={tab}
-              />
-              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                {TAB_LABELS[tab]}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+            return (
+              <Pressable
+                key={tab}
+                onPress={() => onChangeTab(tab)}
+                style={[styles.tabButton, isActive && styles.tabButtonActive]}>
+                <TabIcon
+                  color={isActive ? TAB_ACTIVE_COLORS[tab] : colors.text.secondary}
+                  tab={tab}
+                />
+                <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                  {TAB_LABELS[tab]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -159,8 +204,12 @@ type DashboardStackOptions = {
   dashboardRoute: DashboardRoute;
   onBackToDashboard: () => void;
   onOpenClassDetail: () => void;
-  onOpenStudentProfile: () => void;
+  onOpenStudentFromClass: () => void;
+  onOpenStudentFromSearchResults: () => void;
+  onOpenStudentSearchResults: (keyword: string) => void;
   onStartMeasurementFromClass: () => void;
+  studentSearchKeyword: string;
+  onBackFromStudentProfile: () => void;
 };
 
 function renderDashboardStack({
@@ -168,26 +217,39 @@ function renderDashboardStack({
   dashboardRoute,
   onBackToDashboard,
   onOpenClassDetail,
-  onOpenStudentProfile,
+  onOpenStudentFromClass,
+  onOpenStudentFromSearchResults,
+  onOpenStudentSearchResults,
   onStartMeasurementFromClass,
+  studentSearchKeyword,
+  onBackFromStudentProfile,
 }: DashboardStackOptions) {
   switch (dashboardRoute) {
     case 'class-detail':
       return (
         <ClassDetailScreen
           onBack={onBackToDashboard}
-          onOpenStudent={onOpenStudentProfile}
+          onOpenStudent={onOpenStudentFromClass}
           onStartMeasurement={onStartMeasurementFromClass}
         />
       );
     case 'student-profile':
-      return <StudentProfileScreen onBack={() => onOpenClassDetail()} />;
+      return <StudentProfileScreen onBack={onBackFromStudentProfile} />;
+    case 'student-search-results':
+      return (
+        <StudentSearchResultsScreen
+          keyword={studentSearchKeyword}
+          onBack={onBackToDashboard}
+          onOpenStudentProfile={onOpenStudentFromSearchResults}
+        />
+      );
     case 'dashboard':
     default:
       return (
         <DashboardScreen
           currentSchool={currentSchool}
           onOpenClassDetail={onOpenClassDetail}
+          onSearchStudents={onOpenStudentSearchResults}
         />
       );
   }
@@ -196,8 +258,10 @@ function renderDashboardStack({
 type MeasurementStackOptions = {
   identifiedStudentName: string | null;
   measurementRoute: MeasurementRoute;
+  faceCameraFacing: 'back' | 'front';
+  onFaceCameraFacingChange: (facing: 'back' | 'front') => void;
   onBackToSessionList: () => void;
-  onOpenBatch: () => void;
+  onOpenCreateSession: () => void;
   onOpenFaceIdentification: () => void;
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onFaceIdentificationMatched: (studentName: string) => void;
@@ -210,8 +274,10 @@ type MeasurementStackOptions = {
 function renderMeasurementStack({
   identifiedStudentName,
   measurementRoute,
+  faceCameraFacing,
+  onFaceCameraFacingChange,
   onBackToSessionList,
-  onOpenBatch: _onOpenBatch,
+  onOpenCreateSession,
   onOpenFaceIdentification,
   onFaceCropReady,
   onFaceIdentificationMatched,
@@ -221,11 +287,20 @@ function renderMeasurementStack({
   faceCropPreview,
 }: MeasurementStackOptions) {
   switch (measurementRoute) {
+    case 'create-session':
+      return (
+        <CreateSessionScreen
+          onBack={onBackToSessionList}
+          onCreateSession={() => onOpenManual()}
+        />
+      );
     case 'face-crop-preview':
       if (!faceCropPreview) {
         return (
           <FaceIdentificationScreen
             onBack={onOpenManual}
+            cameraFacing={faceCameraFacing}
+            onCameraFacingChange={onFaceCameraFacingChange}
             onFaceCropReady={onFaceCropReady}
             onIdentificationSuccess={onFaceIdentificationMatched}
           />
@@ -243,6 +318,8 @@ function renderMeasurementStack({
       return (
         <FaceIdentificationScreen
           onBack={onOpenManual}
+          cameraFacing={faceCameraFacing}
+          onCameraFacingChange={onFaceCameraFacingChange}
           onFaceCropReady={onFaceCropReady}
           onIdentificationSuccess={onFaceIdentificationMatched}
         />
@@ -271,7 +348,7 @@ function renderMeasurementStack({
     default:
       return (
         <SessionListScreen
-          onCreateSession={onOpenManual}
+          onCreateSession={onOpenCreateSession}
           onOpenSessionDetail={onOpenManual}
         />
       );
@@ -282,7 +359,10 @@ type ProfileStackOptions = {
   profileRoute: ProfileRoute;
   onBackToProfile: () => void;
   onOpenEditProfile: () => void;
+  onOpenEditSchoolProfile: () => void;
   onOpenAccountSettings: () => void;
+  onOpenEditEmail: () => void;
+  onOpenEditPassword: () => void;
   onLogout: () => void;
 };
 
@@ -290,20 +370,40 @@ function renderProfileStack({
   profileRoute,
   onBackToProfile,
   onOpenEditProfile,
+  onOpenEditSchoolProfile,
   onOpenAccountSettings,
+  onOpenEditEmail,
+  onOpenEditPassword,
   onLogout,
 }: ProfileStackOptions) {
   switch (profileRoute) {
     case 'edit-profile':
       return <EditProfileScreen onBack={onBackToProfile} />;
+    case 'edit-school-profile':
+      return <EditSchoolProfileScreen onBack={onBackToProfile} />;
+    case 'edit-email':
+      return <EditEmailScreen onBack={onBackToProfile} />;
+    case 'edit-password':
+      return <EditPasswordScreen onBack={onBackToProfile} />;
     case 'account-settings':
-      return <AccountSettingsScreen onBack={onBackToProfile} onLogout={onLogout} />;
+      return (
+        <AccountSettingsScreen
+          onBack={onBackToProfile}
+          onOpenEditEmail={onOpenEditEmail}
+          onOpenEditPassword={onOpenEditPassword}
+          onLogout={onLogout}
+        />
+      );
     case 'profile-overview':
     default:
       return (
         <ProfileOverviewScreen
           onEditProfile={onOpenEditProfile}
+          onEditSchoolProfile={onOpenEditSchoolProfile}
           onOpenAccountSettings={onOpenAccountSettings}
+          onOpenEditEmail={onOpenEditEmail}
+          onOpenEditPassword={onOpenEditPassword}
+          onLogout={onLogout}
         />
       );
   }
@@ -346,6 +446,17 @@ function TabIcon({ color, tab }: TabIconProps) {
     );
   }
 
+  if (tab === 'device-manager') {
+    return (
+      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+        <Rect x={4} y={6.5} width={16} height={11} rx={2.5} stroke={color} strokeWidth={1.8} />
+        <Circle cx={9} cy={12} r={1.2} fill={color} />
+        <Circle cx={12} cy={12} r={1.2} fill={color} />
+        <Circle cx={15} cy={12} r={1.2} fill={color} />
+      </Svg>
+    );
+  }
+
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={8} r={3.5} stroke={color} strokeWidth={1.8} />
@@ -358,10 +469,6 @@ function TabIcon({ color, tab }: TabIconProps) {
     </Svg>
   );
 }
-
-type MonoIconProps = {
-  color: string;
-};
 
 const styles = StyleSheet.create({
   container: {
@@ -380,7 +487,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing[12],
     paddingHorizontal: spacing[16],
     flexDirection: 'row',
-    gap: spacing[8],
+    gap: spacing[4],
   },
   tabButton: {
     flex: 1,

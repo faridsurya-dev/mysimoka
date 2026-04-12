@@ -1,9 +1,14 @@
-export type MainTab = 'dashboard' | 'measurement' | 'profile';
+export type MainTab = 'dashboard' | 'measurement' | 'device-manager' | 'profile';
 
-export type DashboardRoute = 'dashboard' | 'class-detail' | 'student-profile';
+export type DashboardRoute =
+  | 'dashboard'
+  | 'class-detail'
+  | 'student-profile'
+  | 'student-search-results';
 
 export type MeasurementRoute =
   | 'session-list'
+  | 'create-session'
   | 'batch'
   | 'manual'
   | 'face-identification'
@@ -28,4 +33,7 @@ export type FaceCropPreviewPayload = {
 export type ProfileRoute =
   | 'profile-overview'
   | 'edit-profile'
-  | 'account-settings';
+  | 'edit-school-profile'
+  | 'account-settings'
+  | 'edit-email'
+  | 'edit-password';

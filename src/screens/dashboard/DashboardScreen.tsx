@@ -16,6 +16,7 @@ import { colors, radius, spacing, typography } from '../../theme';
 type DashboardScreenProps = {
   currentSchool: string;
   onOpenClassDetail: () => void;
+  onSearchStudents: (keyword: string) => void;
 };
 
 const DEMOGRAPHY_CARDS = [
@@ -77,11 +78,13 @@ const CLASS_ITEMS = [
 export function DashboardScreen({
   currentSchool,
   onOpenClassDetail,
+  onSearchStudents,
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
   const [isPeriodDialogVisible, setIsPeriodDialogVisible] = useState(false);
   const [periodStartDate, setPeriodStartDate] = useState('2026-01-01');
   const [periodEndDate, setPeriodEndDate] = useState('2026-12-31');
+  const [studentQuery, setStudentQuery] = useState('');
   const totalStudentsSubtitle = 'Periode aktif';
   const schoolInitials = currentSchool
     .split(' ')
@@ -92,8 +95,14 @@ export function DashboardScreen({
 
   return (
     <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[1]}>
-      <View style={styles.pageHeader}>
-        <View style={styles.schoolHeroCard}>
+      <View
+        style={[
+          styles.pageHeader,
+          {
+            marginTop: -(insets.top + spacing[8]),
+          },
+        ]}>
+        <View style={[styles.schoolHeroCard, { paddingTop: insets.top + spacing[24] }]}>
           <View style={styles.schoolHeroBody}>
             <View style={styles.schoolHeroCopy}>
               <Text style={styles.schoolHeroEyebrow}>Selamat datang,</Text>
@@ -109,6 +118,56 @@ export function DashboardScreen({
               <Text style={styles.avatarLabel}>{schoolInitials}</Text>
             </View>
           </View>
+
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.stickySearchWrap,
+          {
+            paddingTop: insets.top + spacing[8],
+            marginTop: -(insets.top + spacing[8]),
+          },
+        ]}>
+        <View style={styles.studentSearchCard}>
+          <TextInput
+            autoCapitalize="words"
+            onChangeText={setStudentQuery}
+            onSubmitEditing={() => {
+              const keyword = studentQuery.trim();
+              if (keyword) {
+                onSearchStudents(keyword);
+              }
+            }}
+            placeholder="Cari nama siswa atau NISN"
+            placeholderTextColor={colors.text.muted}
+            style={styles.studentSearchInput}
+            value={studentQuery}
+          />
+          <Pressable
+            accessibilityLabel="Cari siswa"
+            accessibilityRole="button"
+            onPress={() => {
+              const keyword = studentQuery.trim();
+              if (keyword) {
+                onSearchStudents(keyword);
+              }
+            }}
+            style={({ pressed }) => [
+              styles.searchActionButton,
+              pressed && styles.searchActionButtonPressed,
+            ]}>
+            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M15.5 15.5L20 20M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z"
+                stroke={colors.brand.primary500}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+              />
+            </Svg>
+          </Pressable>
         </View>
       </View>
 
@@ -438,14 +497,16 @@ const styles = StyleSheet.create({
     gap: spacing[16],
   },
   pageHeader: {
-    paddingTop: spacing[12],
+    marginHorizontal: -spacing[16],
   },
   schoolHeroCard: {
-    borderRadius: 28,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     backgroundColor: colors.brand.primary500,
     paddingHorizontal: spacing[20],
-    paddingTop: spacing[24],
-    paddingBottom: spacing[24],
+    paddingBottom: spacing[10],
     shadowColor: colors.brand.primary900,
     shadowOpacity: 0.18,
     shadowRadius: 18,
@@ -497,6 +558,19 @@ const styles = StyleSheet.create({
   dashboardHeader: {
     backgroundColor: 'transparent',
     paddingBottom: spacing[10],
+  },
+  stickySearchWrap: {
+    marginHorizontal: -spacing[16],
+    backgroundColor: colors.brand.primary500,
+    paddingHorizontal: spacing[20],
+    paddingBottom: spacing[16],
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    shadowColor: colors.brand.primary900,
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
   periodCard: {
     minHeight: 76,
@@ -624,6 +698,39 @@ const styles = StyleSheet.create({
   chartCardTitle: {
     ...typography.labelLg,
     color: colors.text.primary,
+  },
+  studentSearchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.secondary,
+    paddingHorizontal: spacing[16],
+    paddingTop: spacing[8],
+    paddingBottom: spacing[8],
+    gap: spacing[12],
+    shadowColor: '#1F2D3D',
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 1,
+  },
+  studentSearchInput: {
+    flex: 1,
+    minHeight: 40,
+    paddingHorizontal: spacing[2],
+    color: colors.text.primary,
+    ...typography.bodyMd,
+  },
+  searchActionButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchActionButtonPressed: {
+    opacity: 0.7,
   },
   classList: {
     gap: spacing[12],

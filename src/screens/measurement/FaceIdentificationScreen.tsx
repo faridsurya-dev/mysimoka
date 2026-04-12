@@ -27,19 +27,26 @@ import { colors, radius, spacing, typography } from '../../theme';
 
 type FaceIdentificationScreenProps = {
   onBack: () => void;
+  cameraFacing: 'back' | 'front';
+  onCameraFacingChange: (facing: 'back' | 'front') => void;
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onIdentificationSuccess: (studentName: string) => void;
 };
 
 export function FaceIdentificationScreen({
   onBack,
+  cameraFacing,
+  onCameraFacingChange,
   onFaceCropReady,
   onIdentificationSuccess: _onIdentificationSuccess,
 }: FaceIdentificationScreenProps) {
   const insets = useSafeAreaInsets();
   const backDevice = useCameraDevice('back');
   const frontDevice = useCameraDevice('front');
-  const device = backDevice ?? frontDevice;
+  const selectedDevice = cameraFacing === 'back' ? backDevice : frontDevice;
+  const fallbackDevice = cameraFacing === 'back' ? frontDevice : backDevice;
+  const device = selectedDevice ?? fallbackDevice;
+  const canToggleCamera = !!backDevice && !!frontDevice;
   const { hasPermission, requestPermission } = useCameraPermission();
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
@@ -232,18 +239,18 @@ export function FaceIdentificationScreen({
       return;
     }
 
-    const minCropWidth = previewSize.width * 0.16;
-    const minCropHeight = previewSize.height * 0.2;
-    if (projectedBounds.width < minCropWidth || projectedBounds.height < minCropHeight) {
+    const MIN_FACE_SIZE_PX = 100;
+    if (
+      projectedBounds.width < MIN_FACE_SIZE_PX ||
+      projectedBounds.height < MIN_FACE_SIZE_PX
+    ) {
       return;
     }
 
-    const paddingX = projectedBounds.width * 0.2;
-    const paddingY = projectedBounds.height * 0.25;
-    const cropX = Math.max(projectedBounds.x - paddingX, 0);
-    const cropY = Math.max(projectedBounds.y - paddingY, 0);
-    const cropWidth = Math.min(projectedBounds.width + paddingX * 2, previewSize.width - cropX);
-    const cropHeight = Math.min(projectedBounds.height + paddingY * 2, previewSize.height - cropY);
+    const cropX = Math.max(projectedBounds.x, 0);
+    const cropY = Math.max(projectedBounds.y, 0);
+    const cropWidth = Math.max(Math.min(projectedBounds.width, previewSize.width - cropX), 1);
+    const cropHeight = Math.max(Math.min(projectedBounds.height, previewSize.height - cropY), 1);
 
     isCapturingFaceRef.current = true;
     captureFaceSnapshot({
@@ -311,11 +318,121 @@ export function FaceIdentificationScreen({
     }
   };
 
+  const handleToggleCameraFacing = () => {
+    if (!canToggleCamera) {
+      return;
+    }
+
+    onCameraFacingChange(cameraFacing === 'back' ? 'front' : 'back');
+  };
+
+  const activeCameraFacing = device?.position === 'front' ? 'front' : 'back';
+  const cameraFacingLabel = activeCameraFacing === 'back' ? 'Belakang' : 'Depan';
+
   return (
     <View style={styles.container}>
-      <View style={[styles.stickyHeader, { paddingTop: Math.max(insets.top + 2, 30) }]}>
+      {Platform.OS === 'android' ? (
+        <View
+          pointerEvents="none"
+          style={[styles.androidStatusBarBackground, { height: Math.max(insets.top, 24) }]}
+        />
+      ) : null}
+
+      <View onLayout={onPreviewLayout} style={styles.cameraPreview}>
+        {device && hasPermission ? (
+          <FaceDetectionCamera
+            ref={cameraRef}
+            key={device.id}
+            device={device}
+            isActive={isCameraReady}
+            preview
+            photo
+            video={Platform.OS === 'ios'}
+            androidPreviewViewType={
+              Platform.OS === 'android' ? 'texture-view' : undefined
+            }
+            faceDetectionCallback={handleFacesDetected}
+            faceDetectionOptions={faceDetectionOptions}
+            onInitialized={() => {
+              setIsCameraInitialized(true);
+              setCameraErrorText(null);
+            }}
+            onError={error => {
+              setIsCameraInitialized(false);
+              setDetectedFaces([]);
+              setCameraErrorText(error.message);
+            }}
+            style={styles.cameraLivePreview}
+          />
+        ) : (
+          <View style={styles.cameraFallback} />
+        )}
+
+        {!hasPermission ? (
+          <View style={styles.permissionOverlay}>
+            <Text style={styles.permissionTitle}>Akses Kamera Diperlukan</Text>
+            <Text style={styles.permissionDescription}>
+              Izinkan kamera untuk melanjutkan identifikasi wajah siswa.
+            </Text>
+            <Pressable
+              accessibilityLabel="Izinkan kamera"
+              onPress={handleRequestPermission}
+              style={({ pressed }) => [
+                styles.permissionButton,
+                pressed && styles.permissionButtonPressed,
+              ]}>
+              <Text style={styles.permissionButtonText}>
+                {isRequestingPermission ? 'Meminta izin...' : 'Izinkan Kamera'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        <View pointerEvents="none" style={styles.detectedFacesOverlay}>
+          {detectedFaces.map((face, index) => {
+            const projectedBounds = projectBoundsToPreview(face.bounds);
+            if (!projectedBounds) {
+              return null;
+            }
+
+            return (
+              <View
+                key={`${face.trackingId ?? 'face'}-${index}`}
+                style={[
+                  styles.detectedFaceBox,
+                  {
+                    left: projectedBounds.x,
+                    top: projectedBounds.y,
+                    width: projectedBounds.width,
+                    height: projectedBounds.height,
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
+
+        <View style={styles.faceGuideFrame} />
+        <View style={[styles.statusOverlay, { bottom: Math.max(insets.bottom + 12, 12) }]}>
+          <Text style={styles.statusText}>{statusText}</Text>
+        </View>
+      </View>
+
+      <View
+        pointerEvents="box-none"
+        style={[styles.topOverlay, { paddingTop: Math.max(insets.top + 8, 16) }]}>
         <View style={styles.headerTopRow}>
-          <View style={styles.headerSpacer} />
+          <Pressable
+            accessibilityLabel={`Gunakan kamera ${activeCameraFacing === 'back' ? 'depan' : 'belakang'}`}
+            disabled={!canToggleCamera}
+            onPress={handleToggleCameraFacing}
+            style={({ pressed }) => [
+              styles.facingButton,
+              !canToggleCamera && styles.facingButtonDisabled,
+              pressed && canToggleCamera && styles.facingButtonPressed,
+            ]}>
+            <Text style={styles.facingButtonText}>Kamera: {cameraFacingLabel}</Text>
+          </Pressable>
           <Pressable
             accessibilityLabel="Tutup identifikasi wajah"
             onPress={onBack}
@@ -342,88 +459,6 @@ export function FaceIdentificationScreen({
           </Pressable>
         </View>
       </View>
-
-      <View style={styles.cameraCenterArea}>
-        <View onLayout={onPreviewLayout} style={styles.cameraPreview}>
-          {device && hasPermission ? (
-            <FaceDetectionCamera
-              ref={cameraRef}
-              key={device.id}
-              device={device}
-              isActive={isCameraReady}
-              preview
-              photo
-              video={Platform.OS === 'ios'}
-              androidPreviewViewType={
-                Platform.OS === 'android' ? 'surface-view' : undefined
-              }
-              faceDetectionCallback={handleFacesDetected}
-              faceDetectionOptions={faceDetectionOptions}
-              onInitialized={() => {
-                setIsCameraInitialized(true);
-                setCameraErrorText(null);
-              }}
-              onError={error => {
-                setIsCameraInitialized(false);
-                setDetectedFaces([]);
-                setCameraErrorText(error.message);
-              }}
-              style={styles.cameraLivePreview}
-            />
-          ) : (
-            <View style={styles.cameraFallback} />
-          )}
-
-          {!hasPermission ? (
-            <View style={styles.permissionOverlay}>
-              <Text style={styles.permissionTitle}>Akses Kamera Diperlukan</Text>
-              <Text style={styles.permissionDescription}>
-                Izinkan kamera untuk melanjutkan identifikasi wajah siswa.
-              </Text>
-              <Pressable
-                accessibilityLabel="Izinkan kamera"
-                onPress={handleRequestPermission}
-                style={({ pressed }) => [
-                  styles.permissionButton,
-                  pressed && styles.permissionButtonPressed,
-                ]}>
-                <Text style={styles.permissionButtonText}>
-                  {isRequestingPermission ? 'Meminta izin...' : 'Izinkan Kamera'}
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          <View pointerEvents="none" style={styles.detectedFacesOverlay}>
-            {detectedFaces.map((face, index) => {
-              const projectedBounds = projectBoundsToPreview(face.bounds);
-              if (!projectedBounds) {
-                return null;
-              }
-
-              return (
-                <View
-                  key={`${face.trackingId ?? 'face'}-${index}`}
-                  style={[
-                    styles.detectedFaceBox,
-                    {
-                      left: projectedBounds.x,
-                      top: projectedBounds.y,
-                      width: projectedBounds.width,
-                      height: projectedBounds.height,
-                    },
-                  ]}
-                />
-              );
-            })}
-          </View>
-
-          <View style={styles.faceGuideFrame} />
-          <View style={styles.statusOverlay}>
-            <Text style={styles.statusText}>{statusText}</Text>
-          </View>
-        </View>
-      </View>
     </View>
   );
 }
@@ -431,20 +466,50 @@ export function FaceIdentificationScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.brand.primary700,
+    backgroundColor: colors.neutral[900],
   },
-  stickyHeader: {
-    backgroundColor: colors.brand.primary700,
+  topOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     paddingHorizontal: spacing[16],
-    paddingBottom: spacing[12],
+    zIndex: 5,
+    elevation: 5,
+  },
+  androidStatusBarBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.surface.secondary,
+    zIndex: 4,
+    elevation: 4,
   },
   headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  headerSpacer: {
-    flex: 1,
+  facingButton: {
+    minHeight: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[12],
+    backgroundColor: 'rgba(15,23,42,0.62)',
+    zIndex: 6,
+    elevation: 6,
+  },
+  facingButtonPressed: {
+    backgroundColor: 'rgba(15,23,42,0.82)',
+  },
+  facingButtonDisabled: {
+    backgroundColor: 'rgba(15,23,42,0.4)',
+  },
+  facingButtonText: {
+    ...typography.labelSm,
+    color: colors.text.inverse,
   },
   closeButton: {
     width: 40,
@@ -452,15 +517,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(15,23,42,0.62)',
+    zIndex: 6,
+    elevation: 6,
   },
   closeButtonPressed: {
-    backgroundColor: 'rgba(255,255,255,0.24)',
-  },
-  cameraCenterArea: {
-    flex: 1,
-    paddingHorizontal: spacing[12],
-    paddingBottom: spacing[12],
+    backgroundColor: 'rgba(15,23,42,0.82)',
   },
   cameraPreview: {
     flex: 1,
@@ -522,7 +584,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     top: '15%',
     width: '70%',
-    aspectRatio: 3 / 4,
+    aspectRatio: 1,
     borderWidth: 2,
     borderStyle: 'dashed',
     borderColor: 'rgba(255,255,255,0.6)',
@@ -533,7 +595,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: spacing[12],
     right: spacing[12],
-    bottom: spacing[12],
     backgroundColor: 'rgba(0,0,0,0.35)',
     borderRadius: radius.md,
     paddingHorizontal: spacing[12],

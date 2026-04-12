@@ -139,7 +139,7 @@ export function BatchMeasurementScreen({
           </View>
           <Text style={styles.connectionHint}>{connectionMessage}</Text>
           <Pressable onPress={onOpenDeviceManager} style={styles.deviceManagerButton}>
-            <Text style={styles.deviceManagerButtonLabel}>Buka Device Manager</Text>
+            <Text style={styles.deviceManagerButtonLabel}>Buka Perangkat</Text>
           </Pressable>
         </View>
 

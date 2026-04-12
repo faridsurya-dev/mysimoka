@@ -5,13 +5,19 @@ import { colors, radius, spacing, typography } from '../../theme';
 
 type AccountSettingsScreenProps = {
   onBack: () => void;
+  onOpenEditEmail: () => void;
+  onOpenEditPassword: () => void;
   onLogout: () => void;
 };
 
 export function AccountSettingsScreen({
   onBack,
+  onOpenEditEmail,
+  onOpenEditPassword,
   onLogout,
 }: AccountSettingsScreenProps) {
+  const shouldShowWhatsApp = false;
+
   return (
     <Screen contentContainerStyle={styles.content}>
       <Pressable onPress={onBack} style={styles.backButton}>
@@ -19,21 +25,56 @@ export function AccountSettingsScreen({
       </Pressable>
 
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>Account & Access</Text>
+        <Text style={styles.eyebrow}>Keamanan & Kontak</Text>
         <Text style={styles.title}>Pengaturan akun</Text>
         <Text style={styles.subtitle}>
-          Struktur awal untuk ubah password, pengelolaan akses, dan logout.
+          Kelola email akun dan password untuk keamanan akses.
         </Text>
       </View>
 
-      <InfoCard
-        title="Ubah password"
-        description="Area ini nanti menjadi form keamanan akun."
-      />
+      <InfoCard eyebrow="Kontak Utama">
+        <View style={styles.rowList}>
+          <View style={styles.row}>
+            <View style={styles.rowMeta}>
+              <Text style={styles.rowLabel}>Email</Text>
+              <Text style={styles.rowValue}>farid.ramadhan@simoka.id</Text>
+            </View>
+            <Pressable onPress={onOpenEditEmail} style={styles.rowAction}>
+              <Text style={styles.rowActionLabel}>Edit</Text>
+            </Pressable>
+          </View>
+          {shouldShowWhatsApp ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.row}>
+                <View style={styles.rowMeta}>
+                  <Text style={styles.rowLabel}>Nomor WhatsApp</Text>
+                  <Text style={styles.rowValue}>+62 812-3456-7890</Text>
+                </View>
+                <Pressable onPress={() => undefined} style={styles.rowAction}>
+                  <Text style={styles.rowActionLabel}>Edit</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
+        </View>
+      </InfoCard>
+
+      <InfoCard title="Keamanan">
+        <View style={styles.row}>
+          <View style={styles.rowMeta}>
+            <Text style={styles.rowLabel}>Password</Text>
+            <Text style={styles.rowValue}>Terakhir diubah 22 Jan 2026</Text>
+          </View>
+          <Pressable onPress={onOpenEditPassword} style={styles.rowAction}>
+            <Text style={styles.rowActionLabel}>Edit</Text>
+          </Pressable>
+        </View>
+      </InfoCard>
 
       <Pressable onPress={onLogout} style={styles.logoutCard}>
         <Text style={styles.logoutTitle}>Logout</Text>
-        <Text style={styles.logoutBody}>Kembali ke login tanpa menghapus struktur app.</Text>
+        <Text style={styles.logoutBody}>Keluar dari akun dan kembali ke halaman login.</Text>
       </Pressable>
     </Screen>
   );
@@ -67,6 +108,43 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.bodyMd,
     color: colors.text.secondary,
+  },
+  rowList: {
+    marginTop: spacing[4],
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[12],
+    paddingVertical: spacing[8],
+  },
+  rowMeta: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  rowLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+  },
+  rowValue: {
+    ...typography.bodyMd,
+    color: colors.text.primary,
+  },
+  rowAction: {
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[4],
+  },
+  rowActionLabel: {
+    ...typography.labelMd,
+    color: colors.brand.primary700,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.border.subtle,
   },
   logoutCard: {
     backgroundColor: colors.feedback.errorBackground,
