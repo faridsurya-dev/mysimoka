@@ -2,8 +2,11 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { ForgotPasswordScreen } from '../screens/auth/forgot-password/ForgotPasswordScreen';
 import { LoginScreen } from '../screens/auth/login/LoginScreen';
+import { RegisterScreen } from '../screens/auth/register/RegisterScreen';
 import { ClassDetailScreen } from '../screens/dashboard/ClassDetailScreen';
+import { ClassListScreen } from '../screens/dashboard/ClassListScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
 import { StudentProfileScreen } from '../screens/dashboard/StudentProfileScreen';
 import { StudentSearchResultsScreen } from '../screens/dashboard/StudentSearchResultsScreen';
@@ -48,6 +51,7 @@ const ACTIVE_SCHOOL = 'SDN Sukamaju 01';
 
 export function RootNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authRoute, setAuthRoute] = useState<'login' | 'register' | 'forgot-password'>('login');
   const [activeTab, setActiveTab] = useState<MainTab>('dashboard');
   const [dashboardRoute, setDashboardRoute] = useState<DashboardRoute>('dashboard');
   const [dashboardStudentSearchKeyword, setDashboardStudentSearchKeyword] =
@@ -64,7 +68,29 @@ export function RootNavigator() {
     useState<ProfileRoute>('profile-overview');
 
   if (!isAuthenticated) {
-    return <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />;
+    if (authRoute === 'register') {
+      return (
+        <RegisterScreen
+          onBackToLogin={() => setAuthRoute('login')}
+          onRegisterSuccess={() => {
+            setIsAuthenticated(true);
+            setAuthRoute('login');
+          }}
+        />
+      );
+    }
+
+    if (authRoute === 'forgot-password') {
+      return <ForgotPasswordScreen onBackToLogin={() => setAuthRoute('login')} />;
+    }
+
+    return (
+      <LoginScreen
+        onLoginSuccess={() => setIsAuthenticated(true)}
+        onOpenRegister={() => setAuthRoute('register')}
+        onOpenForgotPassword={() => setAuthRoute('forgot-password')}
+      />
+    );
   }
 
   const shouldHideBottomBar =
@@ -82,6 +108,7 @@ export function RootNavigator() {
             currentSchool: ACTIVE_SCHOOL,
             dashboardRoute,
             onBackToDashboard: () => setDashboardRoute('dashboard'),
+            onOpenClassList: () => setDashboardRoute('class-list'),
             onOpenClassDetail: () => setDashboardRoute('class-detail'),
             onOpenStudentFromClass: () => {
               setStudentProfileBackRoute('class-detail');
@@ -141,6 +168,7 @@ export function RootNavigator() {
             onOpenEditPassword: () => setProfileRoute('edit-password'),
             onLogout: () => {
               setIsAuthenticated(false);
+              setAuthRoute('login');
               setActiveTab('dashboard');
               setDashboardRoute('dashboard');
               setMeasurementRoute('session-list');
@@ -203,6 +231,7 @@ type DashboardStackOptions = {
   currentSchool: string;
   dashboardRoute: DashboardRoute;
   onBackToDashboard: () => void;
+  onOpenClassList: () => void;
   onOpenClassDetail: () => void;
   onOpenStudentFromClass: () => void;
   onOpenStudentFromSearchResults: () => void;
@@ -216,6 +245,7 @@ function renderDashboardStack({
   currentSchool,
   dashboardRoute,
   onBackToDashboard,
+  onOpenClassList,
   onOpenClassDetail,
   onOpenStudentFromClass,
   onOpenStudentFromSearchResults,
@@ -225,10 +255,17 @@ function renderDashboardStack({
   onBackFromStudentProfile,
 }: DashboardStackOptions) {
   switch (dashboardRoute) {
+    case 'class-list':
+      return (
+        <ClassListScreen
+          onBack={onBackToDashboard}
+          onOpenClassDetail={onOpenClassDetail}
+        />
+      );
     case 'class-detail':
       return (
         <ClassDetailScreen
-          onBack={onBackToDashboard}
+          onBack={onOpenClassList}
           onOpenStudent={onOpenStudentFromClass}
           onStartMeasurement={onStartMeasurementFromClass}
         />
@@ -248,7 +285,7 @@ function renderDashboardStack({
       return (
         <DashboardScreen
           currentSchool={currentSchool}
-          onOpenClassDetail={onOpenClassDetail}
+          onOpenClassList={onOpenClassList}
           onSearchStudents={onOpenStudentSearchResults}
         />
       );

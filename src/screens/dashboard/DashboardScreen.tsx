@@ -15,7 +15,7 @@ import { colors, radius, spacing, typography } from '../../theme';
 
 type DashboardScreenProps = {
   currentSchool: string;
-  onOpenClassDetail: () => void;
+  onOpenClassList: () => void;
   onSearchStudents: (keyword: string) => void;
 };
 
@@ -68,16 +68,15 @@ const WEIGHT_TREND = [
   { value: 32.3, label: 'Des' },
 ];
 
-const CLASS_ITEMS = [
-  { name: 'Kelas 1A', total: '28 siswa', lastMeasuredAt: 'Pengukuran terakhir 8 Apr 2026' },
-  { name: 'Kelas 1B', total: '30 siswa', lastMeasuredAt: 'Pengukuran terakhir 6 Apr 2026' },
-  { name: 'Kelas 2A', total: '27 siswa', lastMeasuredAt: 'Pengukuran terakhir 9 Apr 2026' },
-  { name: 'Kelas 2B', total: '35 siswa', lastMeasuredAt: 'Pengukuran terakhir 5 Apr 2026' },
+const QUICK_MENUS = [
+  { label: 'Kelas', badge: 'KL' },
+  { label: 'Siswa', badge: 'SW' },
+  { label: 'Guru', badge: 'GR' },
 ];
 
 export function DashboardScreen({
   currentSchool,
-  onOpenClassDetail,
+  onOpenClassList,
   onSearchStudents,
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
@@ -171,41 +170,61 @@ export function DashboardScreen({
         </View>
       </View>
 
-      <View
-        style={[
-          styles.dashboardHeader,
-          {
-            paddingTop: insets.top + spacing[8],
-            marginTop: -(insets.top + spacing[8]),
-          },
-        ]}>
+      <View style={styles.quickMenuSection}>
+        <View style={styles.quickMenuGrid}>
+          {QUICK_MENUS.map(menu => (
+            <Pressable
+              key={menu.label}
+              onPress={menu.label === 'Kelas' ? onOpenClassList : undefined}
+              disabled={menu.label !== 'Kelas'}
+              style={({ pressed }) => [
+                styles.quickMenuCard,
+                menu.label === 'Kelas' && pressed && styles.quickMenuCardPressed,
+              ]}>
+              <View style={styles.quickMenuBadge}>
+                <Text style={styles.quickMenuBadgeLabel}>{menu.badge}</Text>
+              </View>
+              <Text style={styles.quickMenuCardTitle}>{menu.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <SectionHeader
+          title="Statistik demografi"
+          description="Komposisi siswa aktif berdasarkan populasi kelas saat ini."
+        />
+        <View style={styles.summaryGrid}>
+          {DEMOGRAPHY_CARDS.map(card => (
+            <View key={card.label} style={styles.dataTile}>
+              <Text style={styles.dataTileLabel}>{card.label}</Text>
+              <Text style={styles.dataTileValue}>{card.value}</Text>
+              <Text style={styles.dataTileNote}>
+                {card.label === 'Total Siswa' ? totalStudentsSubtitle : card.note}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.analyticsBlock}>
+        <View style={styles.analyticsBlockHeader}>
+          <Text style={styles.analyticsBlockTitle}>Analitik Pengukuran</Text>
+          <Text style={styles.analyticsBlockDescription}>
+            Ringkasan metrik dan tren berdasarkan rentang tanggal terpilih.
+          </Text>
+        </View>
+
         <PeriodCard
           endDate={periodEndDate}
           onPress={() => setIsPeriodDialogVisible(true)}
           startDate={periodStartDate}
         />
-      </View>
 
         <View style={styles.section}>
           <SectionHeader
-            title="Statistik demografi"
-            description="Komposisi siswa aktif berdasarkan populasi kelas saat ini."
-          />
-          <View style={styles.summaryGrid}>
-            {DEMOGRAPHY_CARDS.map(card => (
-              <View key={card.label} style={styles.dataTile}>
-                <Text style={styles.dataTileLabel}>{card.label}</Text>
-                <Text style={styles.dataTileValue}>{card.value}</Text>
-                <Text style={styles.dataTileNote}>
-                  {card.label === 'Total Siswa' ? totalStudentsSubtitle : card.note}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <SectionHeader
+            compact
             title="Statistik rata-rata"
             description="Nilai rata-rata tinggi, berat, dan BMI siswa pada periode aktif."
           />
@@ -224,6 +243,7 @@ export function DashboardScreen({
 
         <View style={styles.section}>
           <SectionHeader
+            compact
             title="Distribusi kategori BMI"
             description="Bar chart jumlah siswa berdasarkan kategori indeks massa tubuh."
           />
@@ -256,6 +276,7 @@ export function DashboardScreen({
 
         <View style={styles.section}>
           <SectionHeader
+            compact
             title="Tren pengukuran"
             description="Pergerakan rata-rata tinggi dan berat badan siswa dari bulan ke bulan."
           />
@@ -333,38 +354,7 @@ export function DashboardScreen({
             </InfoCard>
           </View>
         </View>
-
-        <View style={styles.section}>
-          <SectionHeader
-            title="Daftar kelas"
-            description="Buka tiap kelas untuk melihat detail siswa dan riwayat pengukuran."
-          />
-          <View style={styles.classList}>
-            {CLASS_ITEMS.map(item => (
-              <Pressable
-                key={item.name}
-                onPress={onOpenClassDetail}
-                style={({ pressed }) => [styles.classRow, pressed && styles.classRowPressed]}>
-                <View style={styles.classInfo}>
-                  <Text style={styles.className}>{item.name}</Text>
-                  <Text style={styles.classMeta}>{item.total}</Text>
-                  <Text style={styles.classMeasurementMeta}>{item.lastMeasuredAt}</Text>
-                </View>
-                <View style={styles.classTrailing}>
-                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                    <Path
-                      d="M9 6l6 6-6 6"
-                      stroke={colors.brand.primary500}
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </Svg>
-                </View>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+      </View>
 
       <Modal
         animationType="fade"
@@ -434,15 +424,18 @@ export function DashboardScreen({
 }
 
 type SectionHeaderProps = {
+  compact?: boolean;
   title: string;
   description: string;
 };
 
-function SectionHeader({ title, description }: SectionHeaderProps) {
+function SectionHeader({ compact = false, title, description }: SectionHeaderProps) {
   return (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.sectionDescription}>{description}</Text>
+      <Text style={[styles.sectionTitle, compact && styles.sectionTitleCompact]}>{title}</Text>
+      <Text style={[styles.sectionDescription, compact && styles.sectionDescriptionCompact]}>
+        {description}
+      </Text>
     </View>
   );
 }
@@ -506,7 +499,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 0,
     backgroundColor: colors.brand.primary500,
     paddingHorizontal: spacing[20],
-    paddingBottom: spacing[10],
+    paddingBottom: spacing[24],
     shadowColor: colors.brand.primary900,
     shadowOpacity: 0.18,
     shadowRadius: 18,
@@ -517,12 +510,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: spacing[18],
+    gap: spacing[16],
   },
   schoolHeroCopy: {
     flex: 1,
     gap: spacing[12],
     paddingTop: spacing[4],
+    paddingBottom: spacing[8],
   },
   schoolHeroEyebrow: {
     ...typography.labelMd,
@@ -555,10 +549,6 @@ const styles = StyleSheet.create({
     ...typography.headingMd,
     color: colors.text.inverse,
   },
-  dashboardHeader: {
-    backgroundColor: 'transparent',
-    paddingBottom: spacing[10],
-  },
   stickySearchWrap: {
     marginHorizontal: -spacing[16],
     backgroundColor: colors.brand.primary500,
@@ -571,6 +561,74 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
+  },
+  quickMenuSection: {
+    marginHorizontal: -spacing[16],
+    marginTop: -spacing[16],
+    backgroundColor: colors.brand.primary100,
+    paddingTop: spacing[24],
+    paddingHorizontal: spacing[16],
+    paddingBottom: spacing[12],
+  },
+  quickMenuGrid: {
+    flexDirection: 'row',
+    gap: spacing[8],
+  },
+  quickMenuCard: {
+    flex: 1,
+    minHeight: 96,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    paddingVertical: spacing[12],
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[8],
+  },
+  quickMenuCardPressed: {
+    borderColor: colors.brand.primary500,
+    backgroundColor: colors.brand.primary100,
+  },
+  quickMenuBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand.primary100,
+  },
+  quickMenuBadgeLabel: {
+    ...typography.caption,
+    color: colors.brand.primary600,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  quickMenuCardTitle: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  analyticsBlock: {
+    marginHorizontal: -spacing[16],
+    gap: spacing[16],
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.muted,
+    paddingVertical: spacing[12],
+    paddingHorizontal: spacing[16],
+  },
+  analyticsBlockHeader: {
+    gap: spacing[4],
+    paddingHorizontal: spacing[2],
+  },
+  analyticsBlockTitle: {
+    ...typography.headingLg,
+    color: colors.text.primary,
+  },
+  analyticsBlockDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
   periodCard: {
     minHeight: 76,
@@ -627,9 +685,17 @@ const styles = StyleSheet.create({
     ...typography.headingLg,
     color: colors.text.primary,
   },
+  sectionTitleCompact: {
+    ...typography.headingMd,
+    color: colors.text.primary,
+  },
   sectionDescription: {
     ...typography.bodySm,
     color: colors.text.secondary,
+  },
+  sectionDescriptionCompact: {
+    ...typography.caption,
+    color: colors.text.muted,
   },
   summaryGrid: {
     flexDirection: 'row',
@@ -731,51 +797,6 @@ const styles = StyleSheet.create({
   },
   searchActionButtonPressed: {
     opacity: 0.7,
-  },
-  classList: {
-    gap: spacing[12],
-  },
-  classRow: {
-    minHeight: 96,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[16],
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    shadowColor: '#1F2D3D',
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 1,
-  },
-  classRowPressed: {
-    borderColor: colors.brand.primary500,
-    backgroundColor: colors.brand.primary100,
-  },
-  classInfo: {
-    flex: 1,
-    gap: spacing[4],
-    paddingRight: spacing[12],
-  },
-  className: {
-    ...typography.headingMd,
-    color: colors.text.primary,
-  },
-  classMeta: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  classMeasurementMeta: {
-    ...typography.caption,
-    color: colors.text.muted,
-  },
-  classTrailing: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   dialogBackdrop: {
     flex: 1,

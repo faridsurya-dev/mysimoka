@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { BarChart } from 'react-native-gifted-charts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { InfoCard, PrimaryButton, Screen, StatusPill } from '../../shared/components';
+import { InfoCard, PrimaryButton, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type ClassDetailScreenProps = {
@@ -15,8 +16,12 @@ type DetailTab = 'statistics' | 'students';
 
 const DETAIL_TABS: Array<{ key: DetailTab; label: string }> = [
   { key: 'statistics', label: 'Statistik' },
-  { key: 'students', label: 'Daftar Siswa' },
+  { key: 'students', label: 'Daftar Anggota' },
 ];
+
+const CLASS_RESPONSIBLE = {
+  name: 'Ibu Rina Kartika',
+};
 
 const STUDENTS = [
   {
@@ -49,13 +54,47 @@ const STUDENTS = [
   },
 ];
 
+const CLASS_DISTRIBUTION = [
+  { value: 2, label: 'Kurus', frontColor: '#E2A93B' },
+  { value: 21, label: 'Normal', frontColor: '#27AE60' },
+  { value: 3, label: 'Over', frontColor: '#2D9CDB' },
+  { value: 2, label: 'Obes', frontColor: '#EB5757' },
+];
+
 export function ClassDetailScreen({
   onBack,
   onStartMeasurement,
   onOpenStudent,
 }: ClassDetailScreenProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>('statistics');
+  const [className, setClassName] = useState('Kelas 3A');
+  const [responsibleName, setResponsibleName] = useState(CLASS_RESPONSIBLE.name);
+  const [draftClassName, setDraftClassName] = useState(className);
+  const [draftResponsibleName, setDraftResponsibleName] = useState(responsibleName);
+  const [isEditDialogVisible, setIsEditDialogVisible] = useState(false);
   const insets = useSafeAreaInsets();
+  const isSaveDisabled =
+    draftClassName.trim().length === 0 || draftResponsibleName.trim().length === 0;
+
+  const handleOpenEditDialog = () => {
+    setDraftClassName(className);
+    setDraftResponsibleName(responsibleName);
+    setIsEditDialogVisible(true);
+  };
+
+  const handleCloseEditDialog = () => {
+    setIsEditDialogVisible(false);
+  };
+
+  const handleSaveClassEdit = () => {
+    if (isSaveDisabled) {
+      return;
+    }
+
+    setClassName(draftClassName.trim());
+    setResponsibleName(draftResponsibleName.trim());
+    setIsEditDialogVisible(false);
+  };
 
   return (
     <View style={styles.container}>
@@ -72,8 +111,33 @@ export function ClassDetailScreen({
               />
             </Svg>
             <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>Kelas 3A</Text>
+              <Text style={styles.pageTitle}>{className}</Text>
             </View>
+          </Pressable>
+
+          <Pressable
+            onPress={handleOpenEditDialog}
+            style={({ pressed }) => [
+              styles.headerEditAction,
+              pressed && styles.headerEditActionPressed,
+            ]}>
+            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M4 20h4l9.5-9.5a1.4 1.4 0 0 0 0-2L15.5 6a1.4 1.4 0 0 0-2 0L4 15.5V20Z"
+                stroke={colors.brand.primary700}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <Path
+                d="M12.5 7L17 11.5"
+                stroke={colors.brand.primary700}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+            <Text style={styles.headerEditActionLabel}>Edit</Text>
           </Pressable>
         </View>
 
@@ -112,21 +176,52 @@ export function ClassDetailScreen({
           <InfoCard
             title="Distribusi siswa"
             description="Ringkasan kategori kelas yang konsisten dengan dashboard global.">
-            <View style={styles.pills}>
-              <StatusPill label="Kurus 2" tone="warning" />
-              <StatusPill label="Normal 21" tone="success" />
-              <StatusPill label="Overweight 3" tone="info" />
-              <StatusPill label="Obesitas 2" tone="danger" />
+            <View style={styles.barChartWrapper}>
+              <BarChart
+                barBorderTopLeftRadius={10}
+                barBorderTopRightRadius={10}
+                barWidth={34}
+                data={CLASS_DISTRIBUTION}
+                disablePress
+                frontColor={colors.brand.primary500}
+                hideRules={false}
+                hideYAxisText={false}
+                initialSpacing={16}
+                isAnimated
+                noOfSections={4}
+                rulesColor={colors.border.subtle}
+                spacing={24}
+                xAxisColor={colors.border.subtle}
+                xAxisLabelTextStyle={styles.chartAxisLabel}
+                xAxisThickness={1}
+                yAxisColor={colors.border.subtle}
+                yAxisTextStyle={styles.chartAxisLabel}
+                yAxisThickness={0}
+              />
             </View>
           </InfoCard>
 
           <PrimaryButton
-            label="Mulai Pengukuran Kelas Ini"
+            label="Buat Sesi Pengukuran"
             onPress={onStartMeasurement}
           />
         </View>
       ) : (
         <View style={styles.section}>
+          <InfoCard>
+            <View style={styles.responsibleCard}>
+              <View style={styles.responsibleAvatar}>
+                <Text style={styles.responsibleAvatarLabel}>
+                  {responsibleName.charAt(0)}
+                </Text>
+              </View>
+              <View style={styles.responsibleContent}>
+                <Text style={styles.responsibleName}>{responsibleName}</Text>
+                <Text style={styles.responsibleRole}>Penanggungjawab</Text>
+              </View>
+            </View>
+          </InfoCard>
+
           <View style={styles.list}>
             {STUDENTS.map(student => (
               <Pressable
@@ -180,6 +275,64 @@ export function ClassDetailScreen({
         </View>
       )}
       </Screen>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={isEditDialogVisible}
+        onRequestClose={handleCloseEditDialog}>
+        <View style={styles.dialogBackdrop}>
+          <Pressable style={styles.dialogBackdropPressable} onPress={handleCloseEditDialog} />
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Edit Kelas</Text>
+            <Text style={styles.dialogDescription}>
+              Perbarui nama kelas dan penanggungjawab untuk menyesuaikan data kelas ini.
+            </Text>
+
+            <View style={styles.dialogFieldGroup}>
+              <Text style={styles.dialogFieldLabel}>Nama kelas</Text>
+              <TextInput
+                autoCapitalize="words"
+                onChangeText={setDraftClassName}
+                placeholder="Contoh: Kelas 3A"
+                placeholderTextColor={colors.text.muted}
+                style={styles.dialogInput}
+                value={draftClassName}
+              />
+            </View>
+
+            <View style={styles.dialogFieldGroup}>
+              <Text style={styles.dialogFieldLabel}>Penanggungjawab</Text>
+              <TextInput
+                autoCapitalize="words"
+                onChangeText={setDraftResponsibleName}
+                placeholder="Nama penanggungjawab"
+                placeholderTextColor={colors.text.muted}
+                style={styles.dialogInput}
+                value={draftResponsibleName}
+              />
+            </View>
+
+            <View style={styles.dialogActions}>
+              <Pressable
+                onPress={handleCloseEditDialog}
+                style={({ pressed }) => [
+                  styles.dialogSecondaryButton,
+                  pressed && styles.dialogSecondaryButtonPressed,
+                ]}>
+                <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
+              </Pressable>
+
+              <PrimaryButton
+                disabled={isSaveDisabled}
+                label="Simpan"
+                onPress={handleSaveClassEdit}
+                style={styles.dialogPrimaryButton}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -250,7 +403,10 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border.subtle,
   },
   pageHeaderTopRow: {
-    alignItems: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[12],
   },
   headerIdentity: {
     flexDirection: 'row',
@@ -263,6 +419,23 @@ const styles = StyleSheet.create({
   pageTitle: {
     ...typography.headingLg,
     color: colors.text.primary,
+  },
+  headerEditAction: {
+    minHeight: 34,
+    paddingHorizontal: spacing[12],
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface.secondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[8],
+  },
+  headerEditActionPressed: {
+    opacity: 0.78,
+  },
+  headerEditActionLabel: {
+    ...typography.labelMd,
+    color: colors.brand.primary700,
   },
   switcher: {
     flexDirection: 'row',
@@ -300,14 +473,46 @@ const styles = StyleSheet.create({
   summaryCard: {
     width: '48%',
   },
-  pills: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[8],
-    marginTop: spacing[4],
+  barChartWrapper: {
+    marginTop: spacing[8],
+    paddingTop: spacing[4],
+    minHeight: 220,
+  },
+  chartAxisLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
   },
   list: {
     gap: spacing[12],
+  },
+  responsibleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+  },
+  responsibleAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand.primary100,
+  },
+  responsibleAvatarLabel: {
+    ...typography.labelLg,
+    color: colors.brand.primary700,
+  },
+  responsibleContent: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  responsibleName: {
+    ...typography.headingMd,
+    color: colors.text.primary,
+  },
+  responsibleRole: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
   studentCard: {
     backgroundColor: colors.surface.primary,
@@ -356,5 +561,78 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.text.secondary,
     flex: 1,
+  },
+  dialogBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 41, 55, 0.36)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[20],
+  },
+  dialogBackdropPressable: {
+    ...StyleSheet.absoluteFill,
+  },
+  dialogCard: {
+    backgroundColor: colors.surface.primary,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing[20],
+    gap: spacing[16],
+    shadowColor: '#1F2D3D',
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+  },
+  dialogTitle: {
+    ...typography.headingLg,
+    color: colors.text.primary,
+  },
+  dialogDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  dialogFieldGroup: {
+    gap: spacing[8],
+  },
+  dialogFieldLabel: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  dialogInput: {
+    minHeight: 48,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.secondary,
+    paddingHorizontal: spacing[16],
+    color: colors.text.primary,
+    ...typography.bodyMd,
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing[12],
+    marginTop: spacing[4],
+  },
+  dialogSecondaryButton: {
+    minHeight: 44,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    paddingHorizontal: spacing[16],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogSecondaryButtonPressed: {
+    backgroundColor: colors.surface.secondary,
+  },
+  dialogSecondaryButtonLabel: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  dialogPrimaryButton: {
+    minWidth: 120,
   },
 });

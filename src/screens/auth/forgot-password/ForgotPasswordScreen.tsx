@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -11,19 +12,22 @@ import {
 import { PrimaryButton, Screen, TextField } from '../../../shared/components';
 import { colors, spacing, typography } from '../../../theme';
 
-type LoginScreenProps = {
-  onLoginSuccess: () => void;
-  onOpenRegister: () => void;
-  onOpenForgotPassword: () => void;
+type ForgotPasswordScreenProps = {
+  onBackToLogin: () => void;
 };
 
-export function LoginScreen({
-  onLoginSuccess,
-  onOpenRegister,
-  onOpenForgotPassword,
-}: LoginScreenProps) {
+export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProps) {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+
+  const canSubmit = useMemo(() => email.trim().length > 0, [email]);
+
+  const handleSubmit = () => {
+    Alert.alert(
+      'Link reset dikirim',
+      'Silakan cek email kamu untuk lanjut reset password.',
+      [{ text: 'OK', onPress: onBackToLogin }],
+    );
+  };
 
   return (
     <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -39,9 +43,9 @@ export function LoginScreen({
             />
           </View>
           <Text style={styles.eyebrow}>MySimoka</Text>
-          <Text style={styles.title}>Masuk ke aplikasi</Text>
+          <Text style={styles.title}>Reset password</Text>
           <Text style={styles.subtitle}>
-            Lanjutkan untuk masuk ke daftar sekolah dan memulai sesi pengukuran.
+            Masukkan email akun kamu. Kami akan kirim link untuk membuat password baru.
           </Text>
         </View>
 
@@ -55,28 +59,19 @@ export function LoginScreen({
             placeholder="Masukkan email"
             value={email}
           />
-          <TextField
-            label="Password"
-            onChangeText={setPassword}
-            placeholder="Masukkan password"
-            secureTextEntry
-            value={password}
-          />
-          <Pressable onPress={onOpenForgotPassword}>
-            <Text style={styles.forgotPasswordLink}>Lupa Password?</Text>
-          </Pressable>
         </View>
 
         <PrimaryButton
-          label="Login"
-          onPress={onLoginSuccess}
+          disabled={!canSubmit}
+          label="Kirim Link Reset"
+          onPress={handleSubmit}
           style={styles.button}
         />
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Belum punya akun?</Text>
-          <Pressable onPress={onOpenRegister}>
-            <Text style={styles.footerLink}>Daftar sekarang</Text>
+          <Text style={styles.footerText}>Ingat password?</Text>
+          <Pressable onPress={onBackToLogin}>
+            <Text style={styles.footerLink}>Kembali ke login</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -130,14 +125,10 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.bodyMd,
     color: colors.text.secondary,
+    textAlign: 'center',
   },
   form: {
     gap: spacing[16],
-  },
-  forgotPasswordLink: {
-    ...typography.labelMd,
-    color: colors.brand.primary500,
-    textAlign: 'right',
   },
   button: {
     width: '100%',

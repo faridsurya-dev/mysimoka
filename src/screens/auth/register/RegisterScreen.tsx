@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Image,
   KeyboardAvoidingView,
@@ -11,19 +11,33 @@ import {
 import { PrimaryButton, Screen, TextField } from '../../../shared/components';
 import { colors, spacing, typography } from '../../../theme';
 
-type LoginScreenProps = {
-  onLoginSuccess: () => void;
-  onOpenRegister: () => void;
-  onOpenForgotPassword: () => void;
+type RegisterScreenProps = {
+  onRegisterSuccess: () => void;
+  onBackToLogin: () => void;
 };
 
-export function LoginScreen({
-  onLoginSuccess,
-  onOpenRegister,
-  onOpenForgotPassword,
-}: LoginScreenProps) {
+export function RegisterScreen({
+  onRegisterSuccess,
+  onBackToLogin,
+}: RegisterScreenProps) {
+  const [schoolName, setSchoolName] = useState('');
+  const [npsn, setNpsn] = useState('');
+  const [personInChargeName, setPersonInChargeName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const canSubmit = useMemo(() => {
+    const hasMinimumInput =
+      schoolName.trim().length > 0 &&
+      npsn.trim().length > 0 &&
+      personInChargeName.trim().length > 0 &&
+      email.trim().length > 0 &&
+      password.length > 0 &&
+      confirmPassword.length > 0;
+
+    return hasMinimumInput && password === confirmPassword;
+  }, [confirmPassword, email, npsn, password, personInChargeName, schoolName]);
 
   return (
     <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -39,13 +53,32 @@ export function LoginScreen({
             />
           </View>
           <Text style={styles.eyebrow}>MySimoka</Text>
-          <Text style={styles.title}>Masuk ke aplikasi</Text>
+          <Text style={styles.title}>Buat akun baru</Text>
           <Text style={styles.subtitle}>
-            Lanjutkan untuk masuk ke daftar sekolah dan memulai sesi pengukuran.
+            Daftarkan akun untuk mengakses sekolah dan mulai pengukuran.
           </Text>
         </View>
 
         <View style={styles.form}>
+          <TextField
+            label="Nama Sekolah"
+            onChangeText={setSchoolName}
+            placeholder="Masukkan nama sekolah"
+            value={schoolName}
+          />
+          <TextField
+            keyboardType="number-pad"
+            label="NPSN"
+            onChangeText={setNpsn}
+            placeholder="Masukkan NPSN"
+            value={npsn}
+          />
+          <TextField
+            label="Nama Penanggungjawab"
+            onChangeText={setPersonInChargeName}
+            placeholder="Masukkan nama penanggungjawab"
+            value={personInChargeName}
+          />
           <TextField
             autoCapitalize="none"
             autoCorrect={false}
@@ -58,25 +91,34 @@ export function LoginScreen({
           <TextField
             label="Password"
             onChangeText={setPassword}
-            placeholder="Masukkan password"
+            placeholder="Buat password"
             secureTextEntry
             value={password}
           />
-          <Pressable onPress={onOpenForgotPassword}>
-            <Text style={styles.forgotPasswordLink}>Lupa Password?</Text>
-          </Pressable>
+          <TextField
+            label="Konfirmasi password"
+            onChangeText={setConfirmPassword}
+            placeholder="Ulangi password"
+            secureTextEntry
+            value={confirmPassword}
+          />
         </View>
 
+        {confirmPassword.length > 0 && password !== confirmPassword ? (
+          <Text style={styles.errorText}>Konfirmasi password belum sama.</Text>
+        ) : null}
+
         <PrimaryButton
-          label="Login"
-          onPress={onLoginSuccess}
+          disabled={!canSubmit}
+          label="Daftar"
+          onPress={onRegisterSuccess}
           style={styles.button}
         />
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Belum punya akun?</Text>
-          <Pressable onPress={onOpenRegister}>
-            <Text style={styles.footerLink}>Daftar sekarang</Text>
+          <Text style={styles.footerText}>Sudah punya akun?</Text>
+          <Pressable onPress={onBackToLogin}>
+            <Text style={styles.footerLink}>Kembali ke login</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -87,21 +129,20 @@ export function LoginScreen({
 const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
     paddingHorizontal: spacing[24],
   },
   keyboardArea: {
     width: '100%',
-    gap: spacing[24],
+    gap: spacing[20],
   },
   header: {
     alignItems: 'center',
     gap: spacing[8],
   },
   logoWrapper: {
-    width: 180,
-    height: 180,
-    borderRadius: 90,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
     overflow: 'hidden',
     marginBottom: spacing[8],
     backgroundColor: colors.surface.primary,
@@ -130,14 +171,14 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.bodyMd,
     color: colors.text.secondary,
+    textAlign: 'center',
   },
   form: {
-    gap: spacing[16],
+    gap: spacing[12],
   },
-  forgotPasswordLink: {
-    ...typography.labelMd,
-    color: colors.brand.primary500,
-    textAlign: 'right',
+  errorText: {
+    ...typography.bodySm,
+    color: colors.accent.red,
   },
   button: {
     width: '100%',

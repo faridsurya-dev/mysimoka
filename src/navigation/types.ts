@@ -2,6 +2,7 @@ export type MainTab = 'dashboard' | 'measurement' | 'device-manager' | 'profile'
 
 export type DashboardRoute =
   | 'dashboard'
+  | 'class-list'
   | 'class-detail'
   | 'student-profile'
   | 'student-search-results';
