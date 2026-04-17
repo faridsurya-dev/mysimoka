@@ -8,9 +8,12 @@ import { RegisterScreen } from '../screens/auth/register/RegisterScreen';
 import { ClassDetailScreen } from '../screens/dashboard/ClassDetailScreen';
 import { ClassListScreen } from '../screens/dashboard/ClassListScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
+import { StudentListScreen } from '../screens/dashboard/StudentListScreen';
 import { StudentProfileScreen } from '../screens/dashboard/StudentProfileScreen';
 import { StudentSearchResultsScreen } from '../screens/dashboard/StudentSearchResultsScreen';
+import { TeacherDetailScreen } from '../screens/dashboard/TeacherDetailScreen';
 import { TeacherListScreen } from '../screens/dashboard/TeacherListScreen';
+import { TEACHER_LIST_ITEMS } from '../features/dashboard';
 import { BatchMeasurementScreen } from '../screens/measurement/BatchMeasurementScreen';
 import { CreateSessionScreen } from '../screens/measurement/CreateSessionScreen';
 import { DeviceManagerScreen } from '../screens/measurement/DeviceManagerScreen';
@@ -27,6 +30,7 @@ import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { EditSchoolProfileScreen } from '../screens/profile/EditSchoolProfileScreen';
 import { ProfileOverviewScreen } from '../screens/profile/ProfileOverviewScreen';
 import { colors, radius, spacing, typography } from '../theme';
+import type { TeacherListItem } from '../types';
 import {
   DashboardRoute,
   FaceCropPreviewPayload,
@@ -58,8 +62,10 @@ export function RootNavigator() {
   const [dashboardRoute, setDashboardRoute] = useState<DashboardRoute>('dashboard');
   const [dashboardStudentSearchKeyword, setDashboardStudentSearchKeyword] =
     useState('');
+  const [teachers, setTeachers] = useState<TeacherListItem[]>(TEACHER_LIST_ITEMS);
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
   const [studentProfileBackRoute, setStudentProfileBackRoute] = useState<
-    'class-detail' | 'student-search-results'
+    'class-detail' | 'student-search-results' | 'student-list'
   >('class-detail');
   const [measurementRoute, setMeasurementRoute] =
     useState<MeasurementRoute>('session-list');
@@ -112,7 +118,23 @@ export function RootNavigator() {
             dashboardRoute,
             onBackToDashboard: () => setDashboardRoute('dashboard'),
             onOpenClassList: () => setDashboardRoute('class-list'),
+            onOpenStudentList: () => setDashboardRoute('student-list'),
             onOpenTeacherList: () => setDashboardRoute('teacher-list'),
+            onOpenTeacherDetail: teacherId => {
+              setSelectedTeacherId(teacherId);
+              setDashboardRoute('teacher-detail');
+            },
+            onAddTeacher: teacher => {
+              setTeachers(previous => [teacher, ...previous]);
+            },
+            onSaveTeacher: teacher => {
+              setTeachers(previous =>
+                previous.map(item => (item.id === teacher.id ? teacher : item))
+              );
+            },
+            teachers,
+            selectedTeacher:
+              teachers.find(item => item.id === selectedTeacherId) ?? null,
             onOpenClassDetail: () => setDashboardRoute('class-detail'),
             onOpenStudentFromClass: () => {
               setStudentProfileBackRoute('class-detail');
@@ -120,6 +142,10 @@ export function RootNavigator() {
             },
             onOpenStudentFromSearchResults: () => {
               setStudentProfileBackRoute('student-search-results');
+              setDashboardRoute('student-profile');
+            },
+            onOpenStudentFromList: () => {
+              setStudentProfileBackRoute('student-list');
               setDashboardRoute('student-profile');
             },
             onOpenStudentSearchResults: keyword => {
@@ -237,10 +263,17 @@ type DashboardStackOptions = {
   dashboardRoute: DashboardRoute;
   onBackToDashboard: () => void;
   onOpenClassList: () => void;
+  onOpenStudentList: () => void;
   onOpenTeacherList: () => void;
+  onOpenTeacherDetail: (teacherId: string) => void;
+  onAddTeacher: (teacher: TeacherListItem) => void;
+  onSaveTeacher: (teacher: TeacherListItem) => void;
+  teachers: TeacherListItem[];
+  selectedTeacher: TeacherListItem | null;
   onOpenClassDetail: () => void;
   onOpenStudentFromClass: () => void;
   onOpenStudentFromSearchResults: () => void;
+  onOpenStudentFromList: () => void;
   onOpenStudentSearchResults: (keyword: string) => void;
   onStartMeasurementFromClass: () => void;
   studentSearchKeyword: string;
@@ -252,10 +285,17 @@ function renderDashboardStack({
   dashboardRoute,
   onBackToDashboard,
   onOpenClassList,
+  onOpenStudentList,
   onOpenTeacherList,
+  onOpenTeacherDetail,
+  onAddTeacher,
+  onSaveTeacher,
+  teachers,
+  selectedTeacher,
   onOpenClassDetail,
   onOpenStudentFromClass,
   onOpenStudentFromSearchResults,
+  onOpenStudentFromList,
   onOpenStudentSearchResults,
   onStartMeasurementFromClass,
   studentSearchKeyword,
@@ -270,7 +310,40 @@ function renderDashboardStack({
         />
       );
     case 'teacher-list':
-      return <TeacherListScreen onBack={onBackToDashboard} />;
+      return (
+        <TeacherListScreen
+          onBack={onBackToDashboard}
+          onOpenTeacherDetail={onOpenTeacherDetail}
+          onAddTeacher={onAddTeacher}
+          teachers={teachers}
+        />
+      );
+    case 'student-list':
+      return (
+        <StudentListScreen
+          onBack={onBackToDashboard}
+          onOpenStudentProfile={onOpenStudentFromList}
+        />
+      );
+    case 'teacher-detail':
+      if (!selectedTeacher) {
+        return (
+          <TeacherListScreen
+            onBack={onBackToDashboard}
+            onOpenTeacherDetail={onOpenTeacherDetail}
+            onAddTeacher={onAddTeacher}
+            teachers={teachers}
+          />
+        );
+      }
+
+      return (
+        <TeacherDetailScreen
+          onBack={onOpenTeacherList}
+          onSave={onSaveTeacher}
+          teacher={selectedTeacher}
+        />
+      );
     case 'class-detail':
       return (
         <ClassDetailScreen
@@ -295,6 +368,7 @@ function renderDashboardStack({
         <DashboardScreen
           currentSchool={currentSchool}
           onOpenClassList={onOpenClassList}
+          onOpenStudentList={onOpenStudentList}
           onOpenTeacherList={onOpenTeacherList}
           onSearchStudents={onOpenStudentSearchResults}
         />

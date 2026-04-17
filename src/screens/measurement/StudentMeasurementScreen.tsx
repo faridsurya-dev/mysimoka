@@ -11,8 +11,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { INITIAL_MEASUREMENT_STUDENTS } from '../../features/measurement';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
+import type { StudentMeasurementItem } from '../../types';
 
 type StudentMeasurementScreenProps = {
   onBack: () => void;
@@ -20,56 +22,6 @@ type StudentMeasurementScreenProps = {
   onOpenHeightPose: () => void;
   onOpenStudentSearch: () => void;
 };
-
-type StudentItem = {
-  name: string;
-  measurement: string;
-  timestamp: string;
-  checked: boolean;
-  syncStatus: 'synced' | 'pending';
-  photoUri: string | null;
-  heightCm?: string;
-  weightKg?: string;
-};
-
-const INITIAL_STUDENTS: StudentItem[] = [
-  {
-    name: 'Alya Putri Maharani',
-    measurement: 'TB 128 cm • BB 29 kg',
-    timestamp: 'Diukur 10 Apr 2026, 08:45',
-    checked: true,
-    syncStatus: 'pending',
-    photoUri: null,
-    heightCm: '128',
-    weightKg: '29',
-  },
-  {
-    name: 'Bima Saputra',
-    measurement: 'TB 125 cm • BB 27 kg',
-    timestamp: 'Diukur 10 Apr 2026, 08:52',
-    checked: true,
-    syncStatus: 'synced',
-    photoUri: null,
-    heightCm: '125',
-    weightKg: '27',
-  },
-  {
-    name: 'Citra Maharani',
-    measurement: 'Belum ada hasil pengukuran',
-    timestamp: 'Menunggu input manual',
-    checked: false,
-    syncStatus: 'synced',
-    photoUri: null,
-  },
-  {
-    name: 'Dimas Pratama',
-    measurement: 'Belum ada hasil pengukuran',
-    timestamp: 'Belum diukur pada sesi ini',
-    checked: false,
-    syncStatus: 'synced',
-    photoUri: null,
-  },
-];
 
 const getStudentInitials = (name: string) =>
   name
@@ -96,7 +48,7 @@ export function StudentMeasurementScreen({
   onOpenStudentSearch,
 }: StudentMeasurementScreenProps) {
   const insets = useSafeAreaInsets();
-  const [students, setStudents] = useState(INITIAL_STUDENTS);
+  const [students, setStudents] = useState(INITIAL_MEASUREMENT_STUDENTS);
   const [selectedStudentName, setSelectedStudentName] = useState<string | null>(null);
   const [measurementMode, setMeasurementMode] = useState<'manual' | 'auto'>('manual');
   const [heightValue, setHeightValue] = useState('');
@@ -137,7 +89,7 @@ export function StudentMeasurementScreen({
     }
   }, [allDevicesConnected, measurementMode]);
 
-  const fillFormFromStudent = (student: StudentItem) => {
+  const fillFormFromStudent = (student: StudentMeasurementItem) => {
     setHeightValue(student.heightCm ?? '');
     setWeightValue(student.weightKg ?? '');
   };

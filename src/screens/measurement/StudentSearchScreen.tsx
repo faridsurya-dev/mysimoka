@@ -1,13 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { MANUAL_SEARCH_STUDENTS } from '../../features/measurement';
 import { InfoCard, Screen, TextField } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type StudentSearchScreenProps = {
   onBack: () => void;
 };
-
-const STUDENTS = ['Alya Putri', 'Bima Saputra', 'Citra Maharani'];
 
 export function StudentSearchScreen({ onBack }: StudentSearchScreenProps) {
   return (
@@ -38,7 +37,7 @@ export function StudentSearchScreen({ onBack }: StudentSearchScreenProps) {
       />
 
       <View style={styles.list}>
-        {STUDENTS.map(student => (
+        {MANUAL_SEARCH_STUDENTS.map(student => (
           <View key={student} style={styles.rowCard}>
             <Text style={styles.rowTitle}>{student}</Text>
             <Text style={styles.rowBody}>Tap untuk kembali ke mode manual dengan siswa ini</Text>

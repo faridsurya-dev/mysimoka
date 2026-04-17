@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { SESSION_LIST_MOCK } from '../../features/session';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton, Screen, StatusPill } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
@@ -9,24 +10,6 @@ type SessionListScreenProps = {
   onOpenSessionDetail: () => void;
   onCreateSession: () => void;
 };
-
-const SESSIONS = [
-  {
-    name: 'Session 10 April 2026',
-    meta: 'Kelas 3A • 28 siswa • Farid',
-    status: 'Aktif',
-  },
-  {
-    name: 'Session 8 April 2026',
-    meta: 'Kelas 2B • 30 siswa • Nabila',
-    status: 'Belum Sync',
-  },
-  {
-    name: 'Session 5 April 2026',
-    meta: 'Kelas 1A • 32 siswa • Rahma',
-    status: 'Selesai',
-  },
-];
 
 export function SessionListScreen({
   onOpenSessionDetail,
@@ -59,9 +42,9 @@ export function SessionListScreen({
         <PrimaryButton label="Buat Sesi Baru" onPress={onCreateSession} />
 
         <View style={styles.list}>
-          {SESSIONS.map(session => (
+          {SESSION_LIST_MOCK.map(session => (
             <Pressable
-              key={session.name}
+              key={session.id}
               onPress={onOpenSessionDetail}
               style={({ pressed }) => [styles.rowCard, pressed && styles.rowCardPressed]}>
               <View style={styles.rowText}>

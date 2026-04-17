@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { DASHBOARD_STUDENT_SEARCH_ITEMS } from '../../features/dashboard';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -11,17 +12,6 @@ type StudentSearchResultsScreenProps = {
   onOpenStudentProfile: () => void;
 };
 
-const STUDENT_ITEMS = [
-  { name: 'Alya Putri Maharani', nisn: '0093184011', className: 'Kelas 3A' },
-  { name: 'Bima Saputra', nisn: '0093184399', className: 'Kelas 1B' },
-  { name: 'Citra Maharani', nisn: '0093184562', className: 'Kelas 3A' },
-  { name: 'Dimas Pratama', nisn: '0093184750', className: 'Kelas 4B' },
-  { name: 'Naila Salsabila', nisn: '0093184236', className: 'Kelas 1A' },
-  { name: 'Rafi Pratama', nisn: '0093184112', className: 'Kelas 1A' },
-  { name: 'Siti Khadijah', nisn: '0093184451', className: 'Kelas 2A' },
-  { name: 'Andi Wijaya', nisn: '0093184527', className: 'Kelas 2B' },
-];
-
 export function StudentSearchResultsScreen({
   keyword,
   onBack,
@@ -29,7 +19,7 @@ export function StudentSearchResultsScreen({
 }: StudentSearchResultsScreenProps) {
   const insets = useSafeAreaInsets();
   const normalizedKeyword = keyword.trim().toLowerCase();
-  const results = STUDENT_ITEMS.filter(student =>
+  const results = DASHBOARD_STUDENT_SEARCH_ITEMS.filter(student =>
     `${student.name} ${student.nisn} ${student.className}`
       .toLowerCase()
       .includes(normalizedKeyword),
@@ -60,7 +50,7 @@ export function StudentSearchResultsScreen({
           <View style={styles.list}>
             {results.map(student => (
               <Pressable
-                key={student.nisn}
+                key={student.id}
                 onPress={onOpenStudentProfile}
                 style={({ pressed }) => [
                   styles.studentRow,

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { CLASS_OPTIONS_MOCK } from '../../features/session';
 import { PrimaryButton, Screen, TextField } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -14,21 +15,6 @@ type CreateSessionScreenProps = {
     sessionDate: string;
   }) => void;
 };
-
-const CLASS_OPTIONS = [
-  'Kelas 1A',
-  'Kelas 1B',
-  'Kelas 2A',
-  'Kelas 2B',
-  'Kelas 3A',
-  'Kelas 3B',
-  'Kelas 4A',
-  'Kelas 4B',
-  'Kelas 5A',
-  'Kelas 5B',
-  'Kelas 6A',
-  'Kelas 6B',
-];
 
 const WEEKDAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 
@@ -101,10 +87,10 @@ export function CreateSessionScreen({
     const keyword = className.trim().toLowerCase();
 
     if (!keyword) {
-      return CLASS_OPTIONS;
+      return CLASS_OPTIONS_MOCK;
     }
 
-    return CLASS_OPTIONS.filter(option => option.toLowerCase().includes(keyword));
+    return CLASS_OPTIONS_MOCK.filter(option => option.toLowerCase().includes(keyword));
   }, [className]);
 
   const calendarDays = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);

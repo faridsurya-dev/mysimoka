@@ -2,69 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { InfoCard, PrimaryButton, Screen } from '../../shared/components';
+import { CLASS_LIST_ITEMS, TEACHER_NAME_OPTIONS } from '../../features/dashboard';
+import { PrimaryButton, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type ClassListScreenProps = {
   onBack: () => void;
   onOpenClassDetail: () => void;
 };
-
-const CLASS_ITEMS = [
-  {
-    name: 'Kelas 1A',
-    total: 28,
-    teacher: 'Wali kelas: Ibu Rina',
-    lastMeasuredAt: 'Pengukuran terakhir 8 Apr 2026',
-    coverage: '26/28 siswa sudah diukur',
-  },
-  {
-    name: 'Kelas 1B',
-    total: 30,
-    teacher: 'Wali kelas: Pak Dedi',
-    lastMeasuredAt: 'Pengukuran terakhir 6 Apr 2026',
-    coverage: '27/30 siswa sudah diukur',
-  },
-  {
-    name: 'Kelas 2A',
-    total: 27,
-    teacher: 'Wali kelas: Ibu Maya',
-    lastMeasuredAt: 'Pengukuran terakhir 9 Apr 2026',
-    coverage: '24/27 siswa sudah diukur',
-  },
-  {
-    name: 'Kelas 2B',
-    total: 35,
-    teacher: 'Wali kelas: Pak Arif',
-    lastMeasuredAt: 'Pengukuran terakhir 5 Apr 2026',
-    coverage: '30/35 siswa sudah diukur',
-  },
-  {
-    name: 'Kelas 3A',
-    total: 29,
-    teacher: 'Wali kelas: Ibu Sinta',
-    lastMeasuredAt: 'Pengukuran terakhir 10 Apr 2026',
-    coverage: '29/29 siswa sudah diukur',
-  },
-  {
-    name: 'Kelas 3B',
-    total: 31,
-    teacher: 'Wali kelas: Pak Yoga',
-    lastMeasuredAt: 'Pengukuran terakhir 4 Apr 2026',
-    coverage: '23/31 siswa sudah diukur',
-  },
-];
-
-const TEACHERS = [
-  'Ibu Rina',
-  'Pak Dedi',
-  'Ibu Maya',
-  'Pak Arif',
-  'Ibu Sinta',
-  'Pak Yoga',
-  'Ibu Lestari',
-  'Pak Bimo',
-];
 
 export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenProps) {
   const insets = useSafeAreaInsets();
@@ -79,10 +24,10 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
   const filteredClasses = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) {
-      return CLASS_ITEMS;
+      return CLASS_LIST_ITEMS;
     }
 
-    return CLASS_ITEMS.filter(item =>
+    return CLASS_LIST_ITEMS.filter(item =>
       `${item.name} ${item.teacher}`.toLowerCase().includes(keyword)
     );
   }, [query]);
@@ -101,7 +46,7 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
       return [];
     }
 
-    return TEACHERS.filter(teacher => teacher.toLowerCase().includes(keyword));
+    return TEACHER_NAME_OPTIONS.filter(teacher => teacher.toLowerCase().includes(keyword));
   }, [teacherSearchQuery]);
 
   function handleCloseDialog() {
@@ -174,24 +119,7 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
         </View>
       </View>
 
-      <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[1]}>
-        <InfoCard
-          eyebrow="Ringkasan"
-          title={`${CLASS_ITEMS.length} kelas aktif`}
-          description="Pantau cakupan pengukuran per kelas dan buka detail kelas dari satu tempat.">
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryStat}>
-              <Text style={styles.summaryValue}>180</Text>
-              <Text style={styles.summaryLabel}>Total siswa</Text>
-            </View>
-            <View style={styles.summaryDivider} />
-            <View style={styles.summaryStat}>
-              <Text style={styles.summaryValue}>88%</Text>
-              <Text style={styles.summaryLabel}>Cakupan terbaru</Text>
-            </View>
-          </View>
-        </InfoCard>
-
+      <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[0]}>
         <View style={styles.stickySearchWrap}>
           <View style={styles.searchCard}>
             <TextInput
@@ -218,7 +146,7 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
         <View style={styles.list}>
           {filteredClasses.map(item => (
             <Pressable
-              key={item.name}
+              key={item.id}
               onPress={onOpenClassDetail}
               style={({ pressed }) => [styles.classCard, pressed && styles.classCardPressed]}>
               <View style={styles.classCardTopRow}>
@@ -455,29 +383,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.app,
     paddingHorizontal: spacing[16],
     paddingVertical: spacing[8],
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[16],
-    marginTop: spacing[4],
-  },
-  summaryStat: {
-    flex: 1,
-    gap: spacing[4],
-  },
-  summaryValue: {
-    ...typography.headingXL,
-    color: colors.text.primary,
-  },
-  summaryLabel: {
-    ...typography.caption,
-    color: colors.text.secondary,
-  },
-  summaryDivider: {
-    width: 1,
-    alignSelf: 'stretch',
-    backgroundColor: colors.border.subtle,
   },
   searchCard: {
     flexDirection: 'row',

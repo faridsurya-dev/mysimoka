@@ -10,74 +10,29 @@ import {
 import { BarChart, LineChart } from 'react-native-gifted-charts';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  DASHBOARD_AVERAGE_METRICS,
+  DASHBOARD_BMI_CATEGORY_DATA,
+  DASHBOARD_DEMOGRAPHY_CARDS,
+  DASHBOARD_HEIGHT_TREND,
+  DASHBOARD_QUICK_MENUS,
+  DASHBOARD_WEIGHT_TREND,
+} from '../../features/dashboard';
 import { InfoCard, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type DashboardScreenProps = {
   currentSchool: string;
   onOpenClassList: () => void;
+  onOpenStudentList: () => void;
   onOpenTeacherList: () => void;
   onSearchStudents: (keyword: string) => void;
 };
 
-const DEMOGRAPHY_CARDS = [
-  { label: 'Total Siswa', value: '120' },
-  { label: 'Laki-laki', value: '70', note: '58.3% populasi aktif' },
-  { label: 'Perempuan', value: '50', note: '41.7% populasi aktif' },
-];
-
-const AVERAGE_METRICS = [
-  { label: 'Rata-rata Tinggi', value: '132', unit: 'cm' },
-  { label: 'Rata-rata Berat', value: '32', unit: 'kg' },
-  { label: 'Rata-rata BMI', value: '18.2', unit: '' },
-];
-
-const BMI_CATEGORY_DATA = [
-  { value: 18, label: 'Kurus', frontColor: '#E2A93B' },
-  { value: 74, label: 'Normal', frontColor: '#27AE60' },
-  { value: 20, label: 'Gemuk', frontColor: '#2D9CDB' },
-  { value: 8, label: 'Obes', frontColor: '#EB5757' },
-];
-
-const HEIGHT_TREND = [
-  { value: 128, label: 'Jan' },
-  { value: 129, label: 'Feb' },
-  { value: 129.5, label: 'Mar' },
-  { value: 130.2, label: 'Apr' },
-  { value: 131, label: 'Mei' },
-  { value: 132, label: 'Jun' },
-  { value: 132.4, label: 'Jul' },
-  { value: 132.9, label: 'Agu' },
-  { value: 133.5, label: 'Sep' },
-  { value: 134, label: 'Okt' },
-  { value: 134.4, label: 'Nov' },
-  { value: 134.9, label: 'Des' },
-];
-
-const WEIGHT_TREND = [
-  { value: 27, label: 'Jan' },
-  { value: 27.6, label: 'Feb' },
-  { value: 28.1, label: 'Mar' },
-  { value: 28.8, label: 'Apr' },
-  { value: 29.4, label: 'Mei' },
-  { value: 30.1, label: 'Jun' },
-  { value: 30.5, label: 'Jul' },
-  { value: 30.9, label: 'Agu' },
-  { value: 31.2, label: 'Sep' },
-  { value: 31.6, label: 'Okt' },
-  { value: 31.9, label: 'Nov' },
-  { value: 32.3, label: 'Des' },
-];
-
-const QUICK_MENUS = [
-  { label: 'Kelas', badge: 'KL' },
-  { label: 'Siswa', badge: 'SW' },
-  { label: 'Guru', badge: 'GR' },
-];
-
 export function DashboardScreen({
   currentSchool,
   onOpenClassList,
+  onOpenStudentList,
   onOpenTeacherList,
   onSearchStudents,
 }: DashboardScreenProps) {
@@ -174,20 +129,28 @@ export function DashboardScreen({
 
       <View style={styles.quickMenuSection}>
         <View style={styles.quickMenuGrid}>
-          {QUICK_MENUS.map(menu => (
+          {DASHBOARD_QUICK_MENUS.map(menu => (
             <Pressable
               key={menu.label}
               onPress={
                 menu.label === 'Kelas'
                   ? onOpenClassList
+                  : menu.label === 'Siswa'
+                    ? onOpenStudentList
                   : menu.label === 'Guru'
                     ? onOpenTeacherList
                     : undefined
               }
-              disabled={menu.label !== 'Kelas' && menu.label !== 'Guru'}
+              disabled={
+                menu.label !== 'Kelas' &&
+                menu.label !== 'Siswa' &&
+                menu.label !== 'Guru'
+              }
               style={({ pressed }) => [
                 styles.quickMenuCard,
-                (menu.label === 'Kelas' || menu.label === 'Guru') &&
+                (menu.label === 'Kelas' ||
+                  menu.label === 'Siswa' ||
+                  menu.label === 'Guru') &&
                   pressed &&
                   styles.quickMenuCardPressed,
               ]}>
@@ -206,7 +169,7 @@ export function DashboardScreen({
           description="Komposisi siswa aktif berdasarkan populasi kelas saat ini."
         />
         <View style={styles.summaryGrid}>
-          {DEMOGRAPHY_CARDS.map(card => (
+          {DASHBOARD_DEMOGRAPHY_CARDS.map(card => (
             <View key={card.label} style={styles.dataTile}>
               <Text style={styles.dataTileLabel}>{card.label}</Text>
               <Text style={styles.dataTileValue}>{card.value}</Text>
@@ -239,7 +202,7 @@ export function DashboardScreen({
             description="Nilai rata-rata tinggi, berat, dan BMI siswa pada periode aktif."
           />
           <View style={styles.metricGrid}>
-            {AVERAGE_METRICS.map(card => (
+            {DASHBOARD_AVERAGE_METRICS.map(card => (
               <View key={card.label} style={styles.dataTile}>
                 <Text style={styles.dataTileLabel}>{card.label}</Text>
                 <View style={styles.metricValueRow}>
@@ -263,7 +226,7 @@ export function DashboardScreen({
                 barBorderTopLeftRadius={10}
                 barBorderTopRightRadius={10}
                 barWidth={34}
-                data={BMI_CATEGORY_DATA}
+                data={DASHBOARD_BMI_CATEGORY_DATA}
                 disablePress
                 frontColor={colors.brand.primary500}
                 hideRules={false}
@@ -298,7 +261,7 @@ export function DashboardScreen({
                   areaChart
                   adjustToWidth
                   color1={colors.brand.primary500}
-                  data={HEIGHT_TREND}
+                  data={DASHBOARD_HEIGHT_TREND}
                   dataPointsColor1={colors.brand.primary500}
                   endFillColor1="rgba(45, 156, 219, 0.06)"
                   endOpacity={0.1}
@@ -334,7 +297,7 @@ export function DashboardScreen({
                   areaChart
                   adjustToWidth
                   color1={colors.accent.teal}
-                  data={WEIGHT_TREND}
+                  data={DASHBOARD_WEIGHT_TREND}
                   dataPointsColor1={colors.accent.teal}
                   endFillColor1="rgba(39, 174, 96, 0.06)"
                   endOpacity={0.1}

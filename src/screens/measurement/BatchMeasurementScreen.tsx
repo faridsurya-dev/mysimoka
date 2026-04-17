@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { DEFAULT_BATCH_ACTIVE_STUDENT } from '../../features/measurement';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -23,8 +24,8 @@ export function BatchMeasurementScreen({
   const [weightValue, setWeightValue] = useState('');
 
   const activeStudent = {
-    name: activeStudentName ?? 'Bima Saputra',
-    photoUri: null as string | null,
+    name: activeStudentName ?? DEFAULT_BATCH_ACTIVE_STUDENT.name,
+    photoUri: DEFAULT_BATCH_ACTIVE_STUDENT.photoUri,
   };
 
   const deviceConnection = {

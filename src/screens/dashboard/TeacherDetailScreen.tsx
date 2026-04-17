@@ -2,47 +2,53 @@ import React, { useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { PrimaryButton, Screen } from '../../shared/components';
+import { InfoCard, PrimaryButton, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { TeacherListItem } from '../../types';
 
-type TeacherListScreenProps = {
+type TeacherDetailScreenProps = {
+  teacher: TeacherListItem;
   onBack: () => void;
-  onOpenTeacherDetail: (teacherId: string) => void;
-  onAddTeacher: (teacher: TeacherListItem) => void;
-  teachers: TeacherListItem[];
+  onSave: (teacher: TeacherListItem) => void;
 };
 
-export function TeacherListScreen({
-  onBack,
-  onOpenTeacherDetail,
-  onAddTeacher,
-  teachers,
-}: TeacherListScreenProps) {
+export function TeacherDetailScreen({ teacher, onBack, onSave }: TeacherDetailScreenProps) {
   const insets = useSafeAreaInsets();
-  const [query, setQuery] = useState('');
-  const [isAddTeacherDialogVisible, setIsAddTeacherDialogVisible] = useState(false);
-  const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [password, setPassword] = useState('');
+  const [isEditDialogVisible, setIsEditDialogVisible] = useState(false);
+  const [draftEmail, setDraftEmail] = useState(teacher.email);
+  const [draftName, setDraftName] = useState(teacher.name);
+  const [draftPassword, setDraftPassword] = useState(teacher.password);
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [isDraftPasswordVisible, setIsDraftPasswordVisible] = useState(false);
 
-  const filteredTeachers = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    if (!keyword) {
-      return teachers;
+  const maskedPassword = useMemo(() => {
+    if (isPasswordVisible) {
+      return teacher.password;
     }
 
-    return teachers.filter(item =>
-      `${item.name} ${item.homeroom} ${item.handledClasses}`
-        .toLowerCase()
-        .includes(keyword)
-    );
-  }, [query, teachers]);
+    return '*'.repeat(Math.max(8, teacher.password.length));
+  }, [isPasswordVisible, teacher.password]);
+  const teacherInitials = useMemo(() => {
+    const parts = teacher.name
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2);
+
+    if (parts.length === 0) {
+      return 'GR';
+    }
+
+    return parts.map(part => part[0]?.toUpperCase() ?? '').join('');
+  }, [teacher.name]);
 
   const isSaveDisabled = useMemo(() => {
-    return email.trim().length === 0 || fullName.trim().length === 0 || password.length === 0;
-  }, [email, fullName, password]);
+    return (
+      draftEmail.trim().length === 0 ||
+      draftName.trim().length === 0 ||
+      draftPassword.length === 0
+    );
+  }, [draftEmail, draftName, draftPassword]);
 
   function createTeacherCode(name: string) {
     const words = name
@@ -86,33 +92,32 @@ export function TeacherListScreen({
     return chars.join('');
   }
 
-  function handleCloseDialog() {
-    setIsAddTeacherDialogVisible(false);
-    setIsPasswordVisible(false);
+  function handleOpenEditDialog() {
+    setDraftEmail(teacher.email);
+    setDraftName(teacher.name);
+    setDraftPassword(teacher.password);
+    setIsDraftPasswordVisible(false);
+    setIsEditDialogVisible(true);
   }
 
-  function handleOpenDialog() {
-    setEmail('');
-    setFullName('');
-    setPassword('');
-    setIsPasswordVisible(false);
-    setIsAddTeacherDialogVisible(true);
+  function handleCloseEditDialog() {
+    setIsEditDialogVisible(false);
+    setIsDraftPasswordVisible(false);
   }
 
-  function handleSaveTeacher() {
-    const newTeacher = {
-      id: `teacher-${Date.now()}`,
-      name: fullName.trim(),
-      email: email.trim().toLowerCase(),
-      password,
-      code: createTeacherCode(fullName),
-      homeroom: 'Belum ditentukan',
-      handledClasses: 'Belum ada kelas',
-      totalStudents: 0,
-    };
+  function handleSaveEdit() {
+    if (isSaveDisabled) {
+      return;
+    }
 
-    onAddTeacher(newTeacher);
-    handleCloseDialog();
+    onSave({
+      ...teacher,
+      email: draftEmail.trim().toLowerCase(),
+      name: draftName.trim(),
+      password: draftPassword,
+      code: createTeacherCode(draftName),
+    });
+    handleCloseEditDialog();
   }
 
   return (
@@ -129,145 +134,45 @@ export function TeacherListScreen({
                 strokeLinejoin="round"
               />
             </Svg>
-            <Text style={styles.pageTitle}>Daftar Guru</Text>
+            <Text numberOfLines={1} style={styles.pageTitle}>
+              Detail Guru
+            </Text>
           </Pressable>
 
           <Pressable
-            accessibilityLabel="Tambah guru"
-            accessibilityRole="button"
-            onPress={handleOpenDialog}
+            onPress={handleOpenEditDialog}
             style={({ pressed }) => [
-              styles.headerActionButton,
-              pressed && styles.headerActionButtonPressed,
+              styles.headerEditAction,
+              pressed && styles.headerEditActionPressed,
             ]}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M12 5v14M5 12h14"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-              />
-            </Svg>
+            <Text style={styles.headerEditActionLabel}>Edit</Text>
           </Pressable>
         </View>
       </View>
 
-      <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[0]}>
-        <View style={styles.stickySearchWrap}>
-          <View style={styles.searchCard}>
-            <TextInput
-              autoCapitalize="words"
-              onChangeText={setQuery}
-              placeholder="Cari nama guru atau kelas"
-              placeholderTextColor={colors.text.muted}
-              style={styles.searchInput}
-              value={query}
-            />
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15.5 15.5L20 20M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z"
-                stroke={colors.text.secondary}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-              />
-            </Svg>
+      <Screen contentContainerStyle={styles.content}>
+        <InfoCard>
+          <View style={styles.profileHeader}>
+            <View style={styles.teacherBadge}>
+              <Text style={styles.teacherBadgeLabel}>{teacherInitials}</Text>
+            </View>
+            <Text style={styles.profileName}>{teacher.name}</Text>
           </View>
-        </View>
 
-        <View style={styles.list}>
-          {filteredTeachers.map(item => (
-            <Pressable
-              key={item.id}
-              onPress={() => onOpenTeacherDetail(item.id)}
-              style={({ pressed }) => [styles.teacherCard, pressed && styles.teacherCardPressed]}>
-              <View style={styles.teacherTopRow}>
-                <View style={styles.teacherBadge}>
-                  <Text style={styles.teacherBadgeLabel}>{item.code}</Text>
-                </View>
-                <View style={styles.teacherCopy}>
-                  <Text style={styles.teacherName}>{item.name}</Text>
-                  <Text style={styles.teacherRole}>{item.homeroom}</Text>
-                </View>
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M9 6l6 6-6 6"
-                    stroke={colors.brand.primary500}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-              </View>
-            </Pressable>
-          ))}
-
-          {filteredTeachers.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Guru tidak ditemukan</Text>
-              <Text style={styles.emptyDescription}>
-                Coba gunakan kata kunci lain seperti nama guru atau nama kelas.
-              </Text>
+          <View style={styles.accountInfoWrap}>
+            <View style={styles.accountInfoRow}>
+              <Text style={styles.accountInfoLabel}>Nama lengkap</Text>
+              <Text style={styles.accountInfoValue}>{teacher.name}</Text>
             </View>
-          ) : null}
-        </View>
-      </Screen>
-
-      <Modal
-        animationType="fade"
-        transparent
-        visible={isAddTeacherDialogVisible}
-        onRequestClose={handleCloseDialog}>
-        <View style={styles.dialogBackdrop}>
-          <Pressable style={styles.dialogBackdropPressable} onPress={handleCloseDialog} />
-          <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Tambah Guru</Text>
-            <Text style={styles.dialogDescription}>
-              Tambahkan akun guru baru untuk mulai mengelola kelas dan pengukuran.
-            </Text>
-
-            <View style={styles.dialogFieldGroup}>
-              <Text style={styles.dialogFieldLabel}>Email</Text>
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                onChangeText={setEmail}
-                placeholder="Contoh: guru@sekolah.id"
-                placeholderTextColor={colors.text.muted}
-                style={styles.dialogInput}
-                value={email}
-              />
+            <View style={styles.accountInfoRow}>
+              <Text style={styles.accountInfoLabel}>Email</Text>
+              <Text style={styles.accountInfoValue}>{teacher.email}</Text>
             </View>
-
-            <View style={styles.dialogFieldGroup}>
-              <Text style={styles.dialogFieldLabel}>Nama lengkap</Text>
-              <TextInput
-                autoCapitalize="words"
-                onChangeText={setFullName}
-                placeholder="Masukkan nama lengkap guru"
-                placeholderTextColor={colors.text.muted}
-                style={styles.dialogInput}
-                value={fullName}
-              />
-            </View>
-
-            <View style={styles.dialogFieldGroup}>
-              <Text style={styles.dialogFieldLabel}>Password</Text>
-              <View style={styles.passwordInputWrap}>
-                <TextInput
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setPassword}
-                  placeholder="Masukkan password"
-                  placeholderTextColor={colors.text.muted}
-                  secureTextEntry={!isPasswordVisible}
-                  style={styles.passwordInput}
-                  value={password}
-                />
+            <View style={styles.accountInfoRow}>
+              <Text style={styles.accountInfoLabel}>Password</Text>
+              <View style={styles.passwordSummaryRow}>
+                <Text style={styles.accountInfoValue}>{maskedPassword}</Text>
                 <Pressable
-                  accessibilityLabel={isPasswordVisible ? 'Sembunyikan password' : 'Tampilkan password'}
-                  accessibilityRole="button"
                   onPress={() => setIsPasswordVisible(previous => !previous)}
                   style={({ pressed }) => [
                     styles.passwordToggleButton,
@@ -278,8 +183,76 @@ export function TeacherListScreen({
                   </Text>
                 </Pressable>
               </View>
+            </View>
+          </View>
+        </InfoCard>
+      </Screen>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={isEditDialogVisible}
+        onRequestClose={handleCloseEditDialog}>
+        <View style={styles.dialogBackdrop}>
+          <Pressable style={styles.dialogBackdropPressable} onPress={handleCloseEditDialog} />
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Edit Data Guru</Text>
+            <Text style={styles.dialogDescription}>
+              Perbarui email, nama lengkap, dan password akun guru ini.
+            </Text>
+
+            <View style={styles.dialogFieldGroup}>
+              <Text style={styles.dialogFieldLabel}>Email</Text>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                onChangeText={setDraftEmail}
+                placeholder="Contoh: guru@sekolah.id"
+                placeholderTextColor={colors.text.muted}
+                style={styles.dialogInput}
+                value={draftEmail}
+              />
+            </View>
+
+            <View style={styles.dialogFieldGroup}>
+              <Text style={styles.dialogFieldLabel}>Nama lengkap</Text>
+              <TextInput
+                autoCapitalize="words"
+                onChangeText={setDraftName}
+                placeholder="Masukkan nama lengkap guru"
+                placeholderTextColor={colors.text.muted}
+                style={styles.dialogInput}
+                value={draftName}
+              />
+            </View>
+
+            <View style={styles.dialogFieldGroup}>
+              <Text style={styles.dialogFieldLabel}>Password</Text>
+              <View style={styles.passwordInputWrap}>
+                <TextInput
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onChangeText={setDraftPassword}
+                  placeholder="Masukkan password"
+                  placeholderTextColor={colors.text.muted}
+                  secureTextEntry={!isDraftPasswordVisible}
+                  style={styles.passwordInput}
+                  value={draftPassword}
+                />
+                <Pressable
+                  onPress={() => setIsDraftPasswordVisible(previous => !previous)}
+                  style={({ pressed }) => [
+                    styles.passwordToggleButton,
+                    pressed && styles.passwordToggleButtonPressed,
+                  ]}>
+                  <Text style={styles.passwordToggleLabel}>
+                    {isDraftPasswordVisible ? 'Hide' : 'Show'}
+                  </Text>
+                </Pressable>
+              </View>
               <Pressable
-                onPress={() => setPassword(generatePassword())}
+                onPress={() => setDraftPassword(generatePassword())}
                 style={({ pressed }) => [
                   styles.generatePasswordButton,
                   pressed && styles.generatePasswordButtonPressed,
@@ -290,7 +263,7 @@ export function TeacherListScreen({
 
             <View style={styles.dialogActions}>
               <Pressable
-                onPress={handleCloseDialog}
+                onPress={handleCloseEditDialog}
                 style={({ pressed }) => [
                   styles.dialogSecondaryButton,
                   pressed && styles.dialogSecondaryButtonPressed,
@@ -300,7 +273,7 @@ export function TeacherListScreen({
               <PrimaryButton
                 disabled={isSaveDisabled}
                 label="Simpan"
-                onPress={handleSaveTeacher}
+                onPress={handleSaveEdit}
                 style={styles.dialogPrimaryButton}
               />
             </View>
@@ -317,126 +290,89 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.app,
   },
   pageHeader: {
-    paddingHorizontal: spacing[20],
-    paddingBottom: spacing[12],
     backgroundColor: colors.surface.app,
+    paddingHorizontal: spacing[16],
+    paddingBottom: spacing[16],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing[12],
   },
   headerIdentity: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[8],
+    flex: 1,
   },
   pageTitle: {
     ...typography.headingLg,
     color: colors.text.primary,
+    flex: 1,
   },
-  headerActionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
+  headerEditAction: {
+    minHeight: 34,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface.secondary,
+    paddingHorizontal: spacing[12],
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerActionButtonPressed: {
-    borderColor: colors.brand.primary500,
-    backgroundColor: colors.brand.primary100,
+  headerEditActionPressed: {
+    opacity: 0.78,
+  },
+  headerEditActionLabel: {
+    ...typography.labelMd,
+    color: colors.brand.primary700,
   },
   content: {
     paddingHorizontal: spacing[16],
     paddingTop: spacing[16],
     gap: spacing[16],
   },
-  stickySearchWrap: {
-    marginHorizontal: -spacing[16],
-    backgroundColor: colors.surface.app,
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[8],
-  },
-  searchCard: {
-    flexDirection: 'row',
+  profileHeader: {
     alignItems: 'center',
-    gap: spacing[12],
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[16],
-    minHeight: 56,
-  },
-  searchInput: {
-    flex: 1,
-    color: colors.text.primary,
-    ...typography.bodyMd,
-  },
-  list: {
-    gap: spacing[12],
-  },
-  teacherCard: {
-    backgroundColor: colors.surface.primary,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[16],
-    gap: spacing[12],
-  },
-  teacherCardPressed: {
-    borderColor: colors.brand.primary500,
-    backgroundColor: colors.surface.secondary,
-  },
-  teacherTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
+    gap: spacing[8],
+    marginBottom: spacing[16],
   },
   teacherBadge: {
-    width: 46,
-    height: 46,
+    width: 56,
+    height: 56,
     borderRadius: radius.pill,
-    backgroundColor: colors.brand.primary100,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.brand.primary100,
   },
   teacherBadgeLabel: {
-    ...typography.bodySmStrong,
-    color: colors.brand.primary600,
+    ...typography.labelLg,
+    color: colors.brand.primary700,
   },
-  teacherCopy: {
-    flex: 1,
-    gap: spacing[2],
-  },
-  teacherName: {
-    ...typography.bodyMdStrong,
+  profileName: {
+    ...typography.headingMd,
     color: colors.text.primary,
   },
-  teacherRole: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
+  accountInfoWrap: {
+    gap: spacing[12],
   },
-  emptyState: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.border.subtle,
-    padding: spacing[16],
+  accountInfoRow: {
     gap: spacing[4],
-    backgroundColor: colors.surface.primary,
   },
-  emptyTitle: {
+  accountInfoLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+  },
+  accountInfoValue: {
     ...typography.bodyMdStrong,
     color: colors.text.primary,
   },
-  emptyDescription: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
+  passwordSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[12],
   },
   dialogBackdrop: {
     flex: 1,
