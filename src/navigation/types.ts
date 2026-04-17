@@ -3,6 +3,7 @@ export type MainTab = 'dashboard' | 'measurement' | 'device-manager' | 'profile'
 export type DashboardRoute =
   | 'dashboard'
   | 'class-list'
+  | 'teacher-list'
   | 'class-detail'
   | 'student-profile'
   | 'student-search-results';
@@ -13,6 +14,7 @@ export type MeasurementRoute =
   | 'batch'
   | 'manual'
   | 'face-identification'
+  | 'height-pose'
   | 'face-crop-preview'
   | 'student-search'
   | 'device-manager';

@@ -16,6 +16,7 @@ import { colors, radius, spacing, typography } from '../../theme';
 type DashboardScreenProps = {
   currentSchool: string;
   onOpenClassList: () => void;
+  onOpenTeacherList: () => void;
   onSearchStudents: (keyword: string) => void;
 };
 
@@ -77,6 +78,7 @@ const QUICK_MENUS = [
 export function DashboardScreen({
   currentSchool,
   onOpenClassList,
+  onOpenTeacherList,
   onSearchStudents,
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
@@ -175,11 +177,19 @@ export function DashboardScreen({
           {QUICK_MENUS.map(menu => (
             <Pressable
               key={menu.label}
-              onPress={menu.label === 'Kelas' ? onOpenClassList : undefined}
-              disabled={menu.label !== 'Kelas'}
+              onPress={
+                menu.label === 'Kelas'
+                  ? onOpenClassList
+                  : menu.label === 'Guru'
+                    ? onOpenTeacherList
+                    : undefined
+              }
+              disabled={menu.label !== 'Kelas' && menu.label !== 'Guru'}
               style={({ pressed }) => [
                 styles.quickMenuCard,
-                menu.label === 'Kelas' && pressed && styles.quickMenuCardPressed,
+                (menu.label === 'Kelas' || menu.label === 'Guru') &&
+                  pressed &&
+                  styles.quickMenuCardPressed,
               ]}>
               <View style={styles.quickMenuBadge}>
                 <Text style={styles.quickMenuBadgeLabel}>{menu.badge}</Text>

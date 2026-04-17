@@ -1,286 +1,527 @@
-# Data Model Mobile App MySimoka
+# MySimoka Data Model Documentation
 
-Dokumen ini mendefinisikan model data utama untuk aplikasi mobile MySimoka (auth, sekolah, siswa, pengukuran IoT, dan sinkronisasi offline).
+## Overview
 
-## 1. Scope dan Prinsip
+Dokumen ini menjelaskan struktur data (ERD) final untuk sistem MySimoka. Tujuan utama adalah memberikan pemahaman yang jelas bagi backend engineer terkait relasi antar entitas, prinsip desain, dan constraint penting.
 
-- Model mendukung flow registrasi sekolah:
-  - Nama Sekolah
-  - NPSN
-  - Nama Penanggungjawab
-  - Email
-  - Password
-  - Konfirmasi Password (validasi UI, tidak disimpan)
-- Model mendukung dual-device measurement:
-  - Device tinggi
-  - Device berat
-- Model mendukung offline-first:
-  - Data operasional disimpan lokal
-  - Sinkronisasi ke server lewat outbox queue
+---
 
-## 2. Entitas Utama
+## Design Principles
 
-### 2.1 `users`
+1. **Academic Year sebagai dimensi utama**
 
-Menyimpan akun operator/guru.
+   * Semua data kelas dan histori berbasis tahun ajaran
+   * Tidak menggunakan range tanggal (start/end)
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID user |
-| full_name | VARCHAR(120) | NOT NULL | Nama penanggungjawab/operator |
-| email | VARCHAR(190) | NOT NULL, UNIQUE | Email login |
-| password_hash | VARCHAR(255) | NOT NULL | Hash password |
-| role | ENUM(`operator`,`teacher`,`admin_school`) | NOT NULL | Peran user |
-| is_active | BOOLEAN | NOT NULL DEFAULT TRUE | Status aktif akun |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
+2. **Classroom adalah snapshot per tahun ajaran**
 
-### 2.2 `schools`
+   * Classroom berbeda setiap academic year
+   * Tidak reuse classroom antar tahun
 
-Menyimpan master sekolah.
+3. **History over mutation**
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID sekolah |
-| name | VARCHAR(160) | NOT NULL | Nama sekolah |
-| npsn | VARCHAR(20) | NOT NULL, UNIQUE | NPSN nasional |
-| address | TEXT | NULL | Alamat |
-| phone | VARCHAR(32) | NULL | Telepon |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
+   * Tidak overwrite data relasi
+   * Gunakan tabel history untuk tracking perubahan
 
-### 2.3 `school_memberships`
+4. **Referential integrity ketat**
 
-Relasi user dengan sekolah (mendukung 1 user ke banyak sekolah).
+   * Gunakan foreign key ke entitas yang tepat
+   * Hindari penggunaan string bebas untuk entitas penting
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID membership |
-| user_id | UUID | FK -> users.id | User |
-| school_id | UUID | FK -> schools.id | Sekolah |
-| role_in_school | ENUM(`operator`,`teacher`,`admin_school`) | NOT NULL | Role per sekolah |
-| is_default | BOOLEAN | NOT NULL DEFAULT FALSE | Sekolah default saat login |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
+---
 
-Unique key: (`user_id`, `school_id`)
+## Entity Relationship Diagram (ERD)
 
-### 2.4 `classrooms`
+```mermaid
+erDiagram
 
-Menyimpan kelas dalam sekolah.
+    USERS {
+        UUID id PK
+        VARCHAR full_name
+        VARCHAR email
+        VARCHAR password_hash
+        ENUM role
+        BOOLEAN is_active
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID kelas |
-| school_id | UUID | FK -> schools.id | Sekolah pemilik |
-| name | VARCHAR(60) | NOT NULL | Nama kelas (contoh: 1A) |
-| grade_level | SMALLINT | NULL | Tingkat kelas |
-| academic_year | VARCHAR(20) | NULL | Tahun ajaran |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
+    SCHOOLS {
+        UUID id PK
+        VARCHAR name
+        VARCHAR npsn
+        TEXT address
+        VARCHAR phone
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
 
-Unique key: (`school_id`, `name`, `academic_year`)
+    SCHOOL_MEMBERSHIPS {
+        UUID id PK
+        UUID user_id FK
+        UUID school_id FK
+        ENUM role_in_school
+        BOOLEAN is_default
+        TIMESTAMP created_at
+    }
 
-### 2.5 `students`
+    ACADEMIC_YEARS {
+        UUID id PK
+        VARCHAR label
+        SMALLINT start_year
+        SMALLINT end_year
+        BOOLEAN is_active
+        TIMESTAMP created_at
+    }
 
-Master siswa.
+    CLASSROOMS {
+        UUID id PK
+        UUID school_id FK
+        VARCHAR name
+        SMALLINT grade_level
+        UUID academic_year_id FK
+        UUID homeroom_teacher_membership_id FK
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID siswa |
-| school_id | UUID | FK -> schools.id | Sekolah |
-| classroom_id | UUID | FK -> classrooms.id | Kelas aktif |
-| nisn | VARCHAR(30) | NULL | NISN |
-| student_number | VARCHAR(30) | NULL | Nomor induk internal |
-| full_name | VARCHAR(160) | NOT NULL | Nama siswa |
-| gender | ENUM(`male`,`female`) | NULL | Jenis kelamin |
-| birth_date | DATE | NULL | Tanggal lahir |
-| is_active | BOOLEAN | NOT NULL DEFAULT TRUE | Status aktif |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
+    STUDENTS {
+        UUID id PK
+        UUID school_id FK
+        VARCHAR nisn
+        VARCHAR student_number
+        VARCHAR full_name
+        ENUM gender
+        DATE birth_date
+        ENUM status
+        SMALLINT graduation_year
+        BOOLEAN is_active
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
 
-Index rekomendasi: (`school_id`, `classroom_id`), (`school_id`, `full_name`)
+    STUDENT_CLASSROOM_HISTORY {
+        UUID id PK
+        UUID student_id FK
+        UUID classroom_id FK
+        UUID academic_year_id FK
+        SMALLINT grade_level_snapshot
+        BOOLEAN is_active
+        TIMESTAMP created_at
+    }
 
-### 2.6 `devices`
+    DEVICES {
+        UUID id PK
+        UUID school_id FK
+        VARCHAR device_code
+        VARCHAR device_name
+        ENUM device_type
+        VARCHAR ble_identifier
+        VARCHAR firmware_version
+        TIMESTAMP last_seen_at
+        BOOLEAN is_active
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
 
-Master perangkat IoT (tinggi/berat).
+    MEASUREMENT_SESSIONS {
+        UUID id PK
+        UUID school_id FK
+        UUID classroom_id FK
+        DATE session_date
+        ENUM mode
+        ENUM status
+        UUID started_by_user_id FK
+        TIMESTAMP started_at
+        TIMESTAMP ended_at
+        TEXT notes
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID perangkat |
-| school_id | UUID | FK -> schools.id | Sekolah pemilik |
-| device_code | VARCHAR(80) | NOT NULL, UNIQUE | Kode/device serial |
-| device_name | VARCHAR(120) | NOT NULL | Nama perangkat |
-| device_type | ENUM(`height`,`weight`) | NOT NULL | Jenis alat |
-| ble_identifier | VARCHAR(190) | NULL | BLE id/mac/uuid |
-| firmware_version | VARCHAR(60) | NULL | Firmware |
-| last_seen_at | TIMESTAMP | NULL | Terakhir online |
-| is_active | BOOLEAN | NOT NULL DEFAULT TRUE | Status aktif |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
+    SESSION_STUDENTS {
+        UUID id PK
+        UUID session_id FK
+        UUID student_id FK
+        INT queue_order
+        BOOLEAN is_skipped
+        TIMESTAMP processed_at
+        TIMESTAMP created_at
+    }
 
-### 2.7 `measurement_sessions`
+    MEASUREMENTS {
+        UUID id PK
+        UUID session_id FK
+        UUID student_id FK
+        TIMESTAMP measured_at
+        ENUM identification_method
+        DECIMAL height_cm
+        DECIMAL weight_kg
+        DECIMAL bmi
+        ENUM completeness_status
+        ENUM source
+        ENUM sync_status
+        TIMESTAMP synced_at
+        UUID created_by_user_id FK
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
 
-Satu sesi pengukuran untuk satu kelas dan tanggal tertentu.
+    MEASUREMENT_DEVICE_READINGS {
+        UUID id PK
+        UUID measurement_id FK
+        UUID device_id FK
+        ENUM device_type
+        DECIMAL value
+        ENUM unit
+        TIMESTAMP reading_time
+        BOOLEAN is_selected
+        JSONB raw_payload
+        TIMESTAMP created_at
+    }
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID sesi |
-| school_id | UUID | FK -> schools.id | Sekolah |
-| classroom_id | UUID | FK -> classrooms.id | Kelas |
-| session_date | DATE | NOT NULL | Tanggal sesi |
-| mode | ENUM(`batch`,`manual`,`mixed`) | NOT NULL | Mode utama sesi |
-| status | ENUM(`draft`,`active`,`paused`,`completed`,`archived`) | NOT NULL | Status sesi |
-| started_by_user_id | UUID | FK -> users.id | Pembuat sesi |
-| started_at | TIMESTAMP | NULL | Mulai sesi |
-| ended_at | TIMESTAMP | NULL | Selesai sesi |
-| notes | TEXT | NULL | Catatan sesi |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
+    FACE_EMBEDDINGS {
+        UUID id PK
+        UUID student_id FK
+        JSONB embedding_vector
+        VARCHAR model_name
+        DECIMAL quality_score
+        TIMESTAMP created_at
+    }
 
-Index rekomendasi: (`school_id`, `session_date`), (`classroom_id`, `session_date`)
+    USERS ||--o{ SCHOOL_MEMBERSHIPS : has
+    SCHOOLS ||--o{ SCHOOL_MEMBERSHIPS : has
 
-### 2.8 `session_students`
+    SCHOOLS ||--o{ CLASSROOMS : has
+    SCHOOLS ||--o{ STUDENTS : has
 
-Antrian siswa di sebuah sesi (untuk mode batch/manual tracking).
+    ACADEMIC_YEARS ||--o{ CLASSROOMS : used_by
+    ACADEMIC_YEARS ||--o{ STUDENT_CLASSROOM_HISTORY : used_by
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID item antrian |
-| session_id | UUID | FK -> measurement_sessions.id | Sesi |
-| student_id | UUID | FK -> students.id | Siswa |
-| queue_order | INT | NOT NULL | Urutan |
-| is_skipped | BOOLEAN | NOT NULL DEFAULT FALSE | Siswa dilewati |
-| processed_at | TIMESTAMP | NULL | Waktu diproses |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
+    SCHOOL_MEMBERSHIPS ||--o{ CLASSROOMS : homeroom_teacher
 
-Unique key: (`session_id`, `student_id`), (`session_id`, `queue_order`)
+    STUDENTS ||--o{ STUDENT_CLASSROOM_HISTORY : has
+    CLASSROOMS ||--o{ STUDENT_CLASSROOM_HISTORY : contains
 
-### 2.9 `measurements`
+    SCHOOLS ||--o{ DEVICES : owns
 
-Record final hasil pengukuran siswa per sesi.
+    SCHOOLS ||--o{ MEASUREMENT_SESSIONS : has
+    CLASSROOMS ||--o{ MEASUREMENT_SESSIONS : used_in
+    USERS ||--o{ MEASUREMENT_SESSIONS : started_by
 
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID hasil ukur |
-| session_id | UUID | FK -> measurement_sessions.id | Sesi |
-| student_id | UUID | FK -> students.id | Siswa |
-| measured_at | TIMESTAMP | NOT NULL | Waktu pengukuran |
-| identification_method | ENUM(`batch`,`manual`,`face_recognition`) | NOT NULL | Cara identifikasi |
-| height_cm | DECIMAL(5,2) | NULL | Tinggi (cm) |
-| weight_kg | DECIMAL(5,2) | NULL | Berat (kg) |
-| bmi | DECIMAL(5,2) | NULL | BMI terhitung |
-| completeness_status | ENUM(`complete`,`height_only`,`weight_only`) | NOT NULL | Kelengkapan data |
-| source | ENUM(`mobile`) | NOT NULL DEFAULT `mobile` | Sumber input |
-| sync_status | ENUM(`local_only`,`syncing`,`synced`,`failed`) | NOT NULL DEFAULT `local_only` | Status sinkronisasi |
-| synced_at | TIMESTAMP | NULL | Waktu sinkron sukses |
-| created_by_user_id | UUID | FK -> users.id | Operator pengukur |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
+    MEASUREMENT_SESSIONS ||--o{ SESSION_STUDENTS : contains
+    STUDENTS ||--o{ SESSION_STUDENTS : queued
 
-Index rekomendasi: (`session_id`, `student_id`), (`sync_status`)
+    MEASUREMENT_SESSIONS ||--o{ MEASUREMENTS : produces
+    STUDENTS ||--o{ MEASUREMENTS : measured
+    USERS ||--o{ MEASUREMENTS : created_by
 
-### 2.10 `measurement_device_readings`
+    MEASUREMENTS ||--o{ MEASUREMENT_DEVICE_READINGS : has
+    DEVICES ||--o{ MEASUREMENT_DEVICE_READINGS : produces
 
-Raw reading dari perangkat, bisa lebih dari satu sebelum dikonfirmasi final.
-
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID reading |
-| measurement_id | UUID | FK -> measurements.id | Hasil ukur terkait |
-| device_id | UUID | FK -> devices.id | Device pengirim |
-| device_type | ENUM(`height`,`weight`) | NOT NULL | Jenis device |
-| value | DECIMAL(7,3) | NOT NULL | Nilai mentah |
-| unit | ENUM(`cm`,`kg`) | NOT NULL | Satuan |
-| reading_time | TIMESTAMP | NOT NULL | Timestamp reading device |
-| is_selected | BOOLEAN | NOT NULL DEFAULT TRUE | Reading terpilih |
-| raw_payload | JSONB | NULL | Payload mentah BLE |
-| created_at | TIMESTAMP | NOT NULL | Waktu simpan |
-
-### 2.11 `face_embeddings` (opsional FR)
-
-Template embedding wajah per siswa.
-
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID embedding |
-| student_id | UUID | FK -> students.id | Siswa |
-| embedding_vector | VECTOR / JSONB | NOT NULL | Vektor embedding |
-| model_name | VARCHAR(80) | NOT NULL | Model FR |
-| quality_score | DECIMAL(5,2) | NULL | Kualitas template |
-| created_at | TIMESTAMP | NOT NULL | Waktu dibuat |
-
-### 2.12 `sync_outbox`
-
-Queue lokal untuk sinkronisasi offline-first.
-
-| Field | Type | Constraint | Keterangan |
-|---|---|---|---|
-| id | UUID | PK | ID outbox |
-| aggregate_type | ENUM(`measurement`,`session`,`student`) | NOT NULL | Tipe data |
-| aggregate_id | UUID | NOT NULL | ID data utama |
-| operation | ENUM(`create`,`update`,`delete`) | NOT NULL | Aksi sinkronisasi |
-| payload | JSONB | NOT NULL | Payload API |
-| retry_count | INT | NOT NULL DEFAULT 0 | Jumlah retry |
-| next_retry_at | TIMESTAMP | NULL | Jadwal retry |
-| last_error | TEXT | NULL | Pesan error terakhir |
-| status | ENUM(`pending`,`processing`,`done`,`failed`) | NOT NULL DEFAULT `pending` | Status item |
-| created_at | TIMESTAMP | NOT NULL | Waktu enqueue |
-| updated_at | TIMESTAMP | NOT NULL | Waktu update |
-
-Index rekomendasi: (`status`, `next_retry_at`)
-
-## 3. Relasi Antar Entitas
-
-```text
-users ---< school_memberships >--- schools
-schools ---< classrooms ---< students
-schools ---< devices
-classrooms ---< measurement_sessions ---< session_students >--- students
-measurement_sessions ---< measurements >--- students
-measurements ---< measurement_device_readings >--- devices
-students ---< face_embeddings
-measurements ---< sync_outbox (by aggregate_id, aggregate_type)
+    STUDENTS ||--o{ FACE_EMBEDDINGS : has
 ```
 
-## 4. Payload Registrasi (API Contract Awal)
+---
 
-Request:
+## Core Entities Explanation
 
-```json
-{
-  "school_name": "SDN Sukamaju 01",
-  "npsn": "12345678",
-  "person_in_charge_name": "Aisyah Nur",
-  "email": "operator@sdnsukamaju.sch.id",
-  "password": "********",
-  "confirm_password": "********"
-}
-```
+Di bawah ini adalah penjelasan tiap entitas beserta peran, relasi, dan catatan implementasi penting.
 
-Catatan:
-- `confirm_password` dipakai untuk validasi client/server, tidak disimpan sebagai kolom.
-- Saat registrasi sukses, sistem membuat:
-  1. `schools`
-  2. `users`
-  3. `school_memberships` (user sebagai default operator sekolah tersebut)
+### 1. USERS
 
-## 5. Aturan Integritas Data
+**Peran**: Identitas pengguna sistem (admin/operator/guru, dll)
 
-- `npsn` wajib unik per sekolah.
-- Satu `measurement` harus punya minimal salah satu nilai: `height_cm` atau `weight_kg`.
-- `completeness_status` harus konsisten dengan isi `height_cm` dan `weight_kg`.
-- Untuk mode batch, `session_students.queue_order` wajib unik per sesi.
-- Data dengan `sync_status = failed` harus memiliki jejak error pada `sync_outbox.last_error`.
+* Digunakan untuk autentikasi & otorisasi
+* Tidak langsung terikat ke sekolah → melalui `SCHOOL_MEMBERSHIPS`
+* Dipakai sebagai `started_by_user_id` (session) dan `created_by_user_id` (measurement)
 
-## 6. Rekomendasi Penyimpanan Mobile
+**Catatan**:
 
-- Local DB (SQLite) tabel minimal:
-  - `measurement_sessions`
-  - `session_students`
-  - `measurements`
-  - `measurement_device_readings`
-  - `devices`
-  - `sync_outbox`
-- Cache reference:
-  - `schools`, `classrooms`, `students`, `users` (read-heavy)
+* Gunakan `is_active` untuk soft disable akun
 
+---
+
+### 2. SCHOOLS
+
+**Peran**: Entitas sekolah (tenant utama sistem)
+
+* Semua data lain berada dalam konteks sekolah
+
+**Relasi utama**:
+
+* 1 school → banyak classrooms, students, devices, sessions
+
+**Catatan**:
+
+* `npsn` bisa dijadikan unique identifier eksternal
+
+---
+
+### 3. SCHOOL_MEMBERSHIPS
+
+**Peran**: Menghubungkan user dengan school + role dalam konteks sekolah
+
+* Satu user bisa punya banyak membership (multi sekolah)
+
+**Digunakan untuk**:
+
+* Role-based access per sekolah
+* Assignment wali kelas (`CLASSROOMS.homeroom_teacher_membership_id`)
+
+**Catatan penting**:
+
+* Selalu gunakan membership_id (bukan user_id) untuk relasi kontekstual sekolah
+
+---
+
+### 4. ACADEMIC_YEARS
+
+**Peran**: Master data tahun ajaran
+
+* Menggantikan penggunaan string bebas
+
+**Field penting**:
+
+* `label` ("2025/2026") → untuk display
+* `start_year`, `end_year` → untuk sorting & logic
+
+**Digunakan oleh**:
+
+* Classrooms
+* Student classroom history
+
+**Catatan**:
+
+* Bisa gunakan `is_active` untuk menandai tahun berjalan
+
+---
+
+### 5. CLASSROOMS
+
+**Peran**: Representasi kelas pada tahun ajaran tertentu (snapshot)
+
+**Karakteristik**:
+
+* Tidak reusable antar tahun
+* Satu classroom = satu grade level + satu academic year
+
+**Field penting**:
+
+* `grade_level` (1–6, dll)
+* `academic_year_id`
+* `homeroom_teacher_membership_id`
+
+**Relasi**:
+
+* Dipakai oleh measurement sessions
+* Diisi oleh student melalui history
+
+**Catatan penting**:
+
+* Jangan gunakan classroom lintas tahun
+* Classroom adalah entitas temporal (per tahun)
+
+---
+
+### 6. STUDENTS
+
+**Peran**: Data master siswa
+
+**Karakteristik**:
+
+* Tidak menyimpan classroom langsung
+* Relasi ke kelas melalui history
+
+**Field penting**:
+
+* `status` (active, graduated, dll)
+* `graduation_year`
+
+**Catatan**:
+
+* `is_active` untuk soft delete / arsip
+
+---
+
+### 7. STUDENT_CLASSROOM_HISTORY
+
+**Peran**: Sumber kebenaran utama posisi siswa per tahun ajaran
+
+**Karakteristik**:
+
+* 1 row = 1 siswa di 1 classroom pada 1 academic year
+
+**Field penting**:
+
+* `academic_year_id`
+* `grade_level_snapshot` (untuk menjaga histori)
+* `is_active`
+
+**Constraint penting**:
+
+* UNIQUE(student_id, academic_year_id)
+
+**Catatan**:
+
+* Tidak menggunakan start/end date
+* Semua berbasis academic year
+
+---
+
+### 8. DEVICES
+
+**Peran**: Perangkat pengukuran (tinggi/berat)
+
+**Field penting**:
+
+* `device_type`
+* `ble_identifier`
+* `last_seen_at`
+
+**Digunakan oleh**:
+
+* Measurement device readings
+
+**Catatan**:
+
+* `is_active` untuk disable device tanpa menghapus histori
+
+---
+
+### 9. MEASUREMENT_SESSIONS
+
+**Peran**: Sesi pengukuran untuk satu classroom
+
+**Karakteristik**:
+
+* Biasanya dilakukan per kelas per hari
+
+**Field penting**:
+
+* `session_date`
+* `mode` (batch, dll)
+* `status` (active, completed)
+
+**Relasi**:
+
+* Menghasilkan measurements
+* Memiliki queue siswa (session_students)
+
+---
+
+### 10. SESSION_STUDENTS
+
+**Peran**: Queue siswa dalam satu measurement session
+
+**Field penting**:
+
+* `queue_order`
+* `is_skipped`
+* `processed_at`
+
+**Fungsi**:
+
+* Mengatur urutan pengukuran
+* Tracking siswa yang sudah diproses
+
+---
+
+### 11. MEASUREMENTS
+
+**Peran**: Hasil utama pengukuran siswa
+
+**Field penting**:
+
+* `height_cm`, `weight_kg`, `bmi`
+* `identification_method`
+* `sync_status`
+
+**Relasi**:
+
+* Dimiliki oleh session
+* Terkait ke student
+* Bisa memiliki banyak device readings
+
+**Catatan**:
+
+* Ini adalah data utama untuk analitik & reporting
+
+---
+
+### 12. MEASUREMENT_DEVICE_READINGS
+
+**Peran**: Data mentah dari device
+
+**Karakteristik**:
+
+* Satu measurement bisa punya banyak readings
+
+**Field penting**:
+
+* `value`, `unit`
+* `is_selected` (nilai yang dipakai)
+* `raw_payload` (data asli device)
+
+**Fungsi**:
+
+* Audit trail
+* Debugging device
+* Validasi hasil
+
+---
+
+### 13. FACE_EMBEDDINGS
+
+**Peran**: Data biometrik untuk identifikasi siswa (opsional)
+
+**Field penting**:
+
+* `embedding_vector`
+* `model_name`
+* `quality_score`
+
+**Fungsi**:
+
+* Face recognition
+* Alternatif input manual
+
+**Catatan**:
+
+* Bisa memiliki lebih dari satu embedding per siswa
+
+---
+
+## Key Constraints
+
+1. **Single classroom per student per academic year**
+
+   * UNIQUE(student_id, academic_year_id)
+
+2. **School consistency**
+
+   * Classroom, student, dan membership harus dalam school yang sama
+
+3. **Academic year integrity**
+
+   * Semua referensi harus ke ACADEMIC_YEARS
+
+---
+
+## Important Notes
+
+* Tidak menggunakan start_date / end_date
+* Tidak menyimpan classroom_id di students
+* Semua histori berbasis academic year
+* Classroom adalah snapshot, bukan entitas permanen
+
+---
+
+## Summary
+
+Model ini dirancang untuk:
+
+* Konsistensi data tinggi
+* Kemudahan query
+* Skalabilitas jangka panjang
+* Mendukung fitur promote dan histori siswa

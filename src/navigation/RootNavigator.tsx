@@ -10,11 +10,13 @@ import { ClassListScreen } from '../screens/dashboard/ClassListScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
 import { StudentProfileScreen } from '../screens/dashboard/StudentProfileScreen';
 import { StudentSearchResultsScreen } from '../screens/dashboard/StudentSearchResultsScreen';
+import { TeacherListScreen } from '../screens/dashboard/TeacherListScreen';
 import { BatchMeasurementScreen } from '../screens/measurement/BatchMeasurementScreen';
 import { CreateSessionScreen } from '../screens/measurement/CreateSessionScreen';
 import { DeviceManagerScreen } from '../screens/measurement/DeviceManagerScreen';
 import { FaceCropPreviewScreen } from '../screens/measurement/FaceCropPreviewScreen';
 import { FaceIdentificationScreen } from '../screens/measurement/FaceIdentificationScreen';
+import { HeightPoseScreen } from '../screens/measurement/HeightPoseScreen';
 import { SessionListScreen } from '../screens/measurement/SessionListScreen';
 import { StudentMeasurementScreen } from '../screens/measurement/StudentMeasurementScreen';
 import { StudentSearchScreen } from '../screens/measurement/StudentSearchScreen';
@@ -37,7 +39,7 @@ const TAB_LABELS: Record<MainTab, string> = {
   dashboard: 'Dashboard',
   measurement: 'Pengukuran',
   'device-manager': 'Perangkat',
-  profile: 'Profil',
+  profile: 'Pengaturan',
 };
 
 const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
@@ -96,6 +98,7 @@ export function RootNavigator() {
   const shouldHideBottomBar =
     activeTab === 'measurement' &&
     (measurementRoute === 'face-identification' ||
+      measurementRoute === 'height-pose' ||
       measurementRoute === 'face-crop-preview');
 
   return (
@@ -109,6 +112,7 @@ export function RootNavigator() {
             dashboardRoute,
             onBackToDashboard: () => setDashboardRoute('dashboard'),
             onOpenClassList: () => setDashboardRoute('class-list'),
+            onOpenTeacherList: () => setDashboardRoute('teacher-list'),
             onOpenClassDetail: () => setDashboardRoute('class-detail'),
             onOpenStudentFromClass: () => {
               setStudentProfileBackRoute('class-detail');
@@ -140,6 +144,7 @@ export function RootNavigator() {
             onBackToSessionList: () => setMeasurementRoute('session-list'),
             onOpenCreateSession: () => setMeasurementRoute('create-session'),
             onOpenFaceIdentification: () => setMeasurementRoute('face-identification'),
+            onOpenHeightPose: () => setMeasurementRoute('height-pose'),
             onFaceCropReady: payload => {
               setFaceCropPreview(payload);
               setMeasurementRoute('face-crop-preview');
@@ -232,6 +237,7 @@ type DashboardStackOptions = {
   dashboardRoute: DashboardRoute;
   onBackToDashboard: () => void;
   onOpenClassList: () => void;
+  onOpenTeacherList: () => void;
   onOpenClassDetail: () => void;
   onOpenStudentFromClass: () => void;
   onOpenStudentFromSearchResults: () => void;
@@ -246,6 +252,7 @@ function renderDashboardStack({
   dashboardRoute,
   onBackToDashboard,
   onOpenClassList,
+  onOpenTeacherList,
   onOpenClassDetail,
   onOpenStudentFromClass,
   onOpenStudentFromSearchResults,
@@ -262,6 +269,8 @@ function renderDashboardStack({
           onOpenClassDetail={onOpenClassDetail}
         />
       );
+    case 'teacher-list':
+      return <TeacherListScreen onBack={onBackToDashboard} />;
     case 'class-detail':
       return (
         <ClassDetailScreen
@@ -286,6 +295,7 @@ function renderDashboardStack({
         <DashboardScreen
           currentSchool={currentSchool}
           onOpenClassList={onOpenClassList}
+          onOpenTeacherList={onOpenTeacherList}
           onSearchStudents={onOpenStudentSearchResults}
         />
       );
@@ -300,6 +310,7 @@ type MeasurementStackOptions = {
   onBackToSessionList: () => void;
   onOpenCreateSession: () => void;
   onOpenFaceIdentification: () => void;
+  onOpenHeightPose: () => void;
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onFaceIdentificationMatched: (studentName: string) => void;
   onOpenManual: () => void;
@@ -316,6 +327,7 @@ function renderMeasurementStack({
   onBackToSessionList,
   onOpenCreateSession,
   onOpenFaceIdentification,
+  onOpenHeightPose,
   onFaceCropReady,
   onFaceIdentificationMatched,
   onOpenManual,
@@ -361,6 +373,14 @@ function renderMeasurementStack({
           onIdentificationSuccess={onFaceIdentificationMatched}
         />
       );
+    case 'height-pose':
+      return (
+        <HeightPoseScreen
+          onBack={onOpenManual}
+          cameraFacing={faceCameraFacing}
+          onCameraFacingChange={onFaceCameraFacingChange}
+        />
+      );
     case 'batch':
       return (
         <BatchMeasurementScreen
@@ -374,6 +394,7 @@ function renderMeasurementStack({
         <StudentMeasurementScreen
           onBack={onBackToSessionList}
           onOpenFaceIdentification={onOpenFaceIdentification}
+          onOpenHeightPose={onOpenHeightPose}
           onOpenStudentSearch={onOpenStudentSearch}
         />
       );
@@ -496,13 +517,14 @@ function TabIcon({ color, tab }: TabIconProps) {
 
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={8} r={3.5} stroke={color} strokeWidth={1.8} />
       <Path
-        d="M5.5 19.5c1.8-3 4.1-4.5 6.5-4.5s4.7 1.5 6.5 4.5"
+        d="M12 3.2v2.1M12 18.7v2.1M4.8 12h2.1M17.1 12h2.1M6.9 6.9l1.5 1.5M15.6 15.6l1.5 1.5M17.1 6.9l-1.5 1.5M8.4 15.6l-1.5 1.5"
         stroke={color}
         strokeWidth={1.8}
         strokeLinecap="round"
       />
+      <Circle cx={12} cy={12} r={3.2} stroke={color} strokeWidth={1.8} />
+      <Circle cx={12} cy={12} r={1.2} fill={color} />
     </Svg>
   );
 }

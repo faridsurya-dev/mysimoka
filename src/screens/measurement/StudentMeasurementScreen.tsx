@@ -17,6 +17,7 @@ import { colors, radius, spacing, typography } from '../../theme';
 type StudentMeasurementScreenProps = {
   onBack: () => void;
   onOpenFaceIdentification: () => void;
+  onOpenHeightPose: () => void;
   onOpenStudentSearch: () => void;
 };
 
@@ -91,6 +92,7 @@ const formatSavedTimestamp = (date: Date) =>
 export function StudentMeasurementScreen({
   onBack,
   onOpenFaceIdentification,
+  onOpenHeightPose,
   onOpenStudentSearch,
 }: StudentMeasurementScreenProps) {
   const insets = useSafeAreaInsets();
@@ -142,6 +144,10 @@ export function StudentMeasurementScreen({
 
   const startFaceIdentificationMeasurement = () => {
     onOpenFaceIdentification();
+  };
+
+  const startHeightPoseMeasurement = () => {
+    onOpenHeightPose();
   };
 
   const startMeasurementFromSessionCard = () => {
@@ -373,6 +379,15 @@ export function StudentMeasurementScreen({
                 pressed && styles.faceIdButtonPressed,
               ]}>
               <Text style={styles.faceIdButtonLabel}>Identifikasi Wajah</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={startHeightPoseMeasurement}
+              style={({ pressed }) => [
+                styles.heightPoseButton,
+                pressed && styles.heightPoseButtonPressed,
+              ]}>
+              <Text style={styles.heightPoseButtonLabel}>Ukur Tinggi Badan</Text>
             </Pressable>
           </View>
         </View>
@@ -909,6 +924,23 @@ const styles = StyleSheet.create({
   faceIdButtonLabel: {
     ...typography.labelMd,
     color: colors.brand.primary700,
+  },
+  heightPoseButton: {
+    minHeight: 44,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.accent.teal,
+    backgroundColor: colors.feedback.successBackground,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[16],
+  },
+  heightPoseButtonPressed: {
+    backgroundColor: '#DBF2E6',
+  },
+  heightPoseButtonLabel: {
+    ...typography.labelMd,
+    color: colors.accent.teal,
   },
   modalContainer: {
     flex: 1,

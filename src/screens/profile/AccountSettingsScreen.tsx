@@ -21,7 +21,7 @@ export function AccountSettingsScreen({
   return (
     <Screen contentContainerStyle={styles.content}>
       <Pressable onPress={onBack} style={styles.backButton}>
-        <Text style={styles.backLabel}>Kembali ke Profil</Text>
+        <Text style={styles.backLabel}>Kembali ke Pengaturan</Text>
       </Pressable>
 
       <View style={styles.header}>

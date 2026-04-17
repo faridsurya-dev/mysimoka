@@ -2,98 +2,193 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { InfoCard, PrimaryButton, Screen, StatusPill } from '../../shared/components';
+import { PrimaryButton, Screen } from '../../shared/components';
+import {
+  bleManager,
+  ensureBlePoweredOn,
+  getBleDeviceName,
+  requestBlePermissions,
+} from '../../features/device';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type DeviceManagerScreenProps = {
   onBack?: () => void;
 };
-
-type DeviceConnectionState = 'connected' | 'disconnected' | 'scanning';
-
-type DeviceStatusDisplay = {
-  label: string;
-  tone: 'success' | 'warning' | 'info';
-  description: string;
+type DetectedDevice = {
+  id: string;
+  name: string;
+  isConnected: boolean;
 };
-
-function getDeviceStatusDisplay(state: DeviceConnectionState): DeviceStatusDisplay {
-  if (state === 'connected') {
-    return {
-      label: 'Connected',
-      tone: 'success',
-      description: 'Terhubung dan siap dipakai pada session aktif.',
-    };
-  }
-
-  if (state === 'scanning') {
-    return {
-      label: 'Scanning...',
-      tone: 'info',
-      description: 'Memindai perangkat di sekitar. Mohon tunggu beberapa detik.',
-    };
-  }
-
-  return {
-    label: 'Disconnected',
-    tone: 'warning',
-    description: 'Belum tersambung, perlu scan ulang.',
-  };
-}
 
 export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   const insets = useSafeAreaInsets();
   const headerHeight = insets.top + 72;
-  const [heightDeviceState, setHeightDeviceState] =
-    useState<DeviceConnectionState>('connected');
-  const [weightDeviceState, setWeightDeviceState] =
-    useState<DeviceConnectionState>('disconnected');
-  const scanTimeoutRef = useRef<{
-    height: ReturnType<typeof setTimeout> | null;
-    weight: ReturnType<typeof setTimeout> | null;
-  }>({
-    height: null,
-    weight: null,
-  });
-
-  const heightStatus = getDeviceStatusDisplay(heightDeviceState);
-  const weightStatus = getDeviceStatusDisplay(weightDeviceState);
+  const [isScanning, setIsScanning] = useState(false);
+  const [detectedDevices, setDetectedDevices] = useState<DetectedDevice[]>([]);
+  const [busyDeviceId, setBusyDeviceId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<'connect' | 'disconnect' | null>(null);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
 
   useEffect(() => {
-    const timeoutRefs = scanTimeoutRef.current;
-
     return () => {
-      if (timeoutRefs.height) {
-        clearTimeout(timeoutRefs.height);
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
       }
-      if (timeoutRefs.weight) {
-        clearTimeout(timeoutRefs.weight);
-      }
+      bleManager.stopDeviceScan().catch(() => undefined);
     };
   }, []);
 
-  const handleScanHeightDevice = () => {
-    if (scanTimeoutRef.current.height) {
-      clearTimeout(scanTimeoutRef.current.height);
+  useEffect(() => {
+    if (!connectedDevice) {
+      return;
     }
 
-    setHeightDeviceState('scanning');
-    scanTimeoutRef.current.height = setTimeout(() => {
-      setHeightDeviceState('connected');
-      scanTimeoutRef.current.height = null;
-    }, 2000);
+    const disconnectSubscription = bleManager.onDeviceDisconnected(connectedDevice.id, () => {
+      setDetectedDevices(currentDevices =>
+        currentDevices.map(device =>
+          device.id === connectedDevice.id ? { ...device, isConnected: false } : device,
+        ),
+      );
+      setBusyAction(null);
+      setBusyDeviceId(null);
+      setScanMessage(`Koneksi ke ${connectedDevice.name} terputus.`);
+    });
+
+    return () => {
+      disconnectSubscription.remove();
+    };
+  }, [connectedDevice]);
+
+  const handleScanDevices = async () => {
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+    }
+
+    await bleManager.stopDeviceScan();
+
+    const hasPermission = await requestBlePermissions();
+    if (!hasPermission) {
+      setScanMessage('Izin Bluetooth belum diberikan, jadi pemindaian tidak bisa dimulai.');
+      return;
+    }
+
+    const isBluetoothReady = await ensureBlePoweredOn();
+    if (!isBluetoothReady) {
+      setScanMessage('Bluetooth belum aktif. Nyalakan Bluetooth lalu coba scan lagi.');
+      return;
+    }
+
+    setIsScanning(true);
+    setScanMessage(null);
+    setDetectedDevices(currentDevices => currentDevices.filter(device => device.isConnected));
+
+    try {
+      await bleManager.startDeviceScan(null, null, (error, device) => {
+        if (error) {
+          if (scanTimeoutRef.current) {
+            clearTimeout(scanTimeoutRef.current);
+            scanTimeoutRef.current = null;
+          }
+          setScanMessage(error.message || 'Pemindaian Bluetooth gagal dijalankan.');
+          setIsScanning(false);
+          bleManager.stopDeviceScan().catch(() => undefined);
+          return;
+        }
+
+        if (!device) {
+          return;
+        }
+
+        const deviceName = getBleDeviceName(device);
+        setDetectedDevices(currentDevices => {
+          const existingDevice = currentDevices.find(item => item.id === device.id);
+
+          if (existingDevice) {
+            return currentDevices.map(item =>
+              item.id === device.id ? { ...item, name: deviceName } : item,
+            );
+          }
+
+          return [
+            ...currentDevices,
+            {
+              id: device.id,
+              name: deviceName,
+              isConnected: false,
+            },
+          ];
+        });
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Pemindaian Bluetooth gagal dimulai.';
+      setIsScanning(false);
+      setScanMessage(message);
+      return;
+    }
+
+    scanTimeoutRef.current = setTimeout(() => {
+      setIsScanning(false);
+      bleManager.stopDeviceScan().catch(() => undefined);
+      setScanMessage(currentMessage =>
+        currentMessage ??
+        'Pemindaian selesai. Pilih satu perangkat BLT yang ingin dihubungkan.',
+      );
+      scanTimeoutRef.current = null;
+    }, 7000);
   };
 
-  const handleScanWeightDevice = () => {
-    if (scanTimeoutRef.current.weight) {
-      clearTimeout(scanTimeoutRef.current.weight);
+  const handleConnectDevice = async (deviceId: string) => {
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = null;
     }
 
-    setWeightDeviceState('scanning');
-    scanTimeoutRef.current.weight = setTimeout(() => {
-      setWeightDeviceState('connected');
-      scanTimeoutRef.current.weight = null;
-    }, 2200);
+    setBusyAction('connect');
+    setBusyDeviceId(deviceId);
+    setScanMessage(null);
+
+    try {
+      await bleManager.stopDeviceScan();
+      await bleManager.connectToDevice(deviceId, { timeout: 10000 });
+      setDetectedDevices(currentDevices =>
+        currentDevices.map(device => ({
+          ...device,
+          isConnected: device.id === deviceId,
+        })),
+      );
+      setScanMessage('Perangkat BLT berhasil terhubung.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Gagal menghubungkan perangkat.';
+      setScanMessage(message);
+    } finally {
+      setIsScanning(false);
+      setBusyAction(null);
+      setBusyDeviceId(null);
+    }
+  };
+
+  const handleDisconnectDevice = async (deviceId: string) => {
+    setBusyAction('disconnect');
+    setBusyDeviceId(deviceId);
+    setScanMessage(null);
+
+    try {
+      await bleManager.cancelDeviceConnection(deviceId);
+      setDetectedDevices(currentDevices =>
+        currentDevices.map(device =>
+          device.id === deviceId ? { ...device, isConnected: false } : device,
+        ),
+      );
+      setScanMessage('Perangkat BLT berhasil diputuskan.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Gagal memutuskan perangkat.';
+      setScanMessage(message);
+    } finally {
+      setBusyAction(null);
+      setBusyDeviceId(null);
+    }
   };
 
   return (
@@ -121,35 +216,91 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
         <View style={styles.intro}>
           <Text style={styles.title}>Kelola perangkat tinggi dan berat</Text>
           <Text style={styles.subtitle}>
-            Layar utilitas global yang bisa diakses dari mana saja dalam flow pengukuran.
+            Satu HP hanya dapat terhubung ke satu perangkat BLT. Lakukan scan untuk
+            menampilkan perangkat yang terdeteksi di sekitar operator.
           </Text>
+          <PrimaryButton
+            label={isScanning ? 'Memindai perangkat...' : 'Scan Perangkat'}
+            loading={isScanning}
+            disabled={busyDeviceId !== null}
+            onPress={handleScanDevices}
+            style={styles.scanButton}
+          />
+          {scanMessage ? <Text style={styles.scanMessage}>{scanMessage}</Text> : null}
         </View>
 
-        <InfoCard
-          eyebrow="Perangkat Tinggi"
-          title="Microtoise BLE #01"
-          description={heightStatus.description}>
-          <StatusPill label={heightStatus.label} tone={heightStatus.tone} />
-          <PrimaryButton
-            label={heightDeviceState === 'connected' ? 'Pindai Ulang' : 'Pindai Perangkat'}
-            loading={heightDeviceState === 'scanning'}
-            onPress={handleScanHeightDevice}
-            style={styles.cardActionButton}
-          />
-        </InfoCard>
+        <View style={styles.detectedSection}>
+          <View style={styles.detectedSectionHeader}>
+            <Text style={styles.detectedSectionTitle}>Perangkat Terdeteksi</Text>
+            <Text style={styles.detectedSectionCaption}>
+              {detectedDevices.length} perangkat
+            </Text>
+          </View>
 
-        <InfoCard
-          eyebrow="Perangkat Berat"
-          title="Timbangan BLE #02"
-          description={weightStatus.description}>
-          <StatusPill label={weightStatus.label} tone={weightStatus.tone} />
-          <PrimaryButton
-            label={weightDeviceState === 'connected' ? 'Pindai Ulang' : 'Pindai Perangkat'}
-            loading={weightDeviceState === 'scanning'}
-            onPress={handleScanWeightDevice}
-            style={styles.cardActionButton}
-          />
-        </InfoCard>
+          {detectedDevices.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateTitle}>Belum ada perangkat terdeteksi</Text>
+              <Text style={styles.emptyStateDescription}>
+                Tekan tombol scan untuk mencari perangkat BLT yang ada di sekitar.
+              </Text>
+            </View>
+          ) : (
+            detectedDevices.map(device => (
+              <View
+                key={device.id}
+                style={[
+                  styles.detectedCard,
+                  device.isConnected && styles.detectedCardConnected,
+                ]}>
+                <View style={styles.detectedCardHeader}>
+                  <Text style={styles.detectedCardTitle}>{device.name}</Text>
+                  {device.isConnected ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={busyDeviceId === device.id}
+                      onPress={() => handleDisconnectDevice(device.id)}
+                      style={({ pressed }) => [
+                        styles.connectAction,
+                        styles.connectedAction,
+                        busyDeviceId === device.id && styles.connectActionDisabled,
+                        pressed && busyDeviceId !== device.id && styles.connectedActionPressed,
+                      ]}>
+                      <Text style={[styles.connectActionLabel, styles.connectedActionLabel]}>
+                        {busyAction === 'disconnect' && busyDeviceId === device.id
+                          ? 'Memutuskan...'
+                          : 'Putuskan'}
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={!!connectedDevice || busyDeviceId !== null}
+                      onPress={() => handleConnectDevice(device.id)}
+                      style={({ pressed }) => [
+                        styles.connectAction,
+                        (!!connectedDevice || busyDeviceId !== null) && styles.connectActionDisabled,
+                        pressed &&
+                          !connectedDevice &&
+                          busyDeviceId === null &&
+                          styles.connectActionPressed,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.connectActionLabel,
+                          (!!connectedDevice || busyDeviceId !== null) &&
+                            styles.connectActionLabelDisabled,
+                        ]}>
+                        {busyAction === 'connect' && busyDeviceId === device.id
+                          ? 'Menghubungkan...'
+                          : 'Hubungkan'}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            ))
+          )}
+        </View>
       </Screen>
     </View>
   );
@@ -185,7 +336,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing[8],
     paddingVertical: spacing[4],
-    paddingHorizontal: spacing[6],
+    paddingHorizontal: spacing[8],
     borderRadius: radius.md,
   },
   headerTitle: {
@@ -203,7 +354,106 @@ const styles = StyleSheet.create({
     ...typography.bodyMd,
     color: colors.text.secondary,
   },
-  cardActionButton: {
-    marginTop: spacing[8],
+  scanButton: {
+    marginTop: spacing[12],
+  },
+  scanMessage: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  detectedSection: {
+    gap: spacing[12],
+  },
+  detectedSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  detectedSectionTitle: {
+    ...typography.headingMd,
+    color: colors.text.primary,
+  },
+  detectedSectionCaption: {
+    ...typography.labelMd,
+    color: colors.text.secondary,
+  },
+  emptyState: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    paddingHorizontal: spacing[16],
+    paddingVertical: spacing[20],
+    gap: spacing[8],
+  },
+  emptyStateTitle: {
+    ...typography.labelLg,
+    color: colors.text.primary,
+  },
+  emptyStateDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  detectedCard: {
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface.primary,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    paddingHorizontal: spacing[16],
+    paddingVertical: spacing[16],
+    gap: spacing[8],
+  },
+  detectedCardConnected: {
+    borderColor: colors.status.device.connected,
+    backgroundColor: colors.feedback.successBackground,
+  },
+  detectedCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[12],
+  },
+  detectedCardTitle: {
+    ...typography.headingMd,
+    color: colors.text.primary,
+    flex: 1,
+  },
+  connectAction: {
+    minHeight: 36,
+    paddingHorizontal: spacing[12],
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.brand.primary300,
+    backgroundColor: colors.brand.primary100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  connectActionPressed: {
+    backgroundColor: colors.neutral[200],
+    borderColor: colors.brand.primary500,
+  },
+  connectActionDisabled: {
+    backgroundColor: colors.neutral[100],
+    borderColor: colors.border.strong,
+  },
+  connectActionLabel: {
+    ...typography.labelMd,
+    color: colors.brand.primary700,
+    minWidth: 88,
+    textAlign: 'center',
+  },
+  connectActionLabelDisabled: {
+    color: colors.text.muted,
+  },
+  connectedAction: {
+    borderColor: colors.status.device.connected,
+    backgroundColor: colors.feedback.successBackground,
+  },
+  connectedActionPressed: {
+    backgroundColor: '#DDF3E5',
+  },
+  connectedActionLabel: {
+    color: colors.status.device.connected,
   },
 });

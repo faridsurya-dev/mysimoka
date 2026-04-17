@@ -35,7 +35,9 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>Aplikasi membutuhkan izin lokasi saat menggunakan Bluetooth di perangkat iOS versi tertentu.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Aplikasi membutuhkan akses Bluetooth untuk memindai dan terhubung ke perangkat BLT.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Aplikasi membutuhkan akses kamera untuk identifikasi wajah siswa.</string>
 	<key>UILaunchStoryboardName</key>
