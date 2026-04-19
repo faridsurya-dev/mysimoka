@@ -5,18 +5,16 @@ import Svg, { Path } from 'react-native-svg';
 import { CLASS_OPTIONS_MOCK } from '../../features/session';
 import { PrimaryButton, Screen, TextField } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
+import type { CreateSessionPayload } from '../../types';
 
 type CreateSessionScreenProps = {
   onBack: () => void;
-  onCreateSession: (payload: {
-    sessionName: string;
-    className: string;
-    note: string;
-    sessionDate: string;
-  }) => void;
+  mode?: 'measurement' | 'immunization';
+  onCreateSession: (payload: CreateSessionPayload) => void;
 };
 
 const WEEKDAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+const IMMUNIZATION_TYPE_OPTIONS = ['Campak Rubela', 'DT', 'Td', 'HPV'];
 
 function formatDateLabel(date: Date) {
   return new Intl.DateTimeFormat('id-ID', {
@@ -68,6 +66,7 @@ function changeMonth(baseDate: Date, delta: number) {
 
 export function CreateSessionScreen({
   onBack,
+  mode = 'measurement',
   onCreateSession,
 }: CreateSessionScreenProps) {
   const insets = useSafeAreaInsets();
@@ -77,9 +76,16 @@ export function CreateSessionScreen({
   const [visibleMonth, setVisibleMonth] = useState<Date>(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
-  const [sessionName, setSessionName] = useState(`Sesi ${formatDateLabel(new Date())}`);
+  const [sessionName, setSessionName] = useState(
+    `${mode === 'measurement' ? 'Sesi Pengukuran' : 'Sesi Imunisasi'} ${formatDateLabel(new Date())}`,
+  );
   const [className, setClassName] = useState('Kelas 3A');
-  const [note, setNote] = useState('Pengukuran rutin bulanan');
+  const [note, setNote] = useState(
+    mode === 'measurement' ? 'Pengukuran rutin bulanan' : 'Pencatatan imunisasi berkala',
+  );
+  const [immunizationType, setImmunizationType] = useState(IMMUNIZATION_TYPE_OPTIONS[2]);
+  const [immunizationDose, setImmunizationDose] = useState('');
+  const [immunizationOfficer, setImmunizationOfficer] = useState('Petugas UKS');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isClassSuggestionOpen, setIsClassSuggestionOpen] = useState(false);
 
@@ -96,8 +102,13 @@ export function CreateSessionScreen({
   const calendarDays = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
 
   const isSubmitDisabled = useMemo(() => {
-    return sessionName.trim().length === 0 || className.trim().length === 0;
-  }, [className, sessionName]);
+    return (
+      sessionName.trim().length === 0 ||
+      className.trim().length === 0 ||
+      (mode === 'immunization' &&
+        (immunizationType.trim().length === 0 || immunizationOfficer.trim().length === 0))
+    );
+  }, [className, immunizationOfficer, immunizationType, mode, sessionName]);
 
   const handleCreateSession = () => {
     if (isSubmitDisabled) {
@@ -109,6 +120,13 @@ export function CreateSessionScreen({
       className: className.trim(),
       note: note.trim(),
       sessionDate: sessionDate.toISOString(),
+      immunizationType: mode === 'immunization' ? immunizationType : undefined,
+      immunizationDose:
+        mode === 'immunization' && immunizationDose.trim().length > 0
+          ? immunizationDose.trim()
+          : undefined,
+      immunizationOfficer:
+        mode === 'immunization' ? immunizationOfficer.trim() : undefined,
     });
   };
 
@@ -132,7 +150,9 @@ export function CreateSessionScreen({
               />
             </Svg>
             <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>Buat Sesi Baru</Text>
+              <Text style={styles.pageTitle}>
+                {mode === 'measurement' ? 'Buat Sesi Pengukuran' : 'Buat Sesi Imunisasi'}
+              </Text>
             </View>
           </Pressable>
         </View>
@@ -156,6 +176,49 @@ export function CreateSessionScreen({
             placeholder="Contoh: Sesi 12 April 2026"
             value={sessionName}
           />
+
+          {mode === 'immunization' ? (
+            <View style={styles.immunizationTypeWrap}>
+              <Text style={styles.fieldLabel}>Jenis imunisasi sesi</Text>
+              <View style={styles.immunizationTypeOptions}>
+                {IMMUNIZATION_TYPE_OPTIONS.map(option => {
+                  const isSelected = option === immunizationType;
+
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => setImmunizationType(option)}
+                      style={[
+                        styles.immunizationTypeChip,
+                        isSelected && styles.immunizationTypeChipActive,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.immunizationTypeChipLabel,
+                          isSelected && styles.immunizationTypeChipLabelActive,
+                        ]}>
+                        {option}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <TextField
+                label="Dosis (opsional)"
+                onChangeText={setImmunizationDose}
+                placeholder="Contoh: Dosis 1"
+                value={immunizationDose}
+              />
+
+              <TextField
+                label="Petugas Imunisasi"
+                onChangeText={setImmunizationOfficer}
+                placeholder="Contoh: Bu Rani"
+                value={immunizationOfficer}
+              />
+            </View>
+          ) : null}
 
           <View style={styles.classFieldWrap}>
             <Text style={styles.fieldLabel}>Kelas</Text>
@@ -212,7 +275,7 @@ export function CreateSessionScreen({
         <View style={styles.footerActions}>
           <PrimaryButton
             disabled={isSubmitDisabled}
-            label="Buat dan Mulai Sesi"
+            label={mode === 'measurement' ? 'Buat dan Mulai Pengukuran' : 'Buat dan Mulai Imunisasi'}
             onPress={handleCreateSession}
           />
         </View>
@@ -369,6 +432,33 @@ const styles = StyleSheet.create({
   classFieldWrap: {
     gap: spacing[8],
     zIndex: 5,
+  },
+  immunizationTypeWrap: {
+    gap: spacing[8],
+  },
+  immunizationTypeOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[8],
+  },
+  immunizationTypeChip: {
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface.primary,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[4],
+  },
+  immunizationTypeChipActive: {
+    borderColor: colors.brand.primary500,
+    backgroundColor: colors.brand.primary100,
+  },
+  immunizationTypeChipLabel: {
+    ...typography.caption,
+    color: colors.text.secondary,
+  },
+  immunizationTypeChipLabelActive: {
+    color: colors.brand.primary700,
   },
   classInput: {
     ...typography.bodyMd,

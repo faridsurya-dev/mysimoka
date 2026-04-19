@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import {
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -8,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { BarChart, LineChart } from 'react-native-gifted-charts';
-import Svg, { Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DASHBOARD_AVERAGE_METRICS,
@@ -26,21 +28,36 @@ type DashboardScreenProps = {
   onOpenClassList: () => void;
   onOpenStudentList: () => void;
   onOpenTeacherList: () => void;
+  onOpenImmunizationRecording: () => void;
   onSearchStudents: (keyword: string) => void;
 };
+
+type PeriodPickerField = 'start' | 'end';
+
+function formatDateLabel(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export function DashboardScreen({
   currentSchool,
   onOpenClassList,
   onOpenStudentList,
   onOpenTeacherList,
+  onOpenImmunizationRecording,
   onSearchStudents,
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
   const [isPeriodDialogVisible, setIsPeriodDialogVisible] = useState(false);
-  const [periodStartDate, setPeriodStartDate] = useState('2026-01-01');
-  const [periodEndDate, setPeriodEndDate] = useState('2026-12-31');
+  const [periodStartDate, setPeriodStartDate] = useState(() => new Date(2026, 0, 1));
+  const [periodEndDate, setPeriodEndDate] = useState(() => new Date(2026, 11, 31));
+  const [activePeriodPickerField, setActivePeriodPickerField] =
+    useState<PeriodPickerField | null>(null);
   const [studentQuery, setStudentQuery] = useState('');
+  const periodStartDateLabel = formatDateLabel(periodStartDate);
+  const periodEndDateLabel = formatDateLabel(periodEndDate);
   const totalStudentsSubtitle = 'Periode aktif';
   const schoolInitials = currentSchool
     .split(' ')
@@ -48,6 +65,39 @@ export function DashboardScreen({
     .slice(0, 2)
     .map(part => part[0]?.toUpperCase() ?? '')
     .join('');
+
+  const handlePeriodDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (!activePeriodPickerField) {
+      return;
+    }
+
+    if (Platform.OS === 'android') {
+      setActivePeriodPickerField(null);
+    }
+
+    if (event.type !== 'set' || !selectedDate) {
+      return;
+    }
+
+    const pickedDate = new Date(
+      selectedDate.getFullYear(),
+      selectedDate.getMonth(),
+      selectedDate.getDate()
+    );
+
+    if (activePeriodPickerField === 'start') {
+      setPeriodStartDate(pickedDate);
+      if (pickedDate > periodEndDate) {
+        setPeriodEndDate(pickedDate);
+      }
+      return;
+    }
+
+    setPeriodEndDate(pickedDate);
+    if (pickedDate < periodStartDate) {
+      setPeriodStartDate(pickedDate);
+    }
+  };
 
   return (
     <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[1]}>
@@ -139,23 +189,27 @@ export function DashboardScreen({
                     ? onOpenStudentList
                   : menu.label === 'Guru'
                     ? onOpenTeacherList
+                  : menu.label === 'Imunisasi'
+                    ? onOpenImmunizationRecording
                     : undefined
               }
               disabled={
                 menu.label !== 'Kelas' &&
                 menu.label !== 'Siswa' &&
-                menu.label !== 'Guru'
+                menu.label !== 'Guru' &&
+                menu.label !== 'Imunisasi'
               }
               style={({ pressed }) => [
                 styles.quickMenuCard,
                 (menu.label === 'Kelas' ||
                   menu.label === 'Siswa' ||
-                  menu.label === 'Guru') &&
+                  menu.label === 'Guru' ||
+                  menu.label === 'Imunisasi') &&
                   pressed &&
                   styles.quickMenuCardPressed,
               ]}>
               <View style={styles.quickMenuBadge}>
-                <Text style={styles.quickMenuBadgeLabel}>{menu.badge}</Text>
+                <QuickMenuIcon menuLabel={menu.label} />
               </View>
               <Text style={styles.quickMenuCardTitle}>{menu.label}</Text>
             </Pressable>
@@ -190,9 +244,9 @@ export function DashboardScreen({
         </View>
 
         <PeriodCard
-          endDate={periodEndDate}
+          endDate={periodEndDateLabel}
           onPress={() => setIsPeriodDialogVisible(true)}
-          startDate={periodStartDate}
+          startDate={periodStartDateLabel}
         />
 
         <View style={styles.section}>
@@ -342,38 +396,68 @@ export function DashboardScreen({
           <View style={styles.dialogCard}>
             <Text style={styles.dialogTitle}>Atur periode pengukuran</Text>
             <Text style={styles.dialogDescription}>
-              Masukkan tanggal mulai dan tanggal akhir dengan format `YYYY-MM-DD`.
+              Pilih tanggal mulai dan tanggal akhir menggunakan date picker.
             </Text>
 
             <View style={styles.dialogFieldGroup}>
               <Text style={styles.dialogFieldLabel}>Tanggal mulai</Text>
-              <TextInput
-                autoCapitalize="none"
-                keyboardType="numbers-and-punctuation"
-                onChangeText={setPeriodStartDate}
-                placeholder="2026-01-01"
-                placeholderTextColor={colors.text.muted}
-                style={styles.dialogInput}
-                value={periodStartDate}
-              />
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  setActivePeriodPickerField(current =>
+                    current === 'start' ? null : 'start'
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.dialogDateInput,
+                  (pressed || activePeriodPickerField === 'start') &&
+                    styles.dialogDateInputPressed,
+                ]}>
+                <Text style={styles.dialogDateInputLabel}>{periodStartDateLabel}</Text>
+              </Pressable>
             </View>
 
             <View style={styles.dialogFieldGroup}>
               <Text style={styles.dialogFieldLabel}>Tanggal akhir</Text>
-              <TextInput
-                autoCapitalize="none"
-                keyboardType="numbers-and-punctuation"
-                onChangeText={setPeriodEndDate}
-                placeholder="2026-12-31"
-                placeholderTextColor={colors.text.muted}
-                style={styles.dialogInput}
-                value={periodEndDate}
-              />
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  setActivePeriodPickerField(current => (current === 'end' ? null : 'end'))
+                }
+                style={({ pressed }) => [
+                  styles.dialogDateInput,
+                  (pressed || activePeriodPickerField === 'end') &&
+                    styles.dialogDateInputPressed,
+                ]}>
+                <Text style={styles.dialogDateInputLabel}>{periodEndDateLabel}</Text>
+              </Pressable>
             </View>
+
+            {activePeriodPickerField ? (
+              <View style={styles.dialogDatePickerWrap}>
+                <DateTimePicker
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  maximumDate={
+                    activePeriodPickerField === 'start' ? periodEndDate : undefined
+                  }
+                  minimumDate={
+                    activePeriodPickerField === 'end' ? periodStartDate : undefined
+                  }
+                  mode="date"
+                  onChange={handlePeriodDateChange}
+                  value={
+                    activePeriodPickerField === 'start' ? periodStartDate : periodEndDate
+                  }
+                />
+              </View>
+            ) : null}
 
             <View style={styles.dialogActions}>
               <Pressable
-                onPress={() => setIsPeriodDialogVisible(false)}
+                onPress={() => {
+                  setActivePeriodPickerField(null);
+                  setIsPeriodDialogVisible(false);
+                }}
                 style={({ pressed }) => [
                   styles.dialogSecondaryButton,
                   pressed && styles.dialogSecondaryButtonPressed,
@@ -381,7 +465,10 @@ export function DashboardScreen({
                 <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
               </Pressable>
               <Pressable
-                onPress={() => setIsPeriodDialogVisible(false)}
+                onPress={() => {
+                  setActivePeriodPickerField(null);
+                  setIsPeriodDialogVisible(false);
+                }}
                 style={({ pressed }) => [
                   styles.dialogPrimaryButton,
                   pressed && styles.dialogPrimaryButtonPressed,
@@ -410,6 +497,76 @@ function SectionHeader({ compact = false, title, description }: SectionHeaderPro
         {description}
       </Text>
     </View>
+  );
+}
+
+type QuickMenuIconProps = {
+  menuLabel: string;
+};
+
+function QuickMenuIcon({ menuLabel }: QuickMenuIconProps) {
+  if (menuLabel === 'Kelas') {
+    return (
+      <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+        <Rect x={3.5} y={3.5} width={7} height={7} rx={2} stroke={colors.brand.primary600} strokeWidth={1.8} />
+        <Rect x={13.5} y={3.5} width={7} height={5} rx={2} stroke={colors.brand.primary600} strokeWidth={1.8} />
+        <Rect x={3.5} y={13.5} width={7} height={7} rx={2} stroke={colors.brand.primary600} strokeWidth={1.8} />
+        <Rect x={13.5} y={11.5} width={7} height={9} rx={2} stroke={colors.brand.primary600} strokeWidth={1.8} />
+      </Svg>
+    );
+  }
+
+  if (menuLabel === 'Siswa') {
+    return (
+      <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+        <Circle cx={12} cy={8.2} r={3.2} stroke={colors.brand.primary600} strokeWidth={1.8} />
+        <Path
+          d="M5 19a7 7 0 0 1 14 0"
+          stroke={colors.brand.primary600}
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+      </Svg>
+    );
+  }
+
+  if (menuLabel === 'Guru') {
+    return (
+      <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+        <Path
+          d="M3 9.5 12 5l9 4.5-9 4.5L3 9.5Z"
+          stroke={colors.brand.primary600}
+          strokeWidth={1.8}
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M7 12.3V15c0 1.8 2.2 3.3 5 3.3s5-1.5 5-3.3v-2.7"
+          stroke={colors.brand.primary600}
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </Svg>
+    );
+  }
+
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M10 4v4l-3.2 5.4A4 4 0 0 0 10.2 20h3.6a4 4 0 0 0 3.4-6.6L14 8V4"
+        stroke={colors.brand.primary600}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="m10.5 13 1.6 1.7 2.9-3.2"
+        stroke={colors.brand.primary600}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
   );
 }
 
@@ -537,7 +694,7 @@ const styles = StyleSheet.create({
   },
   quickMenuSection: {
     marginHorizontal: -spacing[16],
-    marginTop: -spacing[16],
+    marginTop: -28,
     backgroundColor: colors.brand.primary100,
     paddingTop: spacing[24],
     paddingHorizontal: spacing[16],
@@ -808,15 +965,32 @@ const styles = StyleSheet.create({
     ...typography.labelMd,
     color: colors.text.primary,
   },
-  dialogInput: {
+  dialogDateInput: {
     minHeight: 48,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border.subtle,
     backgroundColor: colors.surface.secondary,
     paddingHorizontal: spacing[16],
-    color: colors.text.primary,
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  dialogDateInputPressed: {
+    borderColor: colors.brand.primary500,
+    backgroundColor: colors.brand.primary100,
+  },
+  dialogDateInputLabel: {
     ...typography.bodyMd,
+    color: colors.text.primary,
+  },
+  dialogDatePickerWrap: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.secondary,
+    overflow: 'hidden',
+    paddingVertical: spacing[4],
+    paddingHorizontal: spacing[12],
   },
   dialogActions: {
     flexDirection: 'row',

@@ -8,6 +8,7 @@ import { RegisterScreen } from '../screens/auth/register/RegisterScreen';
 import { ClassDetailScreen } from '../screens/dashboard/ClassDetailScreen';
 import { ClassListScreen } from '../screens/dashboard/ClassListScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
+import { FaceRegistrationScreen } from '../screens/dashboard/FaceRegistrationScreen';
 import { StudentListScreen } from '../screens/dashboard/StudentListScreen';
 import { StudentProfileScreen } from '../screens/dashboard/StudentProfileScreen';
 import { StudentSearchResultsScreen } from '../screens/dashboard/StudentSearchResultsScreen';
@@ -21,6 +22,7 @@ import { FaceCropPreviewScreen } from '../screens/measurement/FaceCropPreviewScr
 import { FaceIdentificationScreen } from '../screens/measurement/FaceIdentificationScreen';
 import { HeightPoseScreen } from '../screens/measurement/HeightPoseScreen';
 import { SessionListScreen } from '../screens/measurement/SessionListScreen';
+import { StudentImmunizationScreen } from '../screens/measurement/StudentImmunizationScreen';
 import { StudentMeasurementScreen } from '../screens/measurement/StudentMeasurementScreen';
 import { StudentSearchScreen } from '../screens/measurement/StudentSearchScreen';
 import { AccountSettingsScreen } from '../screens/profile/AccountSettingsScreen';
@@ -30,6 +32,7 @@ import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { EditSchoolProfileScreen } from '../screens/profile/EditSchoolProfileScreen';
 import { ProfileOverviewScreen } from '../screens/profile/ProfileOverviewScreen';
 import { colors, radius, spacing, typography } from '../theme';
+import type { CreateSessionPayload } from '../types';
 import type { TeacherListItem } from '../types';
 import {
   DashboardRoute,
@@ -41,7 +44,7 @@ import {
 
 const TAB_LABELS: Record<MainTab, string> = {
   dashboard: 'Dashboard',
-  measurement: 'Pengukuran',
+  measurement: 'Pencatatan',
   'device-manager': 'Perangkat',
   profile: 'Pengaturan',
 };
@@ -69,6 +72,14 @@ export function RootNavigator() {
   >('class-detail');
   const [measurementRoute, setMeasurementRoute] =
     useState<MeasurementRoute>('session-list');
+  const [measurementProgram, setMeasurementProgram] =
+    useState<'measurement' | 'immunization'>('measurement');
+  const [activeImmunizationType, setActiveImmunizationType] = useState('Td');
+  const [activeImmunizationDose, setActiveImmunizationDose] = useState<string | null>(null);
+  const [activeImmunizationOfficer, setActiveImmunizationOfficer] = useState<string | null>(
+    'Petugas UKS',
+  );
+  const [activeSessionDate, setActiveSessionDate] = useState<string>(new Date().toISOString());
   const [identifiedStudentName, setIdentifiedStudentName] = useState<string | null>(null);
   const [faceCropPreview, setFaceCropPreview] = useState<FaceCropPreviewPayload | null>(null);
   const [faceCameraFacing, setFaceCameraFacing] = useState<'back' | 'front'>('back');
@@ -102,10 +113,11 @@ export function RootNavigator() {
   }
 
   const shouldHideBottomBar =
-    activeTab === 'measurement' &&
-    (measurementRoute === 'face-identification' ||
-      measurementRoute === 'height-pose' ||
-      measurementRoute === 'face-crop-preview');
+    (activeTab === 'measurement' &&
+      (measurementRoute === 'face-identification' ||
+        measurementRoute === 'height-pose' ||
+        measurementRoute === 'face-crop-preview')) ||
+    (activeTab === 'dashboard' && dashboardRoute === 'face-registration');
 
   return (
     <MainAppShell
@@ -152,9 +164,30 @@ export function RootNavigator() {
               setDashboardStudentSearchKeyword(keyword);
               setDashboardRoute('student-search-results');
             },
+            onOpenImmunizationRecording: () => {
+              setActiveTab('measurement');
+              setMeasurementProgram('immunization');
+              setMeasurementRoute('create-session');
+              setActiveImmunizationDose(null);
+              setActiveImmunizationOfficer('Petugas UKS');
+            },
             onStartMeasurementFromClass: () => {
               setActiveTab('measurement');
-              setMeasurementRoute('manual');
+              setMeasurementProgram('measurement');
+              setMeasurementRoute('create-session');
+            },
+            onStartImmunizationFromStudentProfile: () => {
+              setActiveTab('measurement');
+              setMeasurementProgram('immunization');
+              setMeasurementRoute('create-session');
+              setActiveImmunizationDose(null);
+              setActiveImmunizationOfficer('Petugas UKS');
+            },
+            onOpenFaceRegistrationFromClass: () => {
+              setDashboardRoute('face-registration');
+            },
+            onBackFromFaceRegistration: () => {
+              setDashboardRoute('class-detail');
             },
             studentSearchKeyword: dashboardStudentSearchKeyword,
             onBackFromStudentProfile: () => setDashboardRoute(studentProfileBackRoute),
@@ -165,12 +198,26 @@ export function RootNavigator() {
         ? renderMeasurementStack({
             identifiedStudentName,
             measurementRoute,
+            measurementProgram,
+            onSwitchProgram: setMeasurementProgram,
             faceCameraFacing,
             onFaceCameraFacingChange: setFaceCameraFacing,
             onBackToSessionList: () => setMeasurementRoute('session-list'),
             onOpenCreateSession: () => setMeasurementRoute('create-session'),
+            onCreateSession: (payload: CreateSessionPayload) => {
+              setActiveSessionDate(payload.sessionDate);
+
+              if (measurementProgram === 'measurement') {
+                setMeasurementRoute('manual');
+                return;
+              }
+
+              setActiveImmunizationType(payload.immunizationType ?? 'Td');
+              setActiveImmunizationDose(payload.immunizationDose ?? null);
+              setActiveImmunizationOfficer(payload.immunizationOfficer ?? 'Petugas UKS');
+              setMeasurementRoute('immunization-manual');
+            },
             onOpenFaceIdentification: () => setMeasurementRoute('face-identification'),
-            onOpenHeightPose: () => setMeasurementRoute('height-pose'),
             onFaceCropReady: payload => {
               setFaceCropPreview(payload);
               setMeasurementRoute('face-crop-preview');
@@ -182,6 +229,11 @@ export function RootNavigator() {
             onOpenManual: () => setMeasurementRoute('manual'),
             onOpenStudentSearch: () => setMeasurementRoute('student-search'),
             onOpenDeviceManager: () => setMeasurementRoute('device-manager'),
+            onOpenImmunizationManual: () => setMeasurementRoute('immunization-manual'),
+            activeImmunizationType,
+            activeImmunizationDose,
+            activeImmunizationOfficer,
+            activeSessionDate,
             faceCropPreview,
           })
         : null}
@@ -203,6 +255,11 @@ export function RootNavigator() {
               setActiveTab('dashboard');
               setDashboardRoute('dashboard');
               setMeasurementRoute('session-list');
+              setMeasurementProgram('measurement');
+              setActiveImmunizationType('Td');
+              setActiveImmunizationDose(null);
+              setActiveImmunizationOfficer('Petugas UKS');
+              setActiveSessionDate(new Date().toISOString());
               setIdentifiedStudentName(null);
               setFaceCropPreview(null);
               setProfileRoute('profile-overview');
@@ -275,7 +332,11 @@ type DashboardStackOptions = {
   onOpenStudentFromSearchResults: () => void;
   onOpenStudentFromList: () => void;
   onOpenStudentSearchResults: (keyword: string) => void;
+  onOpenImmunizationRecording: () => void;
   onStartMeasurementFromClass: () => void;
+  onStartImmunizationFromStudentProfile: () => void;
+  onOpenFaceRegistrationFromClass: () => void;
+  onBackFromFaceRegistration: () => void;
   studentSearchKeyword: string;
   onBackFromStudentProfile: () => void;
 };
@@ -297,7 +358,11 @@ function renderDashboardStack({
   onOpenStudentFromSearchResults,
   onOpenStudentFromList,
   onOpenStudentSearchResults,
+  onOpenImmunizationRecording,
   onStartMeasurementFromClass,
+  onStartImmunizationFromStudentProfile,
+  onOpenFaceRegistrationFromClass,
+  onBackFromFaceRegistration,
   studentSearchKeyword,
   onBackFromStudentProfile,
 }: DashboardStackOptions) {
@@ -350,10 +415,28 @@ function renderDashboardStack({
           onBack={onOpenClassList}
           onOpenStudent={onOpenStudentFromClass}
           onStartMeasurement={onStartMeasurementFromClass}
+          onOpenFaceRegistration={onOpenFaceRegistrationFromClass}
+        />
+      );
+    case 'face-registration':
+      return (
+        <FaceRegistrationScreen
+          onBack={onBackFromFaceRegistration}
+          studentNames={[
+            'Alya Putri Maharani',
+            'Bima Saputra',
+            'Citra Maharani',
+            'Dimas Pratama',
+          ]}
         />
       );
     case 'student-profile':
-      return <StudentProfileScreen onBack={onBackFromStudentProfile} />;
+      return (
+        <StudentProfileScreen
+          onBack={onBackFromStudentProfile}
+          onOpenImmunizationRecord={onStartImmunizationFromStudentProfile}
+        />
+      );
     case 'student-search-results':
       return (
         <StudentSearchResultsScreen
@@ -370,6 +453,7 @@ function renderDashboardStack({
           onOpenClassList={onOpenClassList}
           onOpenStudentList={onOpenStudentList}
           onOpenTeacherList={onOpenTeacherList}
+          onOpenImmunizationRecording={onOpenImmunizationRecording}
           onSearchStudents={onOpenStudentSearchResults}
         />
       );
@@ -379,42 +463,57 @@ function renderDashboardStack({
 type MeasurementStackOptions = {
   identifiedStudentName: string | null;
   measurementRoute: MeasurementRoute;
+  measurementProgram: 'measurement' | 'immunization';
+  activeImmunizationType: string;
+  activeImmunizationDose: string | null;
+  activeImmunizationOfficer: string | null;
+  activeSessionDate: string;
+  onSwitchProgram: (mode: 'measurement' | 'immunization') => void;
   faceCameraFacing: 'back' | 'front';
   onFaceCameraFacingChange: (facing: 'back' | 'front') => void;
   onBackToSessionList: () => void;
   onOpenCreateSession: () => void;
+  onCreateSession: (payload: CreateSessionPayload) => void;
   onOpenFaceIdentification: () => void;
-  onOpenHeightPose: () => void;
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onFaceIdentificationMatched: (studentName: string) => void;
   onOpenManual: () => void;
   onOpenStudentSearch: () => void;
   onOpenDeviceManager: () => void;
+  onOpenImmunizationManual: () => void;
   faceCropPreview: FaceCropPreviewPayload | null;
 };
 
 function renderMeasurementStack({
   identifiedStudentName,
   measurementRoute,
+  measurementProgram,
+  activeImmunizationType,
+  activeImmunizationDose,
+  activeImmunizationOfficer,
+  activeSessionDate,
+  onSwitchProgram,
   faceCameraFacing,
   onFaceCameraFacingChange,
   onBackToSessionList,
   onOpenCreateSession,
+  onCreateSession,
   onOpenFaceIdentification,
-  onOpenHeightPose,
   onFaceCropReady,
   onFaceIdentificationMatched,
   onOpenManual,
   onOpenStudentSearch,
   onOpenDeviceManager,
+  onOpenImmunizationManual,
   faceCropPreview,
 }: MeasurementStackOptions) {
   switch (measurementRoute) {
     case 'create-session':
       return (
         <CreateSessionScreen
+          mode={measurementProgram}
           onBack={onBackToSessionList}
-          onCreateSession={() => onOpenManual()}
+          onCreateSession={onCreateSession}
         />
       );
     case 'face-crop-preview':
@@ -468,8 +567,17 @@ function renderMeasurementStack({
         <StudentMeasurementScreen
           onBack={onBackToSessionList}
           onOpenFaceIdentification={onOpenFaceIdentification}
-          onOpenHeightPose={onOpenHeightPose}
           onOpenStudentSearch={onOpenStudentSearch}
+        />
+      );
+    case 'immunization-manual':
+      return (
+        <StudentImmunizationScreen
+          onBack={onBackToSessionList}
+          sessionImmunizationType={activeImmunizationType}
+          sessionImmunizationDose={activeImmunizationDose}
+          sessionImmunizationOfficer={activeImmunizationOfficer}
+          sessionDateIso={activeSessionDate}
         />
       );
     case 'student-search':
@@ -480,8 +588,14 @@ function renderMeasurementStack({
     default:
       return (
         <SessionListScreen
+          mode={measurementProgram}
+          onSwitchMode={onSwitchProgram}
           onCreateSession={onOpenCreateSession}
-          onOpenSessionDetail={onOpenManual}
+          onOpenSessionDetail={
+            measurementProgram === 'measurement'
+              ? onOpenManual
+              : onOpenImmunizationManual
+          }
         />
       );
   }

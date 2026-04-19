@@ -62,6 +62,7 @@ export const DASHBOARD_QUICK_MENUS: QuickMenuItem[] = [
   { label: 'Kelas', badge: 'KL' },
   { label: 'Siswa', badge: 'SW' },
   { label: 'Guru', badge: 'GR' },
+  { label: 'Imunisasi', badge: 'IM' },
 ];
 
 export const DASHBOARD_STUDENT_SEARCH_ITEMS: StudentSearchResultItem[] = [

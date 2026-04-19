@@ -7,6 +7,7 @@ export type DashboardRoute =
   | 'teacher-list'
   | 'teacher-detail'
   | 'class-detail'
+  | 'face-registration'
   | 'student-profile'
   | 'student-search-results';
 
@@ -15,6 +16,7 @@ export type MeasurementRoute =
   | 'create-session'
   | 'batch'
   | 'manual'
+  | 'immunization-manual'
   | 'face-identification'
   | 'height-pose'
   | 'face-crop-preview'

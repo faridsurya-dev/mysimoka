@@ -12,10 +12,14 @@ type ClassListScreenProps = {
 };
 
 export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenProps) {
+  const classLevelOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => `${index + 1}`), []);
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [isAddClassDialogVisible, setIsAddClassDialogVisible] = useState(false);
   const [className, setClassName] = useState('');
+  const [classLevel, setClassLevel] = useState('');
+  const [isClassLevelDropdownOpen, setIsClassLevelDropdownOpen] = useState(false);
+  const [classCode, setClassCode] = useState('');
   const [classInitial, setClassInitial] = useState('');
   const [teacherName, setTeacherName] = useState('');
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
@@ -35,10 +39,12 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
   const isSaveDisabled = useMemo(() => {
     return (
       className.trim().length === 0 ||
+      classLevel.trim().length === 0 ||
+      classCode.trim().length !== 6 ||
       classInitial.trim().length === 0 ||
       teacherName.trim().length === 0
     );
-  }, [classInitial, className, teacherName]);
+  }, [classCode, classInitial, classLevel, className, teacherName]);
 
   const filteredTeachers = useMemo(() => {
     const keyword = teacherSearchQuery.trim().toLowerCase();
@@ -55,9 +61,12 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
 
   function handleOpenDialog() {
     setClassName('');
+    setClassLevel('');
+    setClassCode('');
     setClassInitial('');
     setTeacherName('');
     setTeacherSearchQuery('');
+    setIsClassLevelDropdownOpen(false);
     setIsTeacherDropdownOpen(false);
     setIsAddClassDialogVisible(true);
   }
@@ -78,6 +87,21 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
     setTeacherName(teacher);
     setTeacherSearchQuery('');
     setIsTeacherDropdownOpen(false);
+  }
+
+  function handleSelectClassLevel(level: string) {
+    setClassLevel(level);
+    setIsClassLevelDropdownOpen(false);
+  }
+
+  function handleClassCodeChange(value: string) {
+    const normalizedCode = value.replace(/[^0-9]/g, '').slice(0, 6);
+    setClassCode(normalizedCode);
+  }
+
+  function handleGenerateClassCode() {
+    const generatedCode = `${Math.floor(100000 + Math.random() * 900000)}`;
+    setClassCode(generatedCode);
   }
 
   return (
@@ -211,6 +235,87 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                 style={styles.dialogInput}
                 value={className}
               />
+            </View>
+
+            <View style={styles.dialogFieldGroup}>
+              <Text style={styles.dialogFieldLabel}>Tingkat</Text>
+              <View style={styles.autocompleteWrap}>
+                <Pressable
+                  onPress={() => setIsClassLevelDropdownOpen(previous => !previous)}
+                  style={({ pressed }) => [
+                    styles.dropdownField,
+                    pressed && styles.dropdownFieldPressed,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.dropdownFieldLabel,
+                      !classLevel && styles.dropdownFieldPlaceholder,
+                    ]}>
+                    {classLevel ? `Tingkat ${classLevel}` : 'Pilih tingkat (1-12)'}
+                  </Text>
+                  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                    <Path
+                      d="M7 10l5 5 5-5"
+                      stroke={colors.text.secondary}
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </Svg>
+                </Pressable>
+
+                {isClassLevelDropdownOpen ? (
+                  <View style={styles.teacherDropdown}>
+                    {classLevelOptions.map(level => {
+                      const isSelected = level === classLevel;
+
+                      return (
+                        <Pressable
+                          key={level}
+                          onPress={() => handleSelectClassLevel(level)}
+                          style={({ pressed }) => [
+                            styles.teacherOption,
+                            isSelected && styles.teacherOptionSelected,
+                            pressed && styles.teacherOptionPressed,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.teacherOptionLabel,
+                              isSelected && styles.teacherOptionLabelSelected,
+                            ]}>
+                            Tingkat {level}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
+            <View style={styles.dialogFieldGroup}>
+              <Text style={styles.dialogFieldLabel}>Kode kelas</Text>
+              <View style={styles.codeInputRow}>
+                <TextInput
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  onChangeText={handleClassCodeChange}
+                  placeholder="Contoh: 123456"
+                  placeholderTextColor={colors.text.muted}
+                  style={[styles.dialogInput, styles.codeInput]}
+                  value={classCode}
+                />
+                <Pressable
+                  onPress={handleGenerateClassCode}
+                  style={({ pressed }) => [
+                    styles.codeGenerateButton,
+                    pressed && styles.codeGenerateButtonPressed,
+                  ]}>
+                  <Text style={styles.codeGenerateButtonLabel}>Generate</Text>
+                </Pressable>
+              </View>
             </View>
 
             <View style={styles.dialogFieldGroup}>
@@ -595,6 +700,32 @@ const styles = StyleSheet.create({
   teacherEmptyLabel: {
     ...typography.bodySm,
     color: colors.text.muted,
+  },
+  codeInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+  },
+  codeInput: {
+    flex: 1,
+  },
+  codeGenerateButton: {
+    minHeight: 48,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[12],
+  },
+  codeGenerateButtonPressed: {
+    borderColor: colors.brand.primary500,
+    backgroundColor: colors.brand.primary100,
+  },
+  codeGenerateButtonLabel: {
+    ...typography.labelMd,
+    color: colors.brand.primary700,
   },
   dialogActions: {
     flexDirection: 'row',

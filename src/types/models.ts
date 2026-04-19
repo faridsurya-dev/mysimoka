@@ -23,6 +23,9 @@ export interface CreateSessionPayload {
   className: string;
   note: string;
   sessionDate: string;
+  immunizationType?: string;
+  immunizationDose?: string;
+  immunizationOfficer?: string;
   assignedStudents?: SessionStudentAssignment[];
 }
 

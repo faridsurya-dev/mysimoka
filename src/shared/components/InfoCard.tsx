@@ -1,5 +1,5 @@
 import React, { PropsWithChildren } from 'react';
-import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { StyleProp, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type InfoCardProps = PropsWithChildren<{
@@ -7,6 +7,7 @@ type InfoCardProps = PropsWithChildren<{
   title?: string;
   description?: string;
   style?: StyleProp<ViewStyle>;
+  titleStyle?: StyleProp<TextStyle>;
 }>;
 
 export function InfoCard({
@@ -15,11 +16,12 @@ export function InfoCard({
   title,
   description,
   style,
+  titleStyle,
 }: InfoCardProps) {
   return (
     <View style={[styles.card, style]}>
       {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
-      {title ? <Text style={styles.title}>{title}</Text> : null}
+      {title ? <Text style={[styles.title, titleStyle]}>{title}</Text> : null}
       {description ? <Text style={styles.description}>{description}</Text> : null}
       {children}
     </View>

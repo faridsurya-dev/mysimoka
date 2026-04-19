@@ -9,11 +9,15 @@ import { colors, radius, spacing, typography } from '../../theme';
 type SessionListScreenProps = {
   onOpenSessionDetail: () => void;
   onCreateSession: () => void;
+  mode: 'measurement' | 'immunization';
+  onSwitchMode: (mode: 'measurement' | 'immunization') => void;
 };
 
 export function SessionListScreen({
   onOpenSessionDetail,
   onCreateSession,
+  mode,
+  onSwitchMode,
 }: SessionListScreenProps) {
   const insets = useSafeAreaInsets();
   const headerHeight = insets.top + 72;
@@ -21,7 +25,7 @@ export function SessionListScreen({
   return (
     <View style={styles.container}>
       <View style={[styles.fixedHeader, { paddingTop: insets.top + spacing[8] }]}>
-        <Text style={styles.headerTitle}>Pengukuran</Text>
+        <Text style={styles.headerTitle}>Pencatatan</Text>
         <Pressable
           accessibilityLabel="Urutkan data"
           accessibilityRole="button"
@@ -39,7 +43,41 @@ export function SessionListScreen({
       </View>
 
       <Screen contentContainerStyle={[styles.content, { paddingTop: headerHeight + spacing[16] }]}>
-        <PrimaryButton label="Buat Sesi Baru" onPress={onCreateSession} />
+        <View style={styles.modeSwitcher}>
+          <Pressable
+            onPress={() => onSwitchMode('measurement')}
+            style={[
+              styles.modeSwitcherItem,
+              mode === 'measurement' && styles.modeSwitcherItemActive,
+            ]}>
+            <Text
+              style={[
+                styles.modeSwitcherLabel,
+                mode === 'measurement' && styles.modeSwitcherLabelActive,
+              ]}>
+              Antropometri
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => onSwitchMode('immunization')}
+            style={[
+              styles.modeSwitcherItem,
+              mode === 'immunization' && styles.modeSwitcherItemActive,
+            ]}>
+            <Text
+              style={[
+                styles.modeSwitcherLabel,
+                mode === 'immunization' && styles.modeSwitcherLabelActive,
+              ]}>
+              Imunisasi
+            </Text>
+          </Pressable>
+        </View>
+
+        <PrimaryButton
+          label={mode === 'measurement' ? 'Buat Sesi Pengukuran' : 'Buat Sesi Imunisasi'}
+          onPress={onCreateSession}
+        />
 
         <View style={styles.list}>
           {SESSION_LIST_MOCK.map(session => (
@@ -114,6 +152,31 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: spacing[12],
+  },
+  modeSwitcher: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface.secondary,
+    borderRadius: radius.pill,
+    padding: spacing[4],
+    gap: spacing[4],
+  },
+  modeSwitcherItem: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[12],
+  },
+  modeSwitcherItemActive: {
+    backgroundColor: colors.surface.primary,
+  },
+  modeSwitcherLabel: {
+    ...typography.labelMd,
+    color: colors.text.secondary,
+  },
+  modeSwitcherLabelActive: {
+    color: colors.brand.primary500,
   },
   rowCard: {
     backgroundColor: colors.surface.primary,
