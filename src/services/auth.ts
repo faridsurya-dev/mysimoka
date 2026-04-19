@@ -22,6 +22,7 @@ export type LoginResult = {
 export type AuthSession = {
   accessToken: string | null;
   refreshToken: string | null;
+  user: Record<string, unknown> | null;
 };
 
 export type ApiRequestOptions = RequestInit & {
@@ -48,6 +49,7 @@ const REFRESH_ENDPOINT = '/api/auth/refresh';
 let authSession: AuthSession = {
   accessToken: null,
   refreshToken: null,
+  user: null,
 };
 
 function normalizeApiErrorMessage(body: ApiBody | null): string | null {
@@ -233,10 +235,12 @@ export function getAuthSession(): AuthSession {
 export function setAuthSession(session: Partial<AuthSession>): void {
   const hasAccessToken = Object.prototype.hasOwnProperty.call(session, 'accessToken');
   const hasRefreshToken = Object.prototype.hasOwnProperty.call(session, 'refreshToken');
+  const hasUser = Object.prototype.hasOwnProperty.call(session, 'user');
 
   authSession = {
     accessToken: hasAccessToken ? (session.accessToken ?? null) : authSession.accessToken,
     refreshToken: hasRefreshToken ? (session.refreshToken ?? null) : authSession.refreshToken,
+    user: hasUser ? (session.user ?? null) : authSession.user,
   };
 }
 
@@ -244,6 +248,7 @@ export function clearAuthSession(): void {
   authSession = {
     accessToken: null,
     refreshToken: null,
+    user: null,
   };
 }
 

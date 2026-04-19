@@ -1,15 +1,8 @@
-import React, { useMemo, useState } from 'react';
-import {
-  Alert,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { PrimaryButton, Screen, TextField } from '../../../shared/components';
+import React, { useMemo, useRef, useState } from 'react';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PrimaryButton, TextField } from '../../../shared/components';
 import { registerSchool } from '../../../services';
 import { colors, spacing, typography } from '../../../theme';
 
@@ -22,6 +15,8 @@ export function RegisterScreen({
   onRegisterSuccess,
   onBackToLogin,
 }: RegisterScreenProps) {
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef<KeyboardAwareScrollView | null>(null);
   const [schoolName, setSchoolName] = useState('');
   const [npsn, setNpsn] = useState('');
   const [personInChargeName, setPersonInChargeName] = useState('');
@@ -74,11 +69,31 @@ export function RegisterScreen({
     }
   };
 
+  const scrollToFormBottom = () => {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd(true);
+    }, 120);
+  };
+
   return (
-    <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.keyboardArea}>
+    <KeyboardAwareScrollView
+      innerRef={ref => {
+        scrollRef.current = ref;
+      }}
+      enableOnAndroid
+      extraHeight={140}
+      extraScrollHeight={32}
+      style={styles.screen}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top + spacing[8],
+          paddingBottom: insets.bottom + spacing[32],
+        },
+      ]}
+      keyboardDismissMode="on-drag"
+      keyboardShouldPersistTaps="handled">
+      <View style={styles.keyboardArea}>
         <View style={styles.header}>
           <View style={styles.logoWrapper}>
             <Image
@@ -126,6 +141,7 @@ export function RegisterScreen({
           <TextField
             label="Password"
             onChangeText={setPassword}
+            onFocus={scrollToFormBottom}
             placeholder="Buat password"
             secureTextEntry
             value={password}
@@ -133,6 +149,7 @@ export function RegisterScreen({
           <TextField
             label="Konfirmasi password"
             onChangeText={setConfirmPassword}
+            onFocus={scrollToFormBottom}
             placeholder="Ulangi password"
             secureTextEntry
             value={confirmPassword}
@@ -159,12 +176,17 @@ export function RegisterScreen({
             <Text style={styles.footerLink}>Kembali ke login</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
-    </Screen>
+
+        <View style={styles.bottomSpacer} />
+      </View>
+    </KeyboardAwareScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    backgroundColor: colors.surface.app,
+  },
   content: {
     flexGrow: 1,
     paddingHorizontal: spacing[24],
@@ -232,5 +254,8 @@ const styles = StyleSheet.create({
   footerLink: {
     ...typography.labelMd,
     color: colors.brand.primary500,
+  },
+  bottomSpacer: {
+    height: spacing[40],
   },
 });

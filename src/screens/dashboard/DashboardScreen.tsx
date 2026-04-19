@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import {
   Modal,
@@ -20,6 +20,7 @@ import {
   DASHBOARD_QUICK_MENUS,
   DASHBOARD_WEIGHT_TREND,
 } from '../../features/dashboard';
+import { apiRequest, getAuthSession } from '../../services';
 import { InfoCard, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -33,6 +34,74 @@ type DashboardScreenProps = {
 };
 
 type PeriodPickerField = 'start' | 'end';
+type UnknownObject = Record<string, unknown>;
+
+function asObject(value: unknown): UnknownObject | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as UnknownObject;
+  }
+
+  return null;
+}
+
+function readStringValue(source: UnknownObject | null, keys: string[]): string | null {
+  if (!source) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function readObjectValue(source: UnknownObject | null, key: string): UnknownObject | null {
+  if (!source) {
+    return null;
+  }
+
+  return asObject(source[key]);
+}
+
+function extractUserId(user: unknown): string | null {
+  const userObject = asObject(user);
+  return readStringValue(userObject, ['id', 'user_id', 'userId', 'uid']);
+}
+
+function extractSchoolName(payload: unknown): string | null {
+  const payloadObject = asObject(payload);
+  const payloadData = readObjectValue(payloadObject, 'data');
+  const payloadUser = readObjectValue(payloadObject, 'user');
+  const candidates = [payloadObject, payloadData, payloadUser];
+
+  for (const source of candidates) {
+    const directSchoolName = readStringValue(source, [
+      'school_name',
+      'schoolName',
+      'school_title',
+      'schoolTitle',
+    ]);
+    if (directSchoolName) {
+      return directSchoolName;
+    }
+
+    const schoolObject =
+      readObjectValue(source, 'school') ??
+      readObjectValue(source, 'school_data') ??
+      readObjectValue(source, 'schoolData');
+
+    const nestedSchoolName = readStringValue(schoolObject, ['name', 'school_name', 'schoolName']);
+    if (nestedSchoolName) {
+      return nestedSchoolName;
+    }
+  }
+
+  return null;
+}
 
 function formatDateLabel(date: Date) {
   const year = date.getFullYear();
@@ -50,6 +119,7 @@ export function DashboardScreen({
   onSearchStudents,
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
+  const [serverSchoolName, setServerSchoolName] = useState<string | null>(null);
   const [isPeriodDialogVisible, setIsPeriodDialogVisible] = useState(false);
   const [periodStartDate, setPeriodStartDate] = useState(() => new Date(2026, 0, 1));
   const [periodEndDate, setPeriodEndDate] = useState(() => new Date(2026, 11, 31));
@@ -59,12 +129,45 @@ export function DashboardScreen({
   const periodStartDateLabel = formatDateLabel(periodStartDate);
   const periodEndDateLabel = formatDateLabel(periodEndDate);
   const totalStudentsSubtitle = 'Periode aktif';
-  const schoolInitials = currentSchool
+  const displayedSchoolName = serverSchoolName ?? currentSchool;
+  const schoolInitials = displayedSchoolName
     .split(' ')
     .filter(part => part.length > 0)
     .slice(0, 2)
     .map(part => part[0]?.toUpperCase() ?? '')
     .join('');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSchoolByCurrentUser = async () => {
+      const { user } = getAuthSession();
+      const userId = extractUserId(user);
+      if (!userId) {
+        return;
+      }
+
+      try {
+        const response = await apiRequest(`/api/users/${encodeURIComponent(userId)}`, {
+          requiresAuth: true,
+        });
+        const schoolName = extractSchoolName(response);
+        if (isMounted && schoolName) {
+          setServerSchoolName(schoolName);
+        }
+      } catch {
+        // Tetap pakai fallback dari data login bila request detail user gagal.
+      }
+    };
+
+    loadSchoolByCurrentUser().catch(() => {
+      // Tetap pakai fallback dari data login bila request detail user gagal.
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handlePeriodDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     if (!activePeriodPickerField) {
@@ -113,7 +216,7 @@ export function DashboardScreen({
             <View style={styles.schoolHeroCopy}>
               <Text style={styles.schoolHeroEyebrow}>Selamat datang,</Text>
               <Text numberOfLines={2} style={styles.schoolTriggerLabel}>
-                {currentSchool}
+                {displayedSchoolName}
               </Text>
               <Text style={styles.schoolHeroDescription}>
                 MySimoka membantu sekolah untuk pantau kesehatan siswa.

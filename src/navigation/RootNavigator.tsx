@@ -57,10 +57,68 @@ const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
   profile: colors.accent.amber,
 };
 
-const ACTIVE_SCHOOL = 'SDN Sukamaju 01';
+const DEFAULT_SCHOOL_NAME = 'Sekolah';
+
+type UnknownObject = Record<string, unknown>;
+
+function asObject(value: unknown): UnknownObject | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as UnknownObject;
+  }
+
+  return null;
+}
+
+function readStringValue(source: UnknownObject | null, keys: string[]): string | null {
+  if (!source) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function readObjectValue(source: UnknownObject | null, key: string): UnknownObject | null {
+  if (!source) {
+    return null;
+  }
+
+  return asObject(source[key]);
+}
+
+function extractSchoolNameFromLoginUser(user: unknown): string | null {
+  const userObject = asObject(user);
+  if (!userObject) {
+    return null;
+  }
+
+  const directSchoolName = readStringValue(userObject, [
+    'school_name',
+    'schoolName',
+    'school_title',
+    'schoolTitle',
+  ]);
+  if (directSchoolName) {
+    return directSchoolName;
+  }
+
+  const schoolObject =
+    readObjectValue(userObject, 'school') ??
+    readObjectValue(userObject, 'school_data') ??
+    readObjectValue(userObject, 'schoolData');
+
+  return readStringValue(schoolObject, ['name', 'school_name', 'schoolName']);
+}
 
 export function RootNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentSchool, setCurrentSchool] = useState(DEFAULT_SCHOOL_NAME);
   const [authRoute, setAuthRoute] = useState<'login' | 'register' | 'forgot-password'>('login');
   const [activeTab, setActiveTab] = useState<MainTab>('dashboard');
   const [dashboardRoute, setDashboardRoute] = useState<DashboardRoute>('dashboard');
@@ -110,7 +168,9 @@ export function RootNavigator() {
           setAuthSession({
             accessToken: result.accessToken,
             refreshToken: result.refreshToken,
+            user: result.user,
           });
+          setCurrentSchool(extractSchoolNameFromLoginUser(result.user) ?? DEFAULT_SCHOOL_NAME);
           setIsAuthenticated(true);
         }}
         onOpenRegister={() => setAuthRoute('register')}
@@ -133,7 +193,7 @@ export function RootNavigator() {
       onChangeTab={tab => setActiveTab(tab)}>
       {activeTab === 'dashboard'
         ? renderDashboardStack({
-            currentSchool: ACTIVE_SCHOOL,
+            currentSchool,
             dashboardRoute,
             onBackToDashboard: () => setDashboardRoute('dashboard'),
             onOpenClassList: () => setDashboardRoute('class-list'),
@@ -258,6 +318,7 @@ export function RootNavigator() {
             onOpenEditPassword: () => setProfileRoute('edit-password'),
             onLogout: () => {
               clearAuthSession();
+              setCurrentSchool(DEFAULT_SCHOOL_NAME);
               setIsAuthenticated(false);
               setAuthRoute('login');
               setActiveTab('dashboard');
