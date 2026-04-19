@@ -31,6 +31,7 @@ import { EditPasswordScreen } from '../screens/profile/EditPasswordScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { EditSchoolProfileScreen } from '../screens/profile/EditSchoolProfileScreen';
 import { ProfileOverviewScreen } from '../screens/profile/ProfileOverviewScreen';
+import { clearAuthSession, setAuthSession } from '../services';
 import { colors, radius, spacing, typography } from '../theme';
 import type { CreateSessionPayload } from '../types';
 import type { TeacherListItem } from '../types';
@@ -105,7 +106,13 @@ export function RootNavigator() {
 
     return (
       <LoginScreen
-        onLoginSuccess={() => setIsAuthenticated(true)}
+        onLoginSuccess={result => {
+          setAuthSession({
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+          });
+          setIsAuthenticated(true);
+        }}
         onOpenRegister={() => setAuthRoute('register')}
         onOpenForgotPassword={() => setAuthRoute('forgot-password')}
       />
@@ -250,6 +257,7 @@ export function RootNavigator() {
             onOpenEditEmail: () => setProfileRoute('edit-email'),
             onOpenEditPassword: () => setProfileRoute('edit-password'),
             onLogout: () => {
+              clearAuthSession();
               setIsAuthenticated(false);
               setAuthRoute('login');
               setActiveTab('dashboard');

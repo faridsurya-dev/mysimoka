@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -9,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { PrimaryButton, Screen, TextField } from '../../../shared/components';
+import { registerSchool } from '../../../services';
 import { colors, spacing, typography } from '../../../theme';
 
 type RegisterScreenProps = {
@@ -26,6 +28,8 @@ export function RegisterScreen({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const canSubmit = useMemo(() => {
     const hasMinimumInput =
@@ -38,6 +42,37 @@ export function RegisterScreen({
 
     return hasMinimumInput && password === confirmPassword;
   }, [confirmPassword, email, npsn, password, personInChargeName, schoolName]);
+
+  const handleSubmit = async () => {
+    if (!canSubmit || isSubmitting) {
+      return;
+    }
+
+    setSubmitError(null);
+    setIsSubmitting(true);
+
+    try {
+      await registerSchool({
+        name: schoolName.trim(),
+        number: npsn.trim(),
+        pic_email: email.trim().toLowerCase(),
+        pic_name: personInChargeName.trim(),
+        pic_password: password,
+      });
+
+      Alert.alert(
+        'Registrasi berhasil',
+        'Akun sekolah berhasil dibuat.',
+        [{ text: 'Lanjut', onPress: onRegisterSuccess }],
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Registrasi gagal. Silakan coba lagi.';
+      setSubmitError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -108,10 +143,13 @@ export function RegisterScreen({
           <Text style={styles.errorText}>Konfirmasi password belum sama.</Text>
         ) : null}
 
+        {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
+
         <PrimaryButton
           disabled={!canSubmit}
           label="Daftar"
-          onPress={onRegisterSuccess}
+          loading={isSubmitting}
+          onPress={handleSubmit}
           style={styles.button}
         />
 

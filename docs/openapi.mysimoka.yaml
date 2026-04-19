@@ -1,0 +1,1537 @@
+openapi: 3.0.3
+info:
+  title: API Collection
+  description: >-
+    Postman collection generated from the provided API docs. Uses the
+    https://api.mysimoka.sunhouse.co.id environment variable and {{access_token}} for JWT auth.
+  version: 1.0.0
+  contact: {}
+servers:
+  - url: "https://api.mysimoka.sunhouse.co.id"
+paths:
+  /api/health:
+    get:
+      tags:
+        - Public
+      summary: Health check
+      description: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: ""
+  /api/schools/register:
+    post:
+      tags:
+        - Public
+      summary: Register new user School
+      description: Register new user School
+      operationId: registerNewUserSchool
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: SD 2 Majalengka
+                number:
+                  type: string
+                  example: "20260418011"
+                pic_email:
+                  type: string
+                  example: zulkarnen2@gmail.com
+                pic_name:
+                  type: string
+                  example: Zul
+                pic_password:
+                  type: string
+                  example: supersecret
+            examples:
+              Register new user School:
+                value:
+                  name: SD 2 Majalengka
+                  number: "20260418011"
+                  pic_email: zulkarnen2@gmail.com
+                  pic_name: Zul
+                  pic_password: supersecret
+      responses:
+        "200":
+          description: ""
+  /api/auth/login:
+    post:
+      tags:
+        - Public
+      summary: Login
+      description: Login
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: ibu@gmail.com
+                password:
+                  type: string
+                  example: supersecret
+            examples:
+              Login:
+                value:
+                  email: ibu@gmail.com
+                  password: supersecret
+      responses:
+        "200":
+          description: ""
+  /api/auth/refresh:
+    post:
+      tags:
+        - Public
+      summary: Refresh access token
+      description: Refresh access token
+      operationId: refreshAccessToken
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+                  example: "{{refresh_token}}"
+            examples:
+              Refresh access token:
+                value:
+                  refresh_token: "{{refresh_token}}"
+              Refresh access token Copy:
+                value:
+                  refresh_token: "{{refresh_token}}"
+      responses:
+        "200":
+          description: ""
+  /api/users:
+    get:
+      tags:
+        - Protected
+        - Users
+      summary: List users
+      description: List users
+      operationId: listUsers
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+  /api/users/{id}:
+    get:
+      tags:
+        - Protected
+        - Users
+      summary: Get user details
+      description: Get user details
+      operationId: getUserDetails
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    patch:
+      tags:
+        - Protected
+        - Users
+      summary: Update user
+      description: Update user
+      operationId: updateUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Updated Name
+            examples:
+              Update user:
+                value:
+                  name: Updated Name
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /api/students:
+    get:
+      tags:
+        - Protected
+        - Students
+      summary: List students
+      description: List students
+      operationId: listStudents
+      parameters:
+        - name: class_id
+          in: query
+          schema:
+            type: string
+            example: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+      responses:
+        "200":
+          description: List students
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "365"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 02:39:16 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: aQQN5EXROyqbUpATPRR3ECB-56ZdYe7cf66XpMzssbg
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        created_at:
+                          type: string
+                          example: "2026-04-19T02:14:23.677015Z"
+                        full_name:
+                          type: string
+                          example: Zulkarnen
+                        id:
+                          type: string
+                          example: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                        is_active:
+                          type: boolean
+                          example: true
+                        school_id:
+                          type: string
+                          example: 32434bce-2212-4881-b60c-0590c6669710
+                        student_number:
+                          type: string
+                          example: "1900017083"
+                        updated_at:
+                          type: string
+                          example: "2026-04-19T02:14:23.677015Z"
+                    example:
+                      - created_at: "2026-04-19T02:14:23.677015Z"
+                        full_name: Zulkarnen
+                        id: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                        is_active: true
+                        school_id: 32434bce-2212-4881-b60c-0590c6669710
+                        student_number: "1900017083"
+                        updated_at: "2026-04-19T02:14:23.677015Z"
+                  message:
+                    type: string
+                    example: students retrieved
+                  meta:
+                    type: object
+                    properties:
+                      limit:
+                        type: number
+                        example: 20
+                      page:
+                        type: number
+                        example: 1
+                      total:
+                        type: number
+                        example: 1
+                      total_pages:
+                        type: number
+                        example: 1
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                List students:
+                  value:
+                    data:
+                      - created_at: "2026-04-19T02:14:23.677015Z"
+                        full_name: Zulkarnen
+                        id: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                        is_active: true
+                        school_id: 32434bce-2212-4881-b60c-0590c6669710
+                        student_number: "1900017083"
+                        updated_at: "2026-04-19T02:14:23.677015Z"
+                    message: students retrieved
+                    meta:
+                      limit: 20
+                      page: 1
+                      total: 1
+                      total_pages: 1
+                    success: true
+      security:
+        - bearerAuth: []
+    post:
+      tags:
+        - Protected
+        - Students
+      summary: Create student
+      description: Create student
+      operationId: createStudent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                full_name:
+                  type: string
+                  example: Zulkarnen
+                student_number:
+                  type: string
+                  example: "1900017082"
+            examples:
+              Create student:
+                value:
+                  full_name: Zulkarnen
+                  student_number: "1900017082"
+      responses:
+        "201":
+          description: Create student
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "258"
+            Date:
+              schema:
+                type: string
+                example: Sat, 18 Apr 2026 10:28:31 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: nOY0qCoIycwPPTwPnlCs2Sn_esro_C8yCeACDP92HCw
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      created_at:
+                        type: string
+                        example: "2026-04-18T10:28:31.12583373Z"
+                      full_name:
+                        type: string
+                        example: Zulkarnen
+                      id:
+                        type: string
+                        example: 9dee373a-46de-477e-ade6-22fb4881afad
+                      is_active:
+                        type: boolean
+                        example: true
+                      student_number:
+                        type: string
+                        example: "1900017082"
+                      updated_at:
+                        type: string
+                        example: "2026-04-18T10:28:31.12583373Z"
+                  message:
+                    type: string
+                    example: student created
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                Create student:
+                  value:
+                    data:
+                      created_at: "2026-04-18T10:28:31.12583373Z"
+                      full_name: Zulkarnen
+                      id: 9dee373a-46de-477e-ade6-22fb4881afad
+                      is_active: true
+                      student_number: "1900017082"
+                      updated_at: "2026-04-18T10:28:31.12583373Z"
+                    message: student created
+                    success: true
+      security:
+        - bearerAuth: []
+  /api/students/{id}:
+    get:
+      tags:
+        - Protected
+        - Students
+      summary: Get student
+      description: Get student
+      operationId: getStudent
+      responses:
+        "200":
+          description: Get student
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "307"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 02:37:25 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: V2k_YZvM65HR5Ia91SaXoHrdeLZ_yUMO0sAHh3Wceik
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      created_at:
+                        type: string
+                        example: "2026-04-19T02:14:23.677015Z"
+                      full_name:
+                        type: string
+                        example: Zulkarnen
+                      id:
+                        type: string
+                        example: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                      is_active:
+                        type: boolean
+                        example: true
+                      school_id:
+                        type: string
+                        example: 32434bce-2212-4881-b60c-0590c6669710
+                      student_number:
+                        type: string
+                        example: "1900017083"
+                      updated_at:
+                        type: string
+                        example: "2026-04-19T02:14:23.677015Z"
+                  message:
+                    type: string
+                    example: student retrieved
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                Get student:
+                  value:
+                    data:
+                      created_at: "2026-04-19T02:14:23.677015Z"
+                      full_name: Zulkarnen
+                      id: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                      is_active: true
+                      school_id: 32434bce-2212-4881-b60c-0590c6669710
+                      student_number: "1900017083"
+                      updated_at: "2026-04-19T02:14:23.677015Z"
+                    message: student retrieved
+                    success: true
+      security:
+        - bearerAuth: []
+    delete:
+      tags:
+        - Protected
+        - Teachers
+      summary: Delete student
+      description: Delete student
+      operationId: deleteStudent
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    patch:
+      tags:
+        - Protected
+        - Teachers
+      summary: Update student
+      description: Update student
+      operationId: updateStudent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Updated Student
+            examples:
+              Update student:
+                value:
+                  name: Updated Student
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /api/teachers:
+    get:
+      tags:
+        - Protected
+        - Teachers
+      summary: List teachers
+      description: List teachers
+      operationId: listTeachers
+      responses:
+        "200":
+          description: List teachers
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "322"
+            Date:
+              schema:
+                type: string
+                example: Sat, 18 Apr 2026 10:29:18 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: 8_IZN8CZO1xnGrZtMcR9tM-EzBfJUcRlADpf8rs4-sw
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        created_at:
+                          type: string
+                          example: "2026-04-18T10:26:28Z"
+                        email:
+                          type: string
+                          example: ibu@gmail.com
+                        id:
+                          type: string
+                          example: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+                        name:
+                          type: string
+                          example: Ibu Guru
+                        school_id:
+                          type: string
+                          example: 32434bce-2212-4881-b60c-0590c6669710
+                        updated_at:
+                          type: string
+                          example: "2026-04-18T10:26:28Z"
+                    example:
+                      - created_at: "2026-04-18T10:26:28Z"
+                        email: ibu@gmail.com
+                        id: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+                        name: Ibu Guru
+                        school_id: 32434bce-2212-4881-b60c-0590c6669710
+                        updated_at: "2026-04-18T10:26:28Z"
+                  message:
+                    type: string
+                    example: teachers retrieved
+                  meta:
+                    type: object
+                    properties:
+                      limit:
+                        type: number
+                        example: 20
+                      page:
+                        type: number
+                        example: 1
+                      total:
+                        type: number
+                        example: 1
+                      total_pages:
+                        type: number
+                        example: 1
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                List teachers:
+                  value:
+                    data:
+                      - created_at: "2026-04-18T10:26:28Z"
+                        email: ibu@gmail.com
+                        id: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+                        name: Ibu Guru
+                        school_id: 32434bce-2212-4881-b60c-0590c6669710
+                        updated_at: "2026-04-18T10:26:28Z"
+                    message: teachers retrieved
+                    meta:
+                      limit: 20
+                      page: 1
+                      total: 1
+                      total_pages: 1
+                    success: true
+      security:
+        - bearerAuth: []
+    post:
+      tags:
+        - Protected
+        - Teachers
+      summary: Create student
+      description: Create student
+      operationId: createStudent1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: ibu@gmail.com
+                name:
+                  type: string
+                  example: Ibu Guru
+                password:
+                  type: string
+                  example: supersecret
+            examples:
+              Create student:
+                value:
+                  email: ibu@gmail.com
+                  name: Ibu Guru
+                  password: supersecret
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+  /api/teachers/{id}:
+    get:
+      tags:
+        - Protected
+        - Teachers
+      summary: Get teacher
+      description: Get teacher
+      operationId: getTeacher
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+  /api/classes:
+    get:
+      tags:
+        - Protected
+        - Classes
+      summary: List classes
+      description: List classes
+      operationId: listClasses
+      responses:
+        "200":
+          description: List classes
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "449"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 01:58:37 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: SkAcBNCrBACB6Lr243NUcWDJqAUrDX52xtT3q_SebLI
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        academic_year:
+                          type: string
+                          example: "2026"
+                        created_at:
+                          type: string
+                          example: "2026-04-19T01:51:02.922841Z"
+                        description:
+                          type: string
+                          example: Sample class
+                        grade_level:
+                          type: string
+                          example: "1"
+                        id:
+                          type: string
+                          example: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                        is_active:
+                          type: boolean
+                          example: true
+                        name:
+                          type: string
+                          example: Class A
+                        school_id:
+                          type: string
+                          example: 32434bce-2212-4881-b60c-0590c6669710
+                        teacher_id:
+                          type: string
+                          example: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+                        updated_at:
+                          type: string
+                          example: "2026-04-19T01:56:37.001261Z"
+                    example:
+                      - academic_year: "2026"
+                        created_at: "2026-04-19T01:51:02.922841Z"
+                        description: Sample class
+                        grade_level: "1"
+                        id: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                        is_active: true
+                        name: Class A
+                        school_id: 32434bce-2212-4881-b60c-0590c6669710
+                        teacher_id: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+                        updated_at: "2026-04-19T01:56:37.001261Z"
+                  message:
+                    type: string
+                    example: classes retrieved
+                  meta:
+                    type: object
+                    properties:
+                      limit:
+                        type: number
+                        example: 20
+                      page:
+                        type: number
+                        example: 1
+                      total:
+                        type: number
+                        example: 1
+                      total_pages:
+                        type: number
+                        example: 1
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                List classes:
+                  value:
+                    data:
+                      - academic_year: "2026"
+                        created_at: "2026-04-19T01:51:02.922841Z"
+                        description: Sample class
+                        grade_level: "1"
+                        id: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                        is_active: true
+                        name: Class A
+                        school_id: 32434bce-2212-4881-b60c-0590c6669710
+                        teacher_id: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+                        updated_at: "2026-04-19T01:56:37.001261Z"
+                    message: classes retrieved
+                    meta:
+                      limit: 20
+                      page: 1
+                      total: 1
+                      total_pages: 1
+                    success: true
+      security:
+        - bearerAuth: []
+    post:
+      tags:
+        - Protected
+        - Classes
+      summary: Create class
+      description: Create class
+      operationId: createClass
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                academic_year:
+                  type: string
+                  example: "2026"
+                description:
+                  type: string
+                  example: Sample class
+                grade_level:
+                  type: string
+                  example: "1"
+                name:
+                  type: string
+                  example: Class A
+            examples:
+              Create class:
+                value:
+                  academic_year: "2026"
+                  description: Sample class
+                  grade_level: "1"
+                  name: Class A
+      responses:
+        "201":
+          description: Create class
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "342"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 01:51:02 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: Q4-icuFRvAP3amnYHKNJgXGSQRp9qoobO6OokSY0jX0
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      academic_year:
+                        type: string
+                        example: "2026"
+                      created_at:
+                        type: string
+                        example: "2026-04-19T01:51:02.922841185Z"
+                      description:
+                        type: string
+                        example: Sample class
+                      grade_level:
+                        type: string
+                        example: "1"
+                      id:
+                        type: string
+                        example: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                      is_active:
+                        type: boolean
+                        example: true
+                      name:
+                        type: string
+                        example: Class A
+                      school_id:
+                        type: string
+                        example: 32434bce-2212-4881-b60c-0590c6669710
+                      updated_at:
+                        type: string
+                        example: "2026-04-19T01:51:02.922841185Z"
+                  message:
+                    type: string
+                    example: class created
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                Create class:
+                  value:
+                    data:
+                      academic_year: "2026"
+                      created_at: "2026-04-19T01:51:02.922841185Z"
+                      description: Sample class
+                      grade_level: "1"
+                      id: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                      is_active: true
+                      name: Class A
+                      school_id: 32434bce-2212-4881-b60c-0590c6669710
+                      updated_at: "2026-04-19T01:51:02.922841185Z"
+                    message: class created
+                    success: true
+      security:
+        - bearerAuth: []
+  /api/classes/{id}:
+    get:
+      tags:
+        - Protected
+        - Classes
+      summary: Get class
+      description: Get class
+      operationId: getClass
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    patch:
+      tags:
+        - Protected
+        - Classes
+      summary: Update class
+      description: Update class
+      operationId: updateClass
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Updated Class
+            examples:
+              Update class:
+                value:
+                  name: Updated Class
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /api/classes/{id}/enroll:
+    post:
+      tags:
+        - Protected
+        - Classes
+      summary: Enroll student
+      description: Enroll student
+      operationId: enrollStudent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                student_id:
+                  type: string
+                  example: "{{student_id}}"
+            examples:
+              Enroll student:
+                value:
+                  student_id: "{{student_id}}"
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          example: ""
+  /api/classes/{id}/assign-teacher:
+    post:
+      tags:
+        - Protected
+        - Classes
+      summary: Assign Teacher
+      description: Assign Teacher
+      operationId: assignTeacher
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                teacher_id:
+                  type: string
+                  example: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+            examples:
+              Assign Teacher:
+                value:
+                  teacher_id: 3b87fef6-4ffa-415d-a434-a50b1a6c25a7
+      responses:
+        "200":
+          description: Assign Teacher
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "54"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 01:56:36 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: gY7zQHcb-tMSfZ6h9C1Anbz-NjnnVQuFOpwH4_Rraic
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: teacher assigned to class
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                Assign Teacher:
+                  value:
+                    message: teacher assigned to class
+                    success: true
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          example: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+  /api/measurements/sessions:
+    get:
+      tags:
+        - Protected
+        - Measurements
+      summary: List measurement sessions
+      description: List measurement sessions
+      operationId: listMeasurementSessions
+      responses:
+        "200":
+          description: List measurement sessions
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "383"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 01:59:39 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: wy41C4C_kG8gxXY7Gb865wy6fvaKFDO3k3gORi2H48E
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        class_id:
+                          type: string
+                          example: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                        created_at:
+                          type: string
+                          example: "2026-04-19T01:58:00.222252Z"
+                        created_by:
+                          type: string
+                          example: 9feb47e6-b3ec-4183-b09e-0ad286325d00
+                        id:
+                          type: string
+                          example: 6f05a7a1-c901-478c-823e-a26742c34d07
+                        session_date:
+                          type: string
+                          example: "2026-04-18T00:00:00Z"
+                        updated_at:
+                          type: string
+                          example: "2026-04-19T01:58:00.222252Z"
+                    example:
+                      - class_id: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                        created_at: "2026-04-19T01:58:00.222252Z"
+                        created_by: 9feb47e6-b3ec-4183-b09e-0ad286325d00
+                        id: 6f05a7a1-c901-478c-823e-a26742c34d07
+                        session_date: "2026-04-18T00:00:00Z"
+                        updated_at: "2026-04-19T01:58:00.222252Z"
+                  message:
+                    type: string
+                    example: sessions retrieved
+                  meta:
+                    type: object
+                    properties:
+                      limit:
+                        type: number
+                        example: 20
+                      page:
+                        type: number
+                        example: 1
+                      total:
+                        type: number
+                        example: 1
+                      total_pages:
+                        type: number
+                        example: 1
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                List measurement sessions:
+                  value:
+                    data:
+                      - class_id: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                        created_at: "2026-04-19T01:58:00.222252Z"
+                        created_by: 9feb47e6-b3ec-4183-b09e-0ad286325d00
+                        id: 6f05a7a1-c901-478c-823e-a26742c34d07
+                        session_date: "2026-04-18T00:00:00Z"
+                        updated_at: "2026-04-19T01:58:00.222252Z"
+                    message: sessions retrieved
+                    meta:
+                      limit: 20
+                      page: 1
+                      total: 1
+                      total_pages: 1
+                    success: true
+      security:
+        - bearerAuth: []
+    post:
+      tags:
+        - Protected
+        - Measurements
+      summary: Create measurement session
+      description: Create measurement session
+      operationId: createMeasurementSession
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                class_id:
+                  type: string
+                  example: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                name:
+                  type: string
+                  example: Session 1
+                session_date:
+                  type: string
+                  example: "2026-04-18"
+            examples:
+              Create measurement session:
+                value:
+                  class_id: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                  name: Session 1
+                  session_date: "2026-04-18"
+      responses:
+        "201":
+          description: Create measurement session
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "341"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 01:57:59 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: dcV8LGexGqDb_KOk7kt_299TzxajZtpORRsgrXXtblY
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      class_id:
+                        type: string
+                        example: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                      created_at:
+                        type: string
+                        example: "2026-04-19T01:58:00.222252045Z"
+                      created_by:
+                        type: string
+                        example: 9feb47e6-b3ec-4183-b09e-0ad286325d00
+                      id:
+                        type: string
+                        example: 6f05a7a1-c901-478c-823e-a26742c34d07
+                      session_date:
+                        type: string
+                        example: "2026-04-18T00:00:00Z"
+                      updated_at:
+                        type: string
+                        example: "2026-04-19T01:58:00.222252045Z"
+                  message:
+                    type: string
+                    example: measurement session created
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                Create measurement session:
+                  value:
+                    data:
+                      class_id: cf43538d-de36-4859-bfd1-f2adc0ce5c52
+                      created_at: "2026-04-19T01:58:00.222252045Z"
+                      created_by: 9feb47e6-b3ec-4183-b09e-0ad286325d00
+                      id: 6f05a7a1-c901-478c-823e-a26742c34d07
+                      session_date: "2026-04-18T00:00:00Z"
+                      updated_at: "2026-04-19T01:58:00.222252045Z"
+                    message: measurement session created
+                    success: true
+      security:
+        - bearerAuth: []
+  /api/measurements:
+    post:
+      tags:
+        - Protected
+        - Measurements
+      summary: Record measurement
+      description: Record measurement
+      operationId: recordMeasurement
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                height_cm:
+                  type: number
+                  example: 160
+                session_id:
+                  type: string
+                  example: "{{session_id}}"
+                student_id:
+                  type: string
+                  example: "{{student_id}}"
+                weight_kg:
+                  type: number
+                  example: 55
+            examples:
+              Record measurement:
+                value:
+                  height_cm: 160
+                  session_id: "{{session_id}}"
+                  student_id: "{{student_id}}"
+                  weight_kg: 55
+      responses:
+        "201":
+          description: Record measurement
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "376"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 03:06:21 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: w0RPNB4KTzLYzx1VkgIJL0e0LfNCG9PHQLk_8vEOwZY
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      created_at:
+                        type: string
+                        example: "2026-04-19T03:06:21.938619797Z"
+                      height_cm:
+                        type: number
+                        example: 160
+                      id:
+                        type: string
+                        example: 1e7d084a-6977-4dca-a90a-b6b697e45968
+                      measured_at:
+                        type: string
+                        example: "2026-04-19T03:06:21.938619797Z"
+                      session_id:
+                        type: string
+                        example: e7e0fb81-3e5e-46ba-8da9-5a508eaa588c
+                      student_id:
+                        type: string
+                        example: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                      updated_at:
+                        type: string
+                        example: "2026-04-19T03:06:21.938619797Z"
+                      weight_kg:
+                        type: number
+                        example: 55
+                  message:
+                    type: string
+                    example: measurement recorded
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                Record measurement:
+                  value:
+                    data:
+                      created_at: "2026-04-19T03:06:21.938619797Z"
+                      height_cm: 160
+                      id: 1e7d084a-6977-4dca-a90a-b6b697e45968
+                      measured_at: "2026-04-19T03:06:21.938619797Z"
+                      session_id: e7e0fb81-3e5e-46ba-8da9-5a508eaa588c
+                      student_id: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                      updated_at: "2026-04-19T03:06:21.938619797Z"
+                      weight_kg: 55
+                    message: measurement recorded
+                    success: true
+      security:
+        - bearerAuth: []
+  /api/measurements/students/{id}:
+    get:
+      tags:
+        - Protected
+        - Measurements
+      summary: Get student measurements
+      description: Get student measurements
+      operationId: getStudentMeasurements
+      responses:
+        "200":
+          description: Get student measurements
+          headers:
+            Content-Length:
+              schema:
+                type: string
+                example: "426"
+            Date:
+              schema:
+                type: string
+                example: Sun, 19 Apr 2026 03:04:56 GMT
+            X-Request-Id:
+              schema:
+                type: string
+                example: 9qa4YeablO0jfciQo-pDvua5vOoi-BMHtziddMWmpRY
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        created_at:
+                          type: string
+                          example: "2026-04-19T03:04:43.444432Z"
+                        height_cm:
+                          type: number
+                          example: 160
+                        id:
+                          type: string
+                          example: 4b5afeb7-b2c7-4521-9ccf-9abfe92899fc
+                        measured_at:
+                          type: string
+                          example: "2026-04-19T03:04:43.444432Z"
+                        session_id:
+                          type: string
+                          example: 6f05a7a1-c901-478c-823e-a26742c34d07
+                        student_id:
+                          type: string
+                          example: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                        updated_at:
+                          type: string
+                          example: "2026-04-19T03:04:43.444432Z"
+                        weight_kg:
+                          type: number
+                          example: 55
+                    example:
+                      - created_at: "2026-04-19T03:04:43.444432Z"
+                        height_cm: 160
+                        id: 4b5afeb7-b2c7-4521-9ccf-9abfe92899fc
+                        measured_at: "2026-04-19T03:04:43.444432Z"
+                        session_id: 6f05a7a1-c901-478c-823e-a26742c34d07
+                        student_id: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                        updated_at: "2026-04-19T03:04:43.444432Z"
+                        weight_kg: 55
+                  message:
+                    type: string
+                    example: measurements retrieved
+                  meta:
+                    type: object
+                    properties:
+                      limit:
+                        type: number
+                        example: 20
+                      page:
+                        type: number
+                        example: 1
+                      total:
+                        type: number
+                        example: 1
+                      total_pages:
+                        type: number
+                        example: 1
+                  success:
+                    type: boolean
+                    example: true
+              examples:
+                Get student measurements:
+                  value:
+                    data:
+                      - created_at: "2026-04-19T03:04:43.444432Z"
+                        height_cm: 160
+                        id: 4b5afeb7-b2c7-4521-9ccf-9abfe92899fc
+                        measured_at: "2026-04-19T03:04:43.444432Z"
+                        session_id: 6f05a7a1-c901-478c-823e-a26742c34d07
+                        student_id: 6fd9590b-fa36-4d32-9002-92ca5be02dd8
+                        updated_at: "2026-04-19T03:04:43.444432Z"
+                        weight_kg: 55
+                    message: measurements retrieved
+                    meta:
+                      limit: 20
+                      page: 1
+                      total: 1
+                      total_pages: 1
+                    success: true
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          example: "{{student_id}}"
+  /api/face-embeddings:
+    post:
+      tags:
+        - Protected
+        - Face embeddings
+      summary: Store face embedding
+      description: Store face embedding
+      operationId: storeFaceEmbedding
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                embedding:
+                  type: array
+                  items:
+                    type: number
+                    example: 0.1
+                  example:
+                    - 0.1
+                    - 0.2
+                    - 0.3
+                student_id:
+                  type: string
+                  example: "{{student_id}}"
+            examples:
+              Store face embedding:
+                value:
+                  embedding:
+                    - 0.1
+                    - 0.2
+                    - 0.3
+                  student_id: "{{student_id}}"
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+  /api/face-embeddings/students/{id}:
+    get:
+      tags:
+        - Protected
+        - Face embeddings
+      summary: Get student embeddings
+      description: Get student embeddings
+      operationId: getStudentEmbeddings
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /api/face-embeddings/{id}:
+    delete:
+      tags:
+        - Protected
+        - Face embeddings
+      summary: Delete embedding
+      description: Delete embedding
+      operationId: deleteEmbedding
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  /api/face-embeddings/search:
+    post:
+      tags:
+        - Protected
+        - Face embeddings
+      summary: Search similar faces
+      description: Search similar faces
+      operationId: searchSimilarFaces
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                embedding:
+                  type: array
+                  items:
+                    type: number
+                    example: 0.1
+                  example:
+                    - 0.1
+                    - 0.2
+                    - 0.3
+                limit:
+                  type: number
+                  example: 5
+            examples:
+              Search similar faces:
+                value:
+                  embedding:
+                    - 0.1
+                    - 0.2
+                    - 0.3
+                  limit: 5
+      responses:
+        "200":
+          description: ""
+      security:
+        - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+tags:
+  - name: Public
+  - name: Protected
+  - name: Users
+  - name: Students
+  - name: Teachers
+  - name: Classes
+  - name: Measurements
+  - name: Face embeddings

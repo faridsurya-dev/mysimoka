@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Image,
   KeyboardAvoidingView,
@@ -9,10 +9,11 @@ import {
   View,
 } from 'react-native';
 import { PrimaryButton, Screen, TextField } from '../../../shared/components';
+import { LoginResult, login } from '../../../services';
 import { colors, spacing, typography } from '../../../theme';
 
 type LoginScreenProps = {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (result: LoginResult) => void;
   onOpenRegister: () => void;
   onOpenForgotPassword: () => void;
 };
@@ -24,6 +25,35 @@ export function LoginScreen({
 }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const canSubmit = useMemo(
+    () => email.trim().length > 0 && password.length > 0,
+    [email, password],
+  );
+
+  const handleSubmit = async () => {
+    if (!canSubmit || isSubmitting) {
+      return;
+    }
+
+    setSubmitError(null);
+    setIsSubmitting(true);
+
+    try {
+      const loginResult = await login({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      onLoginSuccess(loginResult);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Login gagal. Silakan coba lagi.';
+      setSubmitError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -67,9 +97,13 @@ export function LoginScreen({
           </Pressable>
         </View>
 
+        {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
+
         <PrimaryButton
+          disabled={!canSubmit}
           label="Login"
-          onPress={onLoginSuccess}
+          loading={isSubmitting}
+          onPress={handleSubmit}
           style={styles.button}
         />
 
@@ -138,6 +172,10 @@ const styles = StyleSheet.create({
     ...typography.labelMd,
     color: colors.brand.primary500,
     textAlign: 'right',
+  },
+  errorText: {
+    ...typography.bodySm,
+    color: colors.accent.red,
   },
   button: {
     width: '100%',
