@@ -1,11 +1,22 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Screen, StatusPill } from '../../../shared/components';
+import type { SchoolMembership } from '../../../services';
 import { colors, radius, spacing, typography } from '../../../theme';
 
-const SCHOOLS = ['SDN Sukamaju 01', 'SDN Sukamaju 02', 'SDN Harapan Jaya'];
+type SchoolSelectionScreenProps = {
+  memberships: SchoolMembership[];
+  onSelectSchool: (membership: SchoolMembership) => void;
+  selectedSchoolId?: string | null;
+};
 
-export function SchoolSelectionScreen() {
+export function SchoolSelectionScreen({
+  memberships,
+  onSelectSchool,
+  selectedSchoolId = null,
+}: SchoolSelectionScreenProps) {
+  const activeMemberships = memberships.filter(item => item.status === 'active');
+
   return (
     <Screen contentContainerStyle={styles.content}>
       <View style={styles.header}>
@@ -16,15 +27,26 @@ export function SchoolSelectionScreen() {
         </Text>
       </View>
 
-      <StatusPill label="3 Sekolah Tersedia" tone="info" />
+      <StatusPill label={`${activeMemberships.length} Sekolah Tersedia`} tone="info" />
 
       <View style={styles.list}>
-        {SCHOOLS.map(school => (
-          <Pressable key={school} style={styles.card}>
-            <Text style={styles.cardTitle}>{school}</Text>
-            <Text style={styles.cardBody}>Tap untuk lanjut ke pemilihan kelas</Text>
-          </Pressable>
-        ))}
+        {activeMemberships.map(membership => {
+          const isSelected =
+            selectedSchoolId === membership.school_id ||
+            (selectedSchoolId === null && membership.is_active);
+
+          return (
+            <Pressable
+              key={membership.id}
+              onPress={() => onSelectSchool(membership)}
+              style={[styles.card, isSelected && styles.cardSelected]}>
+              <Text style={styles.cardTitle}>{membership.school_name}</Text>
+              <Text style={styles.cardBody}>
+                {isSelected ? 'Sekolah aktif saat ini' : 'Tap untuk aktifkan sekolah ini'}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
     </Screen>
   );
@@ -62,6 +84,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border.subtle,
     padding: spacing[16],
     gap: spacing[4],
+  },
+  cardSelected: {
+    borderColor: colors.brand.primary500,
+    borderWidth: 2,
   },
   cardTitle: {
     ...typography.headingMd,

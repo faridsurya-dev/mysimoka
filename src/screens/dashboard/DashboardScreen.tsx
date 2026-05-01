@@ -20,7 +20,7 @@ import {
   DASHBOARD_QUICK_MENUS,
   DASHBOARD_WEIGHT_TREND,
 } from '../../features/dashboard';
-import { apiRequest, getAuthSession } from '../../services';
+import { apiRequest, getAuthSession, listMemberships } from '../../services';
 import { InfoCard, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -59,6 +59,40 @@ function readStringValue(source: UnknownObject | null, keys: string[]): string |
   return null;
 }
 
+function readStringOrNumberValue(source: UnknownObject | null, keys: string[]): string | null {
+  if (!source) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+
+  return null;
+}
+
+function readObjectArrayValue(source: UnknownObject | null, key: string): UnknownObject[] {
+  if (!source) {
+    return [];
+  }
+
+  const value = source[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(item => asObject(item))
+    .filter((item): item is UnknownObject => Boolean(item));
+}
+
 function readObjectValue(source: UnknownObject | null, key: string): UnknownObject | null {
   if (!source) {
     return null;
@@ -69,16 +103,36 @@ function readObjectValue(source: UnknownObject | null, key: string): UnknownObje
 
 function extractUserId(user: unknown): string | null {
   const userObject = asObject(user);
-  return readStringValue(userObject, ['id', 'user_id', 'userId', 'uid']);
+  return readStringOrNumberValue(userObject, ['id', 'user_id', 'userId', 'uid']);
+}
+
+function extractUserDisplayName(source: unknown): string | null {
+  const sourceObject = asObject(source);
+  if (!sourceObject) {
+    return null;
+  }
+
+  return readStringValue(sourceObject, ['full_name', 'fullName', 'name']);
 }
 
 function extractSchoolName(payload: unknown): string | null {
   const payloadObject = asObject(payload);
   const payloadData = readObjectValue(payloadObject, 'data');
   const payloadUser = readObjectValue(payloadObject, 'user');
-  const candidates = [payloadObject, payloadData, payloadUser];
+  const payloadDataList = readObjectArrayValue(payloadObject, 'data');
+  const payloadUserList = readObjectArrayValue(payloadObject, 'users');
+  const candidates = [payloadObject, payloadData, payloadUser, ...payloadDataList, ...payloadUserList];
 
   for (const source of candidates) {
+    if (!source) {
+      continue;
+    }
+
+    const schoolAsText = readStringValue(source, ['school']);
+    if (schoolAsText) {
+      return schoolAsText;
+    }
+
     const directSchoolName = readStringValue(source, [
       'school_name',
       'schoolName',
@@ -98,9 +152,89 @@ function extractSchoolName(payload: unknown): string | null {
     if (nestedSchoolName) {
       return nestedSchoolName;
     }
+
+    const schools = readObjectArrayValue(source, 'schools');
+    for (const school of schools) {
+      const schoolName = readStringValue(school, ['name', 'school_name', 'schoolName']);
+      if (schoolName) {
+        return schoolName;
+      }
+    }
   }
 
   return null;
+}
+
+function toRoleLabel(roleCode: string): string {
+  const normalized = roleCode.trim().toLowerCase();
+  if (normalized === 'school_admin' || normalized === 'admin') {
+    return 'Admin Sekolah';
+  }
+  if (normalized === 'teacher' || normalized === 'guru') {
+    return 'Guru';
+  }
+  if (normalized === 'school_member') {
+    return 'Anggota Sekolah';
+  }
+  if (normalized === 'user') {
+    return 'Pengguna';
+  }
+  return roleCode;
+}
+
+function getRolePriority(roleCode: string): number {
+  const normalized = roleCode.trim().toLowerCase();
+  if (normalized === 'school_admin' || normalized === 'admin') {
+    return 100;
+  }
+  if (normalized === 'teacher' || normalized === 'guru') {
+    return 80;
+  }
+  if (normalized === 'school_member') {
+    return 60;
+  }
+  if (normalized === 'user') {
+    return 40;
+  }
+  return 10;
+}
+
+function extractRoleText(source: unknown, schoolName: string | null, roleOverride?: string | null): string {
+  const sourceObject = asObject(source);
+  const roleCandidates: string[] = [];
+  if (roleOverride && roleOverride.trim().length > 0) {
+    roleCandidates.push(roleOverride);
+  }
+
+  if (sourceObject) {
+    const directRole = readStringValue(sourceObject, ['role', 'default_role', 'defaultRole']);
+    const allowedRolesRaw = sourceObject.allowed_roles ?? sourceObject.allowedRoles;
+    const allowedRoles = Array.isArray(allowedRolesRaw)
+      ? allowedRolesRaw.filter((item): item is string => typeof item === 'string')
+      : [];
+    roleCandidates.push(...allowedRoles);
+    if (directRole) {
+      roleCandidates.unshift(directRole);
+    }
+  }
+
+  const highestRoleCode = roleCandidates.reduce<string | null>((winner, roleCode) => {
+    if (typeof roleCode !== 'string' || roleCode.trim().length === 0) {
+      return winner;
+    }
+    if (!winner) {
+      return roleCode;
+    }
+    return getRolePriority(roleCode) > getRolePriority(winner) ? roleCode : winner;
+  }, null);
+
+  const highestRoleLabel = highestRoleCode ? toRoleLabel(highestRoleCode) : null;
+
+  if (!highestRoleLabel) {
+    return schoolName ? `Pengguna di ${schoolName}.` : 'Pengguna';
+  }
+
+  return schoolName ? `${highestRoleLabel} di ${schoolName}.` : highestRoleLabel;
 }
 
 function formatDateLabel(date: Date) {
@@ -119,7 +253,10 @@ export function DashboardScreen({
   onSearchStudents,
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
+  const authUser = getAuthSession().user;
+  const [serverUserName, setServerUserName] = useState<string | null>(null);
   const [serverSchoolName, setServerSchoolName] = useState<string | null>(null);
+  const [activeMembershipRole, setActiveMembershipRole] = useState<string | null>(null);
   const [isPeriodDialogVisible, setIsPeriodDialogVisible] = useState(false);
   const [periodStartDate, setPeriodStartDate] = useState(() => new Date(2026, 0, 1));
   const [periodEndDate, setPeriodEndDate] = useState(() => new Date(2026, 11, 31));
@@ -129,8 +266,10 @@ export function DashboardScreen({
   const periodStartDateLabel = formatDateLabel(periodStartDate);
   const periodEndDateLabel = formatDateLabel(periodEndDate);
   const totalStudentsSubtitle = 'Periode aktif';
-  const displayedSchoolName = serverSchoolName ?? currentSchool;
-  const schoolInitials = displayedSchoolName
+  const displayedUserName = serverUserName ?? extractUserDisplayName(authUser) ?? 'Pengguna';
+  const displayedSchoolName = serverSchoolName ?? extractSchoolName(authUser) ?? currentSchool;
+  const displayedRoleText = extractRoleText(authUser, displayedSchoolName, activeMembershipRole);
+  const userInitials = displayedUserName
     .split(' ')
     .filter(part => part.length > 0)
     .slice(0, 2)
@@ -143,17 +282,27 @@ export function DashboardScreen({
     const loadSchoolByCurrentUser = async () => {
       const { user } = getAuthSession();
       const userId = extractUserId(user);
-      if (!userId) {
-        return;
-      }
 
       try {
-        const response = await apiRequest(`/api/users/${encodeURIComponent(userId)}`, {
-          requiresAuth: true,
-        });
-        const schoolName = extractSchoolName(response);
-        if (isMounted && schoolName) {
-          setServerSchoolName(schoolName);
+        if (userId) {
+          const response = await apiRequest(`/api/users/${encodeURIComponent(userId)}`, {
+            requiresAuth: true,
+          });
+          const userName = extractUserDisplayName(response);
+          if (isMounted && userName) {
+            setServerUserName(userName);
+          }
+        }
+
+        const memberships = await listMemberships();
+        const activeMembership =
+          memberships.find(item => item.status === 'active' && item.is_active) ??
+          memberships.find(item => item.status === 'active') ??
+          null;
+
+        if (isMounted) {
+          setServerSchoolName(activeMembership?.school_name ?? null);
+          setActiveMembershipRole(activeMembership?.role ?? null);
         }
       } catch {
         // Tetap pakai fallback dari data login bila request detail user gagal.
@@ -167,7 +316,7 @@ export function DashboardScreen({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [currentSchool]);
 
   const handlePeriodDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     if (!activePeriodPickerField) {
@@ -214,17 +363,16 @@ export function DashboardScreen({
         <View style={[styles.schoolHeroCard, { paddingTop: insets.top + spacing[24] }]}>
           <View style={styles.schoolHeroBody}>
             <View style={styles.schoolHeroCopy}>
-              <Text style={styles.schoolHeroEyebrow}>Selamat datang,</Text>
+              <Text style={styles.schoolHeroEyebrow}>Selamat datang di Mysimoka,</Text>
               <Text numberOfLines={2} style={styles.schoolTriggerLabel}>
-                {displayedSchoolName}
+                {displayedUserName}
               </Text>
-              <Text style={styles.schoolHeroDescription}>
-                MySimoka membantu sekolah untuk pantau kesehatan siswa.
+              <Text numberOfLines={1} style={styles.schoolHeroSchoolName}>
+                {displayedRoleText}
               </Text>
             </View>
-
             <View style={styles.avatarCircle}>
-              <Text style={styles.avatarLabel}>{schoolInitials}</Text>
+              <Text style={styles.avatarLabel}>{userInitials}</Text>
             </View>
           </View>
 
@@ -760,11 +908,11 @@ const styles = StyleSheet.create({
     color: colors.text.inverse,
     lineHeight: 32,
   },
-  schoolHeroDescription: {
+  schoolHeroSchoolName: {
     ...typography.bodySm,
-    color: 'rgba(255, 255, 255, 0.86)',
-    lineHeight: 21,
-    maxWidth: '96%',
+    color: 'rgba(255, 255, 255, 0.88)',
+    lineHeight: 20,
+    marginTop: -spacing[6],
   },
   avatarCircle: {
     width: 56,

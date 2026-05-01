@@ -1,40 +1,29 @@
-import React, { useMemo, useRef, useState } from 'react';
-import {
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton, TextField } from '../../../shared/components';
-import { LoginResult, login } from '../../../services';
+import { verifyEmailToken } from '../../../services';
 import { colors, spacing, typography } from '../../../theme';
 import { getFriendlyAuthErrorMessage } from '../errorMessages';
 
-type LoginScreenProps = {
-  onLoginSuccess: (result: LoginResult) => void;
-  onOpenRegister: () => void;
-  onOpenForgotPassword: () => void;
+type VerifyEmailScreenProps = {
+  initialToken?: string | null;
+  onVerifySuccess: () => void;
+  onBackToLogin: () => void;
 };
 
-export function LoginScreen({
-  onLoginSuccess,
-  onOpenRegister,
-  onOpenForgotPassword,
-}: LoginScreenProps) {
+export function VerifyEmailScreen({
+  initialToken = null,
+  onVerifySuccess,
+  onBackToLogin,
+}: VerifyEmailScreenProps) {
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<KeyboardAwareScrollView | null>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [token, setToken] = useState(initialToken ?? '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const canSubmit = useMemo(
-    () => email.trim().length > 0 && password.length > 0,
-    [email, password],
-  );
+  const canSubmit = useMemo(() => token.trim().length > 0, [token]);
 
   const handleSubmit = async () => {
     if (!canSubmit || isSubmitting) {
@@ -45,31 +34,21 @@ export function LoginScreen({
     setIsSubmitting(true);
 
     try {
-      const loginResult = await login({
-        email: email.trim().toLowerCase(),
-        password,
-      });
-      onLoginSuccess(loginResult);
+      await verifyEmailToken({ token: token.trim() });
+      Alert.alert('Verifikasi berhasil', 'Email sudah aktif. Silakan login.', [
+        { text: 'Lanjut', onPress: onVerifySuccess },
+      ]);
     } catch (error) {
-      setSubmitError(getFriendlyAuthErrorMessage(error, 'login'));
+      setSubmitError(getFriendlyAuthErrorMessage(error, 'verify-email'));
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const scrollToFormBottom = () => {
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd(true);
-    }, 120);
-  };
-
   return (
     <KeyboardAwareScrollView
-      innerRef={ref => {
-        scrollRef.current = ref;
-      }}
       enableOnAndroid
-      extraHeight={120}
+      extraHeight={100}
       extraScrollHeight={24}
       style={styles.screen}
       contentContainerStyle={[
@@ -91,9 +70,9 @@ export function LoginScreen({
             />
           </View>
           <Text style={styles.eyebrow}>MySimoka</Text>
-          <Text style={styles.title}>Masuk ke aplikasi</Text>
+          <Text style={styles.title}>Verifikasi Email</Text>
           <Text style={styles.subtitle}>
-            Lanjutkan untuk masuk ke daftar sekolah dan memulai sesi pengukuran.
+            Masukkan token verifikasi dari response register untuk mengaktifkan akun.
           </Text>
         </View>
 
@@ -101,39 +80,27 @@ export function LoginScreen({
           <TextField
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="email-address"
-            label="Email"
-            onChangeText={setEmail}
-            placeholder="Masukkan email"
-            value={email}
+            label="Token Verifikasi"
+            onChangeText={setToken}
+            placeholder="Tempel token verifikasi"
+            value={token}
           />
-          <TextField
-            label="Password"
-            onChangeText={setPassword}
-            onFocus={scrollToFormBottom}
-            placeholder="Masukkan password"
-            secureTextEntry
-            value={password}
-          />
-          <Pressable onPress={onOpenForgotPassword}>
-            <Text style={styles.forgotPasswordLink}>Lupa Password?</Text>
-          </Pressable>
         </View>
 
         {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
 
         <PrimaryButton
           disabled={!canSubmit}
-          label="Login"
+          label="Verifikasi"
           loading={isSubmitting}
           onPress={handleSubmit}
           style={styles.button}
         />
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Belum punya akun?</Text>
-          <Pressable onPress={onOpenRegister}>
-            <Text style={styles.footerLink}>Daftar sekarang</Text>
+          <Text style={styles.footerText}>Sudah punya akun aktif?</Text>
+          <Pressable onPress={onBackToLogin}>
+            <Text style={styles.footerLink}>Kembali ke login</Text>
           </Pressable>
         </View>
       </View>
@@ -189,14 +156,10 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.bodyMd,
     color: colors.text.secondary,
+    textAlign: 'center',
   },
   form: {
     gap: spacing[16],
-  },
-  forgotPasswordLink: {
-    ...typography.labelMd,
-    color: colors.brand.primary500,
-    textAlign: 'right',
   },
   errorText: {
     ...typography.bodySm,

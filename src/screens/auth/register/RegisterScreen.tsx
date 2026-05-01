@@ -3,11 +3,12 @@ import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton, TextField } from '../../../shared/components';
-import { registerSchool } from '../../../services';
+import { register } from '../../../services';
 import { colors, spacing, typography } from '../../../theme';
+import { getFriendlyAuthErrorMessage } from '../errorMessages';
 
 type RegisterScreenProps = {
-  onRegisterSuccess: () => void;
+  onRegisterSuccess: (verificationToken: string | null) => void;
   onBackToLogin: () => void;
 };
 
@@ -17,9 +18,8 @@ export function RegisterScreen({
 }: RegisterScreenProps) {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<KeyboardAwareScrollView | null>(null);
-  const [schoolName, setSchoolName] = useState('');
-  const [npsn, setNpsn] = useState('');
-  const [personInChargeName, setPersonInChargeName] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -28,15 +28,13 @@ export function RegisterScreen({
 
   const canSubmit = useMemo(() => {
     const hasMinimumInput =
-      schoolName.trim().length > 0 &&
-      npsn.trim().length > 0 &&
-      personInChargeName.trim().length > 0 &&
+      fullName.trim().length > 0 &&
       email.trim().length > 0 &&
       password.length > 0 &&
       confirmPassword.length > 0;
 
     return hasMinimumInput && password === confirmPassword;
-  }, [confirmPassword, email, npsn, password, personInChargeName, schoolName]);
+  }, [confirmPassword, email, fullName, password]);
 
   const handleSubmit = async () => {
     if (!canSubmit || isSubmitting) {
@@ -47,23 +45,20 @@ export function RegisterScreen({
     setIsSubmitting(true);
 
     try {
-      await registerSchool({
-        name: schoolName.trim(),
-        number: npsn.trim(),
-        pic_email: email.trim().toLowerCase(),
-        pic_name: personInChargeName.trim(),
-        pic_password: password,
+      const registerResult = await register({
+        email: email.trim().toLowerCase(),
+        password,
+        full_name: fullName.trim(),
+        image_url: imageUrl.trim().length > 0 ? imageUrl.trim() : undefined,
       });
 
       Alert.alert(
         'Registrasi berhasil',
-        'Akun sekolah berhasil dibuat.',
-        [{ text: 'Lanjut', onPress: onRegisterSuccess }],
+        'Akun berhasil dibuat. Verifikasi email dulu sebelum login.',
+        [{ text: 'Lanjut', onPress: () => onRegisterSuccess(registerResult.verificationToken) }],
       );
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Registrasi gagal. Silakan coba lagi.';
-      setSubmitError(message);
+      setSubmitError(getFriendlyAuthErrorMessage(error, 'register'));
     } finally {
       setIsSubmitting(false);
     }
@@ -111,23 +106,10 @@ export function RegisterScreen({
 
         <View style={styles.form}>
           <TextField
-            label="Nama Sekolah"
-            onChangeText={setSchoolName}
-            placeholder="Masukkan nama sekolah"
-            value={schoolName}
-          />
-          <TextField
-            keyboardType="number-pad"
-            label="NPSN"
-            onChangeText={setNpsn}
-            placeholder="Masukkan NPSN"
-            value={npsn}
-          />
-          <TextField
-            label="Nama Penanggungjawab"
-            onChangeText={setPersonInChargeName}
-            placeholder="Masukkan nama penanggungjawab"
-            value={personInChargeName}
+            label="Nama Lengkap"
+            onChangeText={setFullName}
+            placeholder="Masukkan nama lengkap"
+            value={fullName}
           />
           <TextField
             autoCapitalize="none"
@@ -137,6 +119,14 @@ export function RegisterScreen({
             onChangeText={setEmail}
             placeholder="Masukkan email"
             value={email}
+          />
+          <TextField
+            autoCapitalize="none"
+            autoCorrect={false}
+            label="URL Foto (Opsional)"
+            onChangeText={setImageUrl}
+            placeholder="https://example.com/photo.jpg"
+            value={imageUrl}
           />
           <TextField
             label="Password"

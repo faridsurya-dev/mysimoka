@@ -11,7 +11,19 @@ type ProfileOverviewScreenProps = {
   onOpenAccountSettings: () => void;
   onOpenEditEmail: () => void;
   onOpenEditPassword: () => void;
+  onRegenerateJoinCode: () => void;
+  onSwitchSchool: () => void;
   onLogout: () => void;
+  fullName: string;
+  roleLabel: string;
+  email: string;
+  schoolName: string;
+  schoolNumber: string | null;
+  schoolAddress: string | null;
+  schoolJoinCode: string | null;
+  canEditSchoolProfile: boolean;
+  isRegeneratingJoinCode: boolean;
+  schoolActionError: string | null;
 };
 
 type AcademicYearItem = {
@@ -33,13 +45,42 @@ const INITIAL_ACADEMIC_YEARS: AcademicYearItem[] = [
   },
 ];
 
+function buildInitials(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return 'OP';
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
 export function ProfileOverviewScreen({
   onEditProfile,
   onEditSchoolProfile,
   onOpenAccountSettings,
   onOpenEditEmail,
   onOpenEditPassword,
+  onRegenerateJoinCode,
+  onSwitchSchool,
   onLogout,
+  fullName,
+  roleLabel,
+  email,
+  schoolName,
+  schoolNumber,
+  schoolAddress,
+  schoolJoinCode,
+  canEditSchoolProfile,
+  isRegeneratingJoinCode,
+  schoolActionError,
 }: ProfileOverviewScreenProps) {
   const shouldShowWhatsApp = false;
   const insets = useSafeAreaInsets();
@@ -82,15 +123,15 @@ export function ProfileOverviewScreen({
         <InfoCard>
           <View style={styles.personalInfoRow}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>FR</Text>
+              <Text style={styles.avatarText}>{buildInitials(fullName)}</Text>
             </View>
 
             <View style={styles.personalInfoMeta}>
               <View style={styles.personalInfoField}>
-                <Text style={styles.nameValue}>Farid Ramadhan</Text>
+                <Text style={styles.nameValue}>{fullName}</Text>
               </View>
               <View style={styles.personalInfoField}>
-                <Text style={styles.roleValue}>Guru</Text>
+                <Text style={styles.roleValue}>{roleLabel}</Text>
               </View>
             </View>
           </View>
@@ -107,7 +148,7 @@ export function ProfileOverviewScreen({
               <View style={styles.contactRow}>
                 <View style={styles.contactMeta}>
                   <Text style={styles.contactLabel}>Email</Text>
-                  <Text style={styles.contactValue}>farid.ramadhan@simoka.id</Text>
+                  <Text style={styles.contactValue}>{email}</Text>
                 </View>
                 <Pressable onPress={onOpenEditEmail} style={styles.rowEditAction}>
                   <Text style={styles.rowEditText}>Edit</Text>
@@ -145,21 +186,59 @@ export function ProfileOverviewScreen({
           <View style={styles.schoolInfoList}>
             <View style={styles.schoolInfoRow}>
               <Text style={styles.schoolInfoLabel}>Nama Sekolah</Text>
-              <Text style={styles.schoolInfoValue}>SDN Sukamaju 01</Text>
+              <Text style={styles.schoolInfoValue}>{schoolName}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.schoolInfoRow}>
-              <Text style={styles.schoolInfoLabel}>NPSN</Text>
-              <Text style={styles.schoolInfoValue}>20123456</Text>
+              <Text style={styles.schoolInfoLabel}>Nomor Sekolah</Text>
+              <Text style={styles.schoolInfoValue}>{schoolNumber ?? '-'}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.schoolInfoRow}>
-              <Text style={styles.schoolInfoLabel}>Wilayah</Text>
-              <Text style={styles.schoolInfoValue}>Kec. Sukamaju, Jawa Barat</Text>
+              <Text style={styles.schoolInfoLabel}>Address</Text>
+              <Text style={styles.schoolInfoValue}>{schoolAddress ?? '-'}</Text>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.schoolInfoRow}>
+              <Text style={styles.schoolInfoLabel}>Kode Gabung</Text>
+              <Text style={styles.schoolInfoValue}>{schoolJoinCode ?? '-'}</Text>
             </View>
           </View>
-          <Pressable onPress={onEditSchoolProfile} style={styles.schoolEditAction}>
-            <Text style={styles.schoolEditActionText}>Edit Profil Sekolah</Text>
+          <View style={styles.schoolContextNotice}>
+            <Text style={styles.schoolContextNoticeText}>
+              Pengaturan ini hanya untuk sekolah aktif. Untuk ganti sekolah, kembali ke pemilihan
+              sekolah.
+            </Text>
+          </View>
+          <Pressable
+            disabled={!canEditSchoolProfile}
+            onPress={onEditSchoolProfile}
+            style={[styles.schoolEditAction, !canEditSchoolProfile && styles.schoolEditActionDisabled]}>
+            <Text
+              style={[
+                styles.schoolEditActionText,
+                !canEditSchoolProfile && styles.schoolEditActionTextDisabled,
+              ]}>
+              Edit Profil Sekolah
+            </Text>
+          </Pressable>
+          {!canEditSchoolProfile ? (
+            <Text style={styles.schoolEditHelperText}>
+              Hanya admin_sekolah yang dapat memperbarui profil sekolah.
+            </Text>
+          ) : null}
+          {schoolActionError ? <Text style={styles.schoolEditErrorText}>{schoolActionError}</Text> : null}
+          <Pressable
+            disabled={!canEditSchoolProfile || isRegeneratingJoinCode}
+            onPress={onRegenerateJoinCode}
+            style={[styles.schoolEditAction, !canEditSchoolProfile && styles.schoolEditActionDisabled]}>
+            <Text
+              style={[
+                styles.schoolEditActionText,
+                !canEditSchoolProfile && styles.schoolEditActionTextDisabled,
+              ]}>
+              {isRegeneratingJoinCode ? 'Memproses...' : 'Generate Ulang Kode Gabung'}
+            </Text>
           </Pressable>
         </InfoCard>
 
@@ -221,6 +300,10 @@ export function ProfileOverviewScreen({
             <Text style={styles.appInfoValue}>0.0.1</Text>
           </View>
         </InfoCard>
+
+        <Pressable onPress={onSwitchSchool} style={styles.switchSchoolButton}>
+          <Text style={styles.switchSchoolButtonText}>Pilih Sekolah Lain</Text>
+        </Pressable>
 
         <Pressable onPress={onLogout} style={styles.logoutButton}>
           <Text style={styles.logoutButtonText}>Keluar</Text>
@@ -348,6 +431,17 @@ const styles = StyleSheet.create({
     ...typography.bodyMd,
     color: colors.text.primary,
   },
+  schoolContextNotice: {
+    marginTop: spacing[12],
+    borderRadius: radius.md,
+    backgroundColor: colors.feedback.infoBackground,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[8],
+  },
+  schoolContextNoticeText: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
   schoolEditAction: {
     alignSelf: 'flex-start',
     marginTop: spacing[12],
@@ -358,9 +452,25 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[8],
     backgroundColor: colors.surface.secondary,
   },
+  schoolEditActionDisabled: {
+    backgroundColor: colors.neutral[200],
+  },
   schoolEditActionText: {
     ...typography.labelMd,
     color: colors.brand.primary700,
+  },
+  schoolEditActionTextDisabled: {
+    color: colors.text.secondary,
+  },
+  schoolEditHelperText: {
+    ...typography.bodySm,
+    marginTop: spacing[10],
+    color: colors.text.secondary,
+  },
+  schoolEditErrorText: {
+    ...typography.bodySm,
+    marginTop: spacing[8],
+    color: colors.status.device.error,
   },
   academicYearList: {
     marginTop: spacing[4],
@@ -452,6 +562,19 @@ const styles = StyleSheet.create({
   appInfoValue: {
     ...typography.labelMd,
     color: colors.text.primary,
+  },
+  switchSchoolButton: {
+    minHeight: 52,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    backgroundColor: colors.surface.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  switchSchoolButtonText: {
+    ...typography.labelLg,
+    color: colors.brand.primary700,
   },
   logoutButton: {
     minHeight: 52,

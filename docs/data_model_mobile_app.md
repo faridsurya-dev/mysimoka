@@ -189,6 +189,49 @@ erDiagram
         TIMESTAMP created_at
     }
 
+    VACCINE_MASTERS {
+        UUID id PK
+        VARCHAR code
+        VARCHAR name
+        VARCHAR disease_target
+        SMALLINT recommended_age_month
+        VARCHAR dose_recommendation
+        BOOLEAN is_active
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    VACCINATION_EVENTS {
+        UUID id PK
+        UUID school_id FK
+        UUID classroom_id FK
+        UUID academic_year_id FK
+        UUID vaccine_master_id FK
+        DATE event_date
+        VARCHAR batch_number
+        VARCHAR provider_name
+        VARCHAR location
+        UUID created_by_user_id FK
+        TEXT notes
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    STUDENT_VACCINATIONS {
+        UUID id PK
+        UUID vaccination_event_id FK
+        UUID student_id FK
+        SMALLINT dose_number
+        ENUM status
+        TIMESTAMP administered_at
+        BOOLEAN has_adverse_event
+        TEXT adverse_event_notes
+        ENUM sync_status
+        TIMESTAMP synced_at
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
     USERS ||--o{ SCHOOL_MEMBERSHIPS : has
     SCHOOLS ||--o{ SCHOOL_MEMBERSHIPS : has
 
@@ -220,6 +263,15 @@ erDiagram
     DEVICES ||--o{ MEASUREMENT_DEVICE_READINGS : produces
 
     STUDENTS ||--o{ FACE_EMBEDDINGS : has
+
+    SCHOOLS ||--o{ VACCINATION_EVENTS : has
+    CLASSROOMS ||--o{ VACCINATION_EVENTS : target_for
+    ACADEMIC_YEARS ||--o{ VACCINATION_EVENTS : used_by
+    VACCINE_MASTERS ||--o{ VACCINATION_EVENTS : used_in
+    USERS ||--o{ VACCINATION_EVENTS : created_by
+
+    VACCINATION_EVENTS ||--o{ STUDENT_VACCINATIONS : contains
+    STUDENTS ||--o{ STUDENT_VACCINATIONS : receives
 ```
 
 ---
@@ -492,6 +544,71 @@ Di bawah ini adalah penjelasan tiap entitas beserta peran, relasi, dan catatan i
 
 ---
 
+### 14. VACCINE_MASTERS
+
+**Peran**: Master referensi jenis vaksin yang digunakan sistem
+
+**Field penting**:
+
+* `code`, `name`
+* `disease_target`
+* `recommended_age_month`
+* `dose_recommendation`
+
+**Fungsi**:
+
+* Menstandarkan daftar vaksin (hindari string bebas)
+* Referensi utama saat membuat event vaksinasi
+
+---
+
+### 15. VACCINATION_EVENTS
+
+**Peran**: Event/sesi vaksinasi pada konteks school dan tahun ajaran tertentu
+
+**Karakteristik**:
+
+* Dapat ditargetkan ke classroom tertentu
+* Satu event merepresentasikan pelaksanaan vaksin tertentu pada tanggal tertentu
+
+**Field penting**:
+
+* `event_date`
+* `vaccine_master_id`
+* `classroom_id`, `academic_year_id`
+* `batch_number`, `provider_name`
+
+**Relasi**:
+
+* Dimiliki school
+* Dibuat oleh user
+* Menghasilkan banyak `STUDENT_VACCINATIONS`
+
+---
+
+### 16. STUDENT_VACCINATIONS
+
+**Peran**: Catatan pelaksanaan vaksinasi per siswa pada sebuah event
+
+**Field penting**:
+
+* `dose_number`
+* `status` (given, deferred, absent, rejected, dll)
+* `administered_at`
+* `has_adverse_event`, `adverse_event_notes`
+* `sync_status`
+
+**Fungsi**:
+
+* Menjadi histori vaksinasi individual siswa
+* Mendukung audit pelaksanaan dan pelaporan cakupan imunisasi
+
+**Catatan**:
+
+* Satu siswa maksimal satu record per event
+
+---
+
 ## Key Constraints
 
 1. **Single classroom per student per academic year**
@@ -506,6 +623,14 @@ Di bawah ini adalah penjelasan tiap entitas beserta peran, relasi, dan catatan i
 
    * Semua referensi harus ke ACADEMIC_YEARS
 
+4. **Single record per student per vaccination event**
+
+   * UNIQUE(vaccination_event_id, student_id)
+
+5. **Vaccination context consistency**
+
+   * Student vaccination harus mengacu ke event dalam school yang sama dengan siswa
+
 ---
 
 ## Important Notes
@@ -514,6 +639,7 @@ Di bawah ini adalah penjelasan tiap entitas beserta peran, relasi, dan catatan i
 * Tidak menyimpan classroom_id di students
 * Semua histori berbasis academic year
 * Classroom adalah snapshot, bukan entitas permanen
+* Data vaksinasi bersifat historis (hindari overwrite; simpan perubahan sebagai record baru bila perlu)
 
 ---
 
@@ -525,3 +651,4 @@ Model ini dirancang untuk:
 * Kemudahan query
 * Skalabilitas jangka panjang
 * Mendukung fitur promote dan histori siswa
+* Mendukung pencatatan dan pelaporan vaksinasi siswa

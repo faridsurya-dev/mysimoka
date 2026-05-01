@@ -3,10 +3,12 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { InfoCard, PrimaryButton, Screen } from '../../shared/components';
+import { updateMyProfile } from '../../services';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type EditProfileScreenProps = {
   onBack: () => void;
+  fullName: string;
 };
 
 function buildInitials(name: string) {
@@ -26,14 +28,37 @@ function buildInitials(name: string) {
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
-export function EditProfileScreen({ onBack }: EditProfileScreenProps) {
+export function EditProfileScreen({ onBack, fullName: initialFullName }: EditProfileScreenProps) {
   const insets = useSafeAreaInsets();
-  const [fullName, setFullName] = useState('Farid Ramadhan');
+  const [fullName, setFullName] = useState(initialFullName);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const initials = useMemo(() => buildInitials(fullName), [fullName]);
 
   const isSaveDisabled = useMemo(() => {
-    return fullName.trim().length === 0;
-  }, [fullName]);
+    return fullName.trim().length === 0 || isSaving || fullName.trim() === initialFullName.trim();
+  }, [fullName, initialFullName, isSaving]);
+
+  const handleSave = async () => {
+    if (isSaveDisabled) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setErrorMessage(null);
+      await updateMyProfile({
+        full_name: fullName.trim(),
+      });
+      onBack();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Gagal menyimpan profil. Silakan coba lagi.',
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -69,18 +94,20 @@ export function EditProfileScreen({ onBack }: EditProfileScreenProps) {
             </View>
 
             <TextInput
+              editable={!isSaving}
               onChangeText={setFullName}
               placeholder="Masukkan nama lengkap"
               placeholderTextColor={colors.text.muted}
               style={styles.nameInput}
               value={fullName}
             />
+            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
           </View>
         </InfoCard>
         <PrimaryButton
           disabled={isSaveDisabled}
-          label="Simpan Perubahan"
-          onPress={() => undefined}
+          label={isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
+          onPress={handleSave}
         />
       </Screen>
     </View>
@@ -162,5 +189,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.primary,
     paddingHorizontal: spacing[16],
     color: colors.text.primary,
+  },
+  errorText: {
+    ...typography.bodySm,
+    color: colors.status.device.error,
   },
 });

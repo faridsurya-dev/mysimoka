@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { ForgotPasswordScreen } from '../screens/auth/forgot-password/ForgotPasswordScreen';
 import { LoginScreen } from '../screens/auth/login/LoginScreen';
 import { RegisterScreen } from '../screens/auth/register/RegisterScreen';
+import { SchoolConnectionScreen } from '../screens/auth/school-connection/SchoolConnectionScreen';
+import { VerifyEmailScreen } from '../screens/auth/verify-email/VerifyEmailScreen';
 import { ClassDetailScreen } from '../screens/dashboard/ClassDetailScreen';
 import { ClassListScreen } from '../screens/dashboard/ClassListScreen';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
@@ -31,7 +33,19 @@ import { EditPasswordScreen } from '../screens/profile/EditPasswordScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { EditSchoolProfileScreen } from '../screens/profile/EditSchoolProfileScreen';
 import { ProfileOverviewScreen } from '../screens/profile/ProfileOverviewScreen';
-import { clearAuthSession, setAuthSession } from '../services';
+import { SchoolSelectionScreen } from '../screens/setup/school-selection/SchoolSelectionScreen';
+import {
+  clearAuthSession,
+  clearCurrentSchoolContext,
+  getAuthSession,
+  hydrateAuthSession,
+  listMemberships,
+  loadCurrentSchoolContext,
+  regenerateSchoolJoinCode,
+  saveCurrentSchoolContext,
+  setAuthSession,
+  setActiveSchool,
+} from '../services';
 import { colors, radius, spacing, typography } from '../theme';
 import type { CreateSessionPayload } from '../types';
 import type { TeacherListItem } from '../types';
@@ -84,6 +98,25 @@ function readStringValue(source: UnknownObject | null, keys: string[]): string |
   return null;
 }
 
+function readStringOrNumberValue(source: UnknownObject | null, keys: string[]): string | null {
+  if (!source) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+
+  return null;
+}
+
 function readObjectValue(source: UnknownObject | null, key: string): UnknownObject | null {
   if (!source) {
     return null;
@@ -96,6 +129,11 @@ function extractSchoolNameFromLoginUser(user: unknown): string | null {
   const userObject = asObject(user);
   if (!userObject) {
     return null;
+  }
+
+  const schoolAsText = readStringValue(userObject, ['school']);
+  if (schoolAsText) {
+    return schoolAsText;
   }
 
   const directSchoolName = readStringValue(userObject, [
@@ -113,13 +151,96 @@ function extractSchoolNameFromLoginUser(user: unknown): string | null {
     readObjectValue(userObject, 'school_data') ??
     readObjectValue(userObject, 'schoolData');
 
-  return readStringValue(schoolObject, ['name', 'school_name', 'schoolName']);
+  return (
+    readStringValue(schoolObject, ['name', 'school_name', 'schoolName']) ??
+    readStringOrNumberValue(userObject, ['school_name', 'schoolName'])
+  );
+}
+
+type ProfileSettingsData = {
+  fullName: string;
+  roleLabels: string;
+  email: string;
+  schoolId: string | null;
+  activeSchoolRole: string | null;
+  canEditSchoolProfile: boolean;
+  schoolName: string;
+  schoolNumber: string | null;
+  schoolAddress: string | null;
+  schoolJoinCode: string | null;
+};
+
+function toRoleLabel(value: string): string {
+  if (value === 'school_admin') {
+    return 'Admin Sekolah';
+  }
+  if (value === 'school_member') {
+    return 'Anggota Sekolah';
+  }
+  if (value === 'user') {
+    return 'Pengguna';
+  }
+  return value
+    .split('_')
+    .map(part => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function buildProfileSettingsData(
+  user: UnknownObject | null,
+  memberships: Awaited<ReturnType<typeof listMemberships>>,
+): ProfileSettingsData {
+  const fullName =
+    readStringValue(user, ['full_name', 'fullName', 'name']) ?? 'Pengguna';
+  const email = readStringValue(user, ['email']) ?? '-';
+  const allowedRoles = Array.isArray(user?.allowed_roles)
+    ? user.allowed_roles
+    : Array.isArray(user?.allowedRoles)
+      ? user.allowedRoles
+      : [];
+  const normalizedAllowedRoles = allowedRoles
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map(item => item.trim());
+  const fallbackRole =
+    readStringValue(user, ['active_school_role']) ??
+    readStringValue(user, ['default_role', 'defaultRole']) ??
+    'user';
+  const uniqueRoles = Array.from(new Set([...normalizedAllowedRoles, fallbackRole]));
+  const activeMembership =
+    memberships.find(item => item.status === 'active' && item.is_active) ??
+    memberships.find(item => item.status === 'active') ??
+    null;
+  const normalizedRole = activeMembership?.role?.trim().toLowerCase() ?? null;
+  const canEditSchoolProfile =
+    normalizedRole === 'school_admin' || normalizedRole === 'admin_sekolah';
+
+  return {
+    fullName,
+    roleLabels: uniqueRoles.map(toRoleLabel).join(', '),
+    email,
+    schoolId: activeMembership?.school_id ?? null,
+    activeSchoolRole: activeMembership?.role ?? null,
+    canEditSchoolProfile,
+    schoolName: activeMembership?.school_name ?? DEFAULT_SCHOOL_NAME,
+    schoolNumber: activeMembership?.school_number ?? null,
+    schoolAddress: activeMembership?.school_address ?? null,
+    schoolJoinCode: activeMembership?.school_join_code ?? null,
+  };
 }
 
 export function RootNavigator() {
+  const [isBootstrappingAuth, setIsBootstrappingAuth] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentSchool, setCurrentSchool] = useState(DEFAULT_SCHOOL_NAME);
-  const [authRoute, setAuthRoute] = useState<'login' | 'register' | 'forgot-password'>('login');
+  const [currentSchoolId, setCurrentSchoolId] = useState<string | null>(null);
+  const [schoolMemberships, setSchoolMemberships] = useState<
+    Awaited<ReturnType<typeof listMemberships>>
+  >([]);
+  const [isSchoolSelectionVisible, setIsSchoolSelectionVisible] = useState(false);
+  const [authRoute, setAuthRoute] = useState<
+    'login' | 'register' | 'verify-email' | 'forgot-password' | 'school-connection'
+  >('login');
+  const [pendingVerificationToken, setPendingVerificationToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<MainTab>('dashboard');
   const [dashboardRoute, setDashboardRoute] = useState<DashboardRoute>('dashboard');
   const [dashboardStudentSearchKeyword, setDashboardStudentSearchKeyword] =
@@ -144,14 +265,109 @@ export function RootNavigator() {
   const [faceCameraFacing, setFaceCameraFacing] = useState<'back' | 'front'>('back');
   const [profileRoute, setProfileRoute] =
     useState<ProfileRoute>('profile-overview');
+  const [isRegeneratingJoinCode, setIsRegeneratingJoinCode] = useState(false);
+  const [schoolActionError, setSchoolActionError] = useState<string | null>(null);
+  const sessionUser = asObject(getAuthSession().user);
+  const profileData = buildProfileSettingsData(sessionUser, schoolMemberships);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const bootstrapAuth = async () => {
+      try {
+        const restoredSession = await hydrateAuthSession();
+        if (!isMounted) {
+          return;
+        }
+
+        const hasActiveSession = Boolean(restoredSession.accessToken);
+        let hasSchoolMembership = false;
+        let memberships: Awaited<ReturnType<typeof listMemberships>> = [];
+        if (hasActiveSession) {
+          try {
+            memberships = await listMemberships();
+            setSchoolMemberships(memberships);
+            hasSchoolMembership = memberships.some(item => item.status === 'active');
+          } catch {
+            hasSchoolMembership = false;
+          }
+        }
+
+        const shouldOpenSchoolConnection = hasActiveSession && !hasSchoolMembership;
+        setIsAuthenticated(hasActiveSession && hasSchoolMembership);
+        if (shouldOpenSchoolConnection) {
+          setAuthRoute('school-connection');
+        }
+        const activeMemberships = memberships.filter(item => item.status === 'active');
+        const cachedSchool = await loadCurrentSchoolContext();
+        const selectedMembership =
+          (cachedSchool
+            ? activeMemberships.find(item => item.school_id === cachedSchool.schoolId)
+            : null) ??
+          activeMemberships.find(item => item.is_active) ??
+          activeMemberships[0] ??
+          null;
+
+        if (selectedMembership) {
+          setCurrentSchoolId(selectedMembership.school_id);
+          setCurrentSchool(selectedMembership.school_name);
+          await saveCurrentSchoolContext({
+            schoolId: selectedMembership.school_id,
+            schoolName: selectedMembership.school_name,
+          });
+        } else {
+          setCurrentSchool(extractSchoolNameFromLoginUser(restoredSession.user) ?? DEFAULT_SCHOOL_NAME);
+          setCurrentSchoolId(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsBootstrappingAuth(false);
+        }
+      }
+    };
+
+    bootstrapAuth().catch(() => {
+      if (isMounted) {
+        setIsBootstrappingAuth(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  if (isBootstrappingAuth) {
+    return (
+      <View style={styles.bootstrapContainer}>
+        <ActivityIndicator color={colors.brand.primary500} size="small" />
+      </View>
+    );
+  }
 
   if (!isAuthenticated) {
     if (authRoute === 'register') {
       return (
         <RegisterScreen
           onBackToLogin={() => setAuthRoute('login')}
-          onRegisterSuccess={() => {
-            setIsAuthenticated(true);
+          onRegisterSuccess={verificationToken => {
+            setPendingVerificationToken(verificationToken);
+            setAuthRoute('verify-email');
+          }}
+        />
+      );
+    }
+
+    if (authRoute === 'verify-email') {
+      return (
+        <VerifyEmailScreen
+          initialToken={pendingVerificationToken}
+          onBackToLogin={() => {
+            setPendingVerificationToken(null);
+            setAuthRoute('login');
+          }}
+          onVerifySuccess={() => {
+            setPendingVerificationToken(null);
             setAuthRoute('login');
           }}
         />
@@ -160,6 +376,34 @@ export function RootNavigator() {
 
     if (authRoute === 'forgot-password') {
       return <ForgotPasswordScreen onBackToLogin={() => setAuthRoute('login')} />;
+    }
+
+    if (authRoute === 'school-connection') {
+      return (
+        <SchoolConnectionScreen
+          onConnected={() => {
+            listMemberships()
+              .then(memberships => {
+                const activeMemberships = memberships.filter(item => item.status === 'active');
+                setSchoolMemberships(memberships);
+                if (activeMemberships.length === 0) {
+                  setAuthRoute('school-connection');
+                  return;
+                }
+                setIsSchoolSelectionVisible(true);
+                setIsAuthenticated(true);
+              })
+              .catch(() => {
+                setAuthRoute('login');
+              });
+          }}
+          onLogout={() => {
+            clearAuthSession();
+            clearCurrentSchoolContext().catch(() => undefined);
+            setAuthRoute('login');
+          }}
+        />
+      );
     }
 
     return (
@@ -171,10 +415,60 @@ export function RootNavigator() {
             user: result.user,
           });
           setCurrentSchool(extractSchoolNameFromLoginUser(result.user) ?? DEFAULT_SCHOOL_NAME);
-          setIsAuthenticated(true);
+
+          if (result.requiresSchoolConnection) {
+            setAuthRoute('school-connection');
+            return;
+          }
+
+          listMemberships()
+            .then(memberships => {
+              const activeMemberships = memberships.filter(item => item.status === 'active');
+              setSchoolMemberships(memberships);
+
+              if (activeMemberships.length === 0) {
+                setAuthRoute('school-connection');
+                return;
+              }
+
+              setIsAuthenticated(true);
+              setIsSchoolSelectionVisible(true);
+            })
+            .catch(() => {
+              setAuthRoute('school-connection');
+            });
         }}
         onOpenRegister={() => setAuthRoute('register')}
         onOpenForgotPassword={() => setAuthRoute('forgot-password')}
+      />
+    );
+  }
+
+  if (isSchoolSelectionVisible) {
+    return (
+      <SchoolSelectionScreen
+        memberships={schoolMemberships}
+        selectedSchoolId={currentSchoolId}
+        onSelectSchool={membership => {
+          setActiveSchool(membership.school_id)
+            .then(async () => {
+              setCurrentSchoolId(membership.school_id);
+              setCurrentSchool(membership.school_name);
+              setSchoolMemberships(previous =>
+                previous.map(item => ({
+                  ...item,
+                  is_active: item.school_id === membership.school_id,
+                }))
+              );
+              await saveCurrentSchoolContext({
+                schoolId: membership.school_id,
+                schoolName: membership.school_name,
+              });
+              setIsSchoolSelectionVisible(false);
+              setIsAuthenticated(true);
+            })
+            .catch(() => undefined);
+        }}
       />
     );
   }
@@ -310,17 +604,87 @@ export function RootNavigator() {
       {activeTab === 'profile'
         ? renderProfileStack({
             profileRoute,
+            profileData,
             onBackToProfile: () => setProfileRoute('profile-overview'),
             onOpenEditProfile: () => setProfileRoute('edit-profile'),
-            onOpenEditSchoolProfile: () => setProfileRoute('edit-school-profile'),
+            onOpenEditSchoolProfile: () => {
+              if (!profileData.canEditSchoolProfile) {
+                return;
+              }
+              setSchoolActionError(null);
+              setProfileRoute('edit-school-profile');
+            },
             onOpenAccountSettings: () => setProfileRoute('account-settings'),
             onOpenEditEmail: () => setProfileRoute('edit-email'),
             onOpenEditPassword: () => setProfileRoute('edit-password'),
+            onRegenerateJoinCode: () => {
+              if (!profileData.canEditSchoolProfile || !profileData.schoolId || isRegeneratingJoinCode) {
+                return;
+              }
+
+              setSchoolActionError(null);
+              setIsRegeneratingJoinCode(true);
+              regenerateSchoolJoinCode(profileData.schoolId)
+                .then(() => listMemberships())
+                .then(memberships => {
+                  setSchoolMemberships(memberships);
+                })
+                .catch(error => {
+                  setSchoolActionError(
+                    error instanceof Error
+                      ? error.message
+                      : 'Gagal generate ulang kode gabung.',
+                  );
+                })
+                .finally(() => {
+                  setIsRegeneratingJoinCode(false);
+                });
+            },
+            onSchoolProfileSaved: () => {
+              listMemberships()
+                .then(memberships => {
+                  setSchoolMemberships(memberships);
+                })
+                .catch(() => undefined);
+            },
+            onSwitchSchool: () => {
+              listMemberships()
+                .then(memberships => {
+                  const activeMemberships = memberships.filter(item => item.status === 'active');
+                  setSchoolMemberships(memberships);
+                  if (activeMemberships.length === 0) {
+                    setAuthRoute('school-connection');
+                    setIsAuthenticated(false);
+                    return;
+                  }
+
+                  setProfileRoute('profile-overview');
+                  setActiveTab('dashboard');
+                  setDashboardRoute('dashboard');
+                  setMeasurementRoute('session-list');
+                  setMeasurementProgram('measurement');
+                  setActiveImmunizationType('Td');
+                  setActiveImmunizationDose(null);
+                  setActiveImmunizationOfficer('Petugas UKS');
+                  setActiveSessionDate(new Date().toISOString());
+                  setIdentifiedStudentName(null);
+                  setFaceCropPreview(null);
+                  setIsSchoolSelectionVisible(true);
+                })
+                .catch(() => {
+                  setAuthRoute('school-connection');
+                  setIsAuthenticated(false);
+                });
+            },
             onLogout: () => {
               clearAuthSession();
+              clearCurrentSchoolContext().catch(() => undefined);
               setCurrentSchool(DEFAULT_SCHOOL_NAME);
+              setCurrentSchoolId(null);
+              setSchoolMemberships([]);
               setIsAuthenticated(false);
               setAuthRoute('login');
+              setIsSchoolSelectionVisible(false);
               setActiveTab('dashboard');
               setDashboardRoute('dashboard');
               setMeasurementRoute('session-list');
@@ -332,7 +696,10 @@ export function RootNavigator() {
               setIdentifiedStudentName(null);
               setFaceCropPreview(null);
               setProfileRoute('profile-overview');
+              setSchoolActionError(null);
             },
+            isRegeneratingJoinCode,
+            schoolActionError,
           })
         : null}
     </MainAppShell>
@@ -672,13 +1039,19 @@ function renderMeasurementStack({
 
 type ProfileStackOptions = {
   profileRoute: ProfileRoute;
+  profileData: ProfileSettingsData;
   onBackToProfile: () => void;
   onOpenEditProfile: () => void;
   onOpenEditSchoolProfile: () => void;
   onOpenAccountSettings: () => void;
   onOpenEditEmail: () => void;
   onOpenEditPassword: () => void;
+  onRegenerateJoinCode: () => void;
+  onSchoolProfileSaved: () => void;
+  onSwitchSchool: () => void;
   onLogout: () => void;
+  isRegeneratingJoinCode: boolean;
+  schoolActionError: string | null;
 };
 
 function renderProfileStack({
@@ -689,23 +1062,41 @@ function renderProfileStack({
   onOpenAccountSettings,
   onOpenEditEmail,
   onOpenEditPassword,
+  onRegenerateJoinCode,
+  onSchoolProfileSaved,
+  onSwitchSchool,
   onLogout,
+  isRegeneratingJoinCode,
+  schoolActionError,
+  profileData,
 }: ProfileStackOptions) {
   switch (profileRoute) {
     case 'edit-profile':
-      return <EditProfileScreen onBack={onBackToProfile} />;
+      return <EditProfileScreen onBack={onBackToProfile} fullName={profileData.fullName} />;
     case 'edit-school-profile':
-      return <EditSchoolProfileScreen onBack={onBackToProfile} />;
+      return (
+        <EditSchoolProfileScreen
+          canEditSchoolProfile={profileData.canEditSchoolProfile}
+          onBack={onBackToProfile}
+          onSaved={onSchoolProfileSaved}
+          schoolId={profileData.schoolId}
+          schoolAddress={profileData.schoolAddress}
+          schoolName={profileData.schoolName}
+          schoolNumber={profileData.schoolNumber}
+        />
+      );
     case 'edit-email':
-      return <EditEmailScreen onBack={onBackToProfile} />;
+      return <EditEmailScreen onBack={onBackToProfile} currentEmail={profileData.email} />;
     case 'edit-password':
       return <EditPasswordScreen onBack={onBackToProfile} />;
     case 'account-settings':
       return (
         <AccountSettingsScreen
+          email={profileData.email}
           onBack={onBackToProfile}
           onOpenEditEmail={onOpenEditEmail}
           onOpenEditPassword={onOpenEditPassword}
+          onSwitchSchool={onSwitchSchool}
           onLogout={onLogout}
         />
       );
@@ -713,12 +1104,24 @@ function renderProfileStack({
     default:
       return (
         <ProfileOverviewScreen
+          canEditSchoolProfile={profileData.canEditSchoolProfile}
+          email={profileData.email}
+          fullName={profileData.fullName}
           onEditProfile={onOpenEditProfile}
           onEditSchoolProfile={onOpenEditSchoolProfile}
           onOpenAccountSettings={onOpenAccountSettings}
           onOpenEditEmail={onOpenEditEmail}
           onOpenEditPassword={onOpenEditPassword}
+          onRegenerateJoinCode={onRegenerateJoinCode}
+          onSwitchSchool={onSwitchSchool}
           onLogout={onLogout}
+          roleLabel={profileData.roleLabels}
+          schoolActionError={schoolActionError}
+          schoolAddress={profileData.schoolAddress}
+          isRegeneratingJoinCode={isRegeneratingJoinCode}
+          schoolJoinCode={profileData.schoolJoinCode}
+          schoolName={profileData.schoolName}
+          schoolNumber={profileData.schoolNumber}
         />
       );
   }
@@ -787,6 +1190,12 @@ function TabIcon({ color, tab }: TabIconProps) {
 }
 
 const styles = StyleSheet.create({
+  bootstrapContainer: {
+    flex: 1,
+    backgroundColor: colors.surface.app,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: colors.surface.app,

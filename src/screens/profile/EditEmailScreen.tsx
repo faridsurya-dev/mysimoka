@@ -7,15 +7,15 @@ import { colors, radius, spacing, typography } from '../../theme';
 
 type EditEmailScreenProps = {
   onBack: () => void;
+  currentEmail: string;
 };
 
 function isEmailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-export function EditEmailScreen({ onBack }: EditEmailScreenProps) {
+export function EditEmailScreen({ onBack, currentEmail }: EditEmailScreenProps) {
   const insets = useSafeAreaInsets();
-  const [currentEmail] = useState('farid.ramadhan@simoka.id');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [confirmEmail, setConfirmEmail] = useState('');

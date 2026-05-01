@@ -7,14 +7,18 @@ type AccountSettingsScreenProps = {
   onBack: () => void;
   onOpenEditEmail: () => void;
   onOpenEditPassword: () => void;
+  onSwitchSchool: () => void;
   onLogout: () => void;
+  email: string;
 };
 
 export function AccountSettingsScreen({
   onBack,
   onOpenEditEmail,
   onOpenEditPassword,
+  onSwitchSchool,
   onLogout,
+  email,
 }: AccountSettingsScreenProps) {
   const shouldShowWhatsApp = false;
 
@@ -37,7 +41,7 @@ export function AccountSettingsScreen({
           <View style={styles.row}>
             <View style={styles.rowMeta}>
               <Text style={styles.rowLabel}>Email</Text>
-              <Text style={styles.rowValue}>farid.ramadhan@simoka.id</Text>
+              <Text style={styles.rowValue}>{email}</Text>
             </View>
             <Pressable onPress={onOpenEditEmail} style={styles.rowAction}>
               <Text style={styles.rowActionLabel}>Edit</Text>
@@ -64,7 +68,7 @@ export function AccountSettingsScreen({
         <View style={styles.row}>
           <View style={styles.rowMeta}>
             <Text style={styles.rowLabel}>Password</Text>
-            <Text style={styles.rowValue}>Terakhir diubah 22 Jan 2026</Text>
+            <Text style={styles.rowValue}>Kelola password akun Anda</Text>
           </View>
           <Pressable onPress={onOpenEditPassword} style={styles.rowAction}>
             <Text style={styles.rowActionLabel}>Edit</Text>
@@ -72,8 +76,15 @@ export function AccountSettingsScreen({
         </View>
       </InfoCard>
 
+      <Pressable onPress={onSwitchSchool} style={styles.switchSchoolCard}>
+        <Text style={styles.switchSchoolTitle}>Pilih Sekolah Lain</Text>
+        <Text style={styles.switchSchoolBody}>
+          Kembali ke halaman pemilihan sekolah tanpa logout.
+        </Text>
+      </Pressable>
+
       <Pressable onPress={onLogout} style={styles.logoutCard}>
-        <Text style={styles.logoutTitle}>Logout</Text>
+        <Text style={styles.logoutTitle}>Keluar</Text>
         <Text style={styles.logoutBody}>Keluar dari akun dan kembali ke halaman login.</Text>
       </Pressable>
     </Screen>
@@ -145,6 +156,22 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: colors.border.subtle,
+  },
+  switchSchoolCard: {
+    backgroundColor: colors.surface.secondary,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    padding: spacing[16],
+    gap: spacing[4],
+  },
+  switchSchoolTitle: {
+    ...typography.headingMd,
+    color: colors.brand.primary700,
+  },
+  switchSchoolBody: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
   logoutCard: {
     backgroundColor: colors.feedback.errorBackground,
