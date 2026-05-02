@@ -1,12 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { DASHBOARD_STUDENT_SEARCH_ITEMS } from '../../features/dashboard';
+import {
+  createStudent,
+  listStudentsBySchool,
+  type DashboardStudentListItem,
+} from '../../services';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type StudentListScreenProps = {
+  schoolId: string | null;
   onBack: () => void;
   onOpenStudentProfile: () => void;
 };
@@ -19,6 +25,7 @@ function parseClassLevel(className: string) {
 }
 
 export function StudentListScreen({
+  schoolId,
   onBack,
   onOpenStudentProfile,
 }: StudentListScreenProps) {
@@ -29,12 +36,62 @@ export function StudentListScreen({
   const [selectedLevelFilters, setSelectedLevelFilters] = useState<string[]>([]);
   const [draftClassFilters, setDraftClassFilters] = useState<string[]>([]);
   const [draftLevelFilters, setDraftLevelFilters] = useState<string[]>([]);
+  const [students, setStudents] = useState<DashboardStudentListItem[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [loadStudentsError, setLoadStudentsError] = useState<string | null>(null);
+  const [isCreateDialogVisible, setIsCreateDialogVisible] = useState(false);
+  const [createFullName, setCreateFullName] = useState('');
+  const [createNis, setCreateNis] = useState('');
+  const [createNisn, setCreateNisn] = useState('');
+  const [createGender, setCreateGender] = useState<'male' | 'female' | null>(null);
+  const [createBirthDate, setCreateBirthDate] = useState<Date | null>(null);
+  const [isBirthDatePickerVisible, setIsBirthDatePickerVisible] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isSubmittingCreate, setIsSubmittingCreate] = useState(false);
+
+  const loadStudents = useCallback(async () => {
+    if (!schoolId) {
+      setStudents([]);
+      setLoadStudentsError('Sekolah aktif belum dipilih.');
+      setIsLoadingStudents(false);
+      return;
+    }
+
+    setIsLoadingStudents(true);
+    setLoadStudentsError(null);
+
+    try {
+      const rows = await listStudentsBySchool(schoolId);
+      setStudents(rows);
+    } catch (error) {
+      setStudents([]);
+      setLoadStudentsError(error instanceof Error ? error.message : 'Gagal memuat daftar siswa.');
+    } finally {
+      setIsLoadingStudents(false);
+    }
+  }, [schoolId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    loadStudents().catch(() => {
+      if (isMounted) {
+        setStudents([]);
+        setLoadStudentsError('Gagal memuat daftar siswa.');
+        setIsLoadingStudents(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadStudents]);
 
   const classOptions = useMemo(() => {
-    return Array.from(new Set(DASHBOARD_STUDENT_SEARCH_ITEMS.map(student => student.className))).sort(
+    return Array.from(new Set(students.map(student => student.className))).sort(
       (left, right) => left.localeCompare(right, 'id-ID'),
     );
-  }, []);
+  }, [students]);
 
   const levelOptions = useMemo(() => {
     return Array.from({ length: 12 }, (_, index) => String(index + 1));
@@ -43,7 +100,7 @@ export function StudentListScreen({
   const filteredStudents = useMemo(() => {
     const keyword = query.trim().toLowerCase();
 
-    return DASHBOARD_STUDENT_SEARCH_ITEMS.filter(student => {
+    return students.filter(student => {
       const isSearchMatched = keyword
         ? `${student.name} ${student.nisn} ${student.className}`
             .toLowerCase()
@@ -65,7 +122,7 @@ export function StudentListScreen({
 
       return true;
     });
-  }, [query, selectedClassFilters, selectedLevelFilters]);
+  }, [query, selectedClassFilters, selectedLevelFilters, students]);
 
   const activeFilterCount = selectedClassFilters.length + selectedLevelFilters.length;
 
@@ -90,6 +147,66 @@ export function StudentListScreen({
     setDraftLevelFilters([]);
   }
 
+  function handleOpenCreateDialog() {
+    setCreateError(null);
+    setCreateFullName('');
+    setCreateNis('');
+    setCreateNisn('');
+    setCreateGender(null);
+    setCreateBirthDate(null);
+    setIsCreateDialogVisible(true);
+  }
+
+  function handleCloseCreateDialog() {
+    if (isSubmittingCreate) {
+      return;
+    }
+    setIsCreateDialogVisible(false);
+  }
+
+  async function handleSubmitCreateStudent() {
+    const normalizedName = createFullName.trim();
+    if (!normalizedName) {
+      setCreateError('Nama siswa wajib diisi.');
+      return;
+    }
+
+    setCreateError(null);
+    setIsSubmittingCreate(true);
+
+    try {
+      if (!schoolId) {
+        throw new Error('Sekolah aktif belum dipilih.');
+      }
+
+      await createStudent({
+        schoolId,
+        fullName: normalizedName,
+        nis: createNis.trim().length > 0 ? createNis.trim() : null,
+        nisn: createNisn.trim().length > 0 ? createNisn.trim() : null,
+        gender: createGender,
+        birthDate: createBirthDate ? formatDateValue(createBirthDate) : null,
+      });
+      setIsCreateDialogVisible(false);
+      await loadStudents();
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Gagal menambahkan siswa.');
+    } finally {
+      setIsSubmittingCreate(false);
+    }
+  }
+
+  function handleBirthDateChange(event: DateTimePickerEvent, selectedDate?: Date) {
+    setIsBirthDatePickerVisible(false);
+    if (event.type !== 'set' || !selectedDate) {
+      return;
+    }
+
+    setCreateBirthDate(
+      new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()),
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}>
@@ -111,7 +228,7 @@ export function StudentListScreen({
             <Pressable
               accessibilityLabel="Tambah siswa"
               accessibilityRole="button"
-              onPress={() => {}}
+              onPress={handleOpenCreateDialog}
               style={({ pressed }) => [
                 styles.headerActionButton,
                 pressed && styles.headerActionButtonPressed,
@@ -228,7 +345,17 @@ export function StudentListScreen({
           ) : null}
         </View>
 
-        {filteredStudents.length > 0 ? (
+        {isLoadingStudents ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Memuat daftar siswa...</Text>
+            <Text style={styles.emptyBody}>Mengambil data siswa dari Hasura.</Text>
+          </View>
+        ) : loadStudentsError ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Data siswa gagal dimuat</Text>
+            <Text style={styles.emptyBody}>{loadStudentsError}</Text>
+          </View>
+        ) : filteredStudents.length > 0 ? (
           <View style={styles.list}>
             {filteredStudents.map(student => (
               <Pressable
@@ -409,8 +536,151 @@ export function StudentListScreen({
           </View>
         </View>
       </Modal>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={isCreateDialogVisible}
+        onRequestClose={handleCloseCreateDialog}>
+        <View style={styles.dialogBackdrop}>
+          <Pressable
+            style={styles.dialogBackdropPressable}
+            onPress={handleCloseCreateDialog}
+          />
+          <View style={styles.dialogCard}>
+            <View style={styles.dialogTitleRow}>
+              <Text style={styles.dialogTitle}>Tambah Siswa</Text>
+            </View>
+            <Text style={styles.dialogDescription}>
+              Isi data siswa baru untuk ditambahkan ke sekolah aktif.
+            </Text>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.dialogFieldLabel}>Nama</Text>
+              <TextInput
+                value={createFullName}
+                onChangeText={setCreateFullName}
+                placeholder="Nama siswa"
+                placeholderTextColor={colors.text.muted}
+                style={styles.formInput}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.dialogFieldLabel}>NIS (Opsional)</Text>
+              <TextInput
+                value={createNis}
+                onChangeText={setCreateNis}
+                placeholder="NIS"
+                placeholderTextColor={colors.text.muted}
+                style={styles.formInput}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.dialogFieldLabel}>NISN (Opsional)</Text>
+              <TextInput
+                value={createNisn}
+                onChangeText={setCreateNisn}
+                placeholder="NISN"
+                placeholderTextColor={colors.text.muted}
+                style={styles.formInput}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.dialogFieldLabel}>Gender</Text>
+              <View style={styles.genderRow}>
+                <Pressable
+                  onPress={() => setCreateGender('male')}
+                  style={[
+                    styles.genderButton,
+                    createGender === 'male' && styles.genderButtonActive,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.genderButtonLabel,
+                      createGender === 'male' && styles.genderButtonLabelActive,
+                    ]}>
+                    Laki-laki
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setCreateGender('female')}
+                  style={[
+                    styles.genderButton,
+                    createGender === 'female' && styles.genderButtonActive,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.genderButtonLabel,
+                      createGender === 'female' && styles.genderButtonLabelActive,
+                    ]}>
+                    Perempuan
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.dialogFieldLabel}>Tanggal Lahir</Text>
+              <Pressable
+                onPress={() => setIsBirthDatePickerVisible(true)}
+                style={({ pressed }) => [
+                  styles.formInput,
+                  styles.formInputPressable,
+                  pressed && styles.formInputPressablePressed,
+                ]}>
+                <Text style={createBirthDate ? styles.formInputValue : styles.formInputPlaceholder}>
+                  {createBirthDate ? formatDateValue(createBirthDate) : 'Pilih tanggal lahir'}
+                </Text>
+              </Pressable>
+            </View>
+
+            {createError ? <Text style={styles.createErrorText}>{createError}</Text> : null}
+
+            <View style={styles.dialogActions}>
+              <Pressable
+                onPress={handleCloseCreateDialog}
+                style={({ pressed }) => [
+                  styles.dialogSecondaryButton,
+                  pressed && styles.dialogSecondaryButtonPressed,
+                ]}>
+                <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSubmitCreateStudent}
+                style={({ pressed }) => [
+                  styles.dialogPrimaryButton,
+                  pressed && styles.dialogPrimaryButtonPressed,
+                  isSubmittingCreate && styles.dialogPrimaryButtonDisabled,
+                ]}>
+                <Text style={styles.dialogPrimaryButtonLabel}>
+                  {isSubmittingCreate ? 'Menyimpan...' : 'Simpan'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {isBirthDatePickerVisible ? (
+        <DateTimePicker
+          value={createBirthDate ?? new Date(2015, 0, 1)}
+          mode="date"
+          display="default"
+          maximumDate={new Date()}
+          onChange={handleBirthDateChange}
+        />
+      ) : null}
     </View>
   );
+}
+
+function formatDateValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 const styles = StyleSheet.create({
@@ -617,6 +887,62 @@ const styles = StyleSheet.create({
     padding: spacing[20],
     gap: spacing[12],
   },
+  formGroup: {
+    gap: spacing[8],
+  },
+  formInput: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    minHeight: 44,
+    paddingHorizontal: spacing[12],
+    color: colors.text.primary,
+    ...typography.bodyMd,
+  },
+  formInputPressable: {
+    justifyContent: 'center',
+  },
+  formInputPressablePressed: {
+    borderColor: colors.brand.primary500,
+  },
+  formInputValue: {
+    ...typography.bodyMd,
+    color: colors.text.primary,
+  },
+  formInputPlaceholder: {
+    ...typography.bodyMd,
+    color: colors.text.muted,
+  },
+  genderRow: {
+    flexDirection: 'row',
+    gap: spacing[8],
+  },
+  genderButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface.primary,
+  },
+  genderButtonActive: {
+    borderColor: colors.brand.primary500,
+    backgroundColor: colors.brand.primary100,
+  },
+  genderButtonLabel: {
+    ...typography.labelMd,
+    color: colors.text.secondary,
+  },
+  genderButtonLabelActive: {
+    color: colors.brand.primary700,
+  },
+  createErrorText: {
+    ...typography.bodySm,
+    color: colors.accent.red,
+  },
   dialogTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -741,6 +1067,9 @@ const styles = StyleSheet.create({
   },
   dialogPrimaryButtonPressed: {
     backgroundColor: colors.brand.primary700,
+  },
+  dialogPrimaryButtonDisabled: {
+    opacity: 0.6,
   },
   dialogPrimaryButtonLabel: {
     ...typography.labelMd,

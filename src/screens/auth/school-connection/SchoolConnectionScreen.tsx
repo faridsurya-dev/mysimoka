@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton, TextField } from '../../../shared/components';
 import { createSchool, joinSchool } from '../../../services';
-import { colors, spacing, typography } from '../../../theme';
+import { colors, radius, spacing, typography } from '../../../theme';
 
 type SchoolConnectionScreenProps = {
   onConnected: () => void;
@@ -72,26 +72,34 @@ export function SchoolConnectionScreen({ onConnected, onLogout }: SchoolConnecti
       ]}
       keyboardDismissMode="on-drag"
       keyboardShouldPersistTaps="handled">
-      <View style={styles.container}>
+      <View style={styles.keyboardArea}>
         <View style={styles.header}>
+          <View style={styles.logoWrapper}>
+            <Image
+              source={require('../../../../assets/mysimoka_logo.png')}
+              style={styles.logo}
+              resizeMode="cover"
+            />
+          </View>
+          <Text style={styles.eyebrow}>MySimoka</Text>
           <Text style={styles.title}>Hubungkan Akun ke Sekolah</Text>
           <Text style={styles.subtitle}>
             Akun wajib terhubung ke sekolah sebelum dapat mengakses dashboard.
           </Text>
         </View>
 
-        <View style={styles.modeSwitcher}>
+        <View style={styles.switcher}>
           <Pressable
             onPress={() => setMode('create')}
-            style={[styles.modeButton, mode === 'create' && styles.modeButtonActive]}>
-            <Text style={[styles.modeButtonLabel, mode === 'create' && styles.modeButtonLabelActive]}>
+            style={[styles.switcherItem, mode === 'create' && styles.switcherItemActive]}>
+            <Text style={[styles.switcherLabel, mode === 'create' && styles.switcherLabelActive]}>
               Buat Sekolah
             </Text>
           </Pressable>
           <Pressable
             onPress={() => setMode('join')}
-            style={[styles.modeButton, mode === 'join' && styles.modeButtonActive]}>
-            <Text style={[styles.modeButtonLabel, mode === 'join' && styles.modeButtonLabelActive]}>
+            style={[styles.switcherItem, mode === 'join' && styles.switcherItemActive]}>
+            <Text style={[styles.switcherLabel, mode === 'join' && styles.switcherLabelActive]}>
               Gabung Sekolah
             </Text>
           </Pressable>
@@ -132,11 +140,15 @@ export function SchoolConnectionScreen({ onConnected, onLogout }: SchoolConnecti
           loading={isSubmitting}
           label={mode === 'create' ? 'Buat dan Hubungkan' : 'Gabung Sekolah'}
           onPress={handleSubmit}
+          style={styles.button}
         />
 
-        <Pressable onPress={onLogout} style={styles.logoutLink}>
-          <Text style={styles.logoutLabel}>Logout</Text>
-        </Pressable>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Ingin ganti akun?</Text>
+          <Pressable onPress={onLogout}>
+            <Text style={styles.footerLink}>Logout</Text>
+          </Pressable>
+        </View>
       </View>
     </KeyboardAwareScrollView>
   );
@@ -149,45 +161,75 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     paddingHorizontal: spacing[24],
+    justifyContent: 'center',
   },
-  container: {
+  keyboardArea: {
     width: '100%',
     gap: spacing[20],
   },
   header: {
+    alignItems: 'center',
     gap: spacing[8],
   },
+  logoWrapper: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    overflow: 'hidden',
+    marginBottom: spacing[8],
+    backgroundColor: colors.surface.primary,
+    borderWidth: 4,
+    borderColor: colors.neutral[0],
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  logo: {
+    width: '100%',
+    height: '100%',
+  },
+  eyebrow: {
+    ...typography.caption,
+    color: colors.brand.primary700,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
   title: {
-    ...typography.headingLg,
+    ...typography.headingXL,
     color: colors.text.primary,
+    textAlign: 'center',
   },
   subtitle: {
     ...typography.bodyMd,
     color: colors.text.secondary,
+    textAlign: 'center',
   },
-  modeSwitcher: {
+  switcher: {
     flexDirection: 'row',
-    gap: spacing[10],
+    backgroundColor: colors.surface.secondary,
+    borderRadius: radius.pill,
+    padding: spacing[4],
+    gap: spacing[4],
   },
-  modeButton: {
+  switcherItem: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: colors.neutral[200],
-    borderRadius: 12,
-    paddingVertical: spacing[10],
+    minHeight: 42,
+    borderRadius: radius.pill,
     alignItems: 'center',
-    backgroundColor: colors.neutral[0],
+    justifyContent: 'center',
+    paddingHorizontal: spacing[12],
   },
-  modeButtonActive: {
-    borderColor: colors.brand.primary500,
-    backgroundColor: colors.brand.primary100,
+  switcherItemActive: {
+    backgroundColor: colors.surface.primary,
   },
-  modeButtonLabel: {
+  switcherLabel: {
     ...typography.labelMd,
     color: colors.text.secondary,
   },
-  modeButtonLabelActive: {
-    color: colors.brand.primary700,
+  switcherLabelActive: {
+    color: colors.brand.primary500,
   },
   form: {
     gap: spacing[12],
@@ -196,12 +238,19 @@ const styles = StyleSheet.create({
     ...typography.bodySm,
     color: colors.accent.red,
   },
-  logoutLink: {
-    alignSelf: 'center',
-    paddingVertical: spacing[8],
+  button: {
+    width: '100%',
   },
-  logoutLabel: {
-    ...typography.labelMd,
+  footer: {
+    alignItems: 'center',
+    gap: spacing[8],
+  },
+  footerText: {
+    ...typography.bodySm,
     color: colors.text.secondary,
+  },
+  footerLink: {
+    ...typography.labelMd,
+    color: colors.brand.primary500,
   },
 });

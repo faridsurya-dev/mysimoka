@@ -8,12 +8,14 @@ type SchoolSelectionScreenProps = {
   memberships: SchoolMembership[];
   onSelectSchool: (membership: SchoolMembership) => void;
   selectedSchoolId?: string | null;
+  errorMessage?: string | null;
 };
 
 export function SchoolSelectionScreen({
   memberships,
   onSelectSchool,
   selectedSchoolId = null,
+  errorMessage = null,
 }: SchoolSelectionScreenProps) {
   const activeMemberships = memberships.filter(item => item.status === 'active');
 
@@ -28,6 +30,7 @@ export function SchoolSelectionScreen({
       </View>
 
       <StatusPill label={`${activeMemberships.length} Sekolah Tersedia`} tone="info" />
+      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
       <View style={styles.list}>
         {activeMemberships.map(membership => {
@@ -76,6 +79,10 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: spacing[12],
+  },
+  errorText: {
+    ...typography.bodySm,
+    color: colors.accent.red,
   },
   card: {
     backgroundColor: colors.surface.primary,

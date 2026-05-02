@@ -52,12 +52,16 @@ const REGISTER_ENDPOINT = '/register';
 const LOGIN_ENDPOINT = '/login';
 const REFRESH_ENDPOINT = '/refresh';
 const VERIFY_EMAIL_ENDPOINT = '/verify-email';
-const CREATE_SCHOOL_ENDPOINT = '/schools';
-const JOIN_SCHOOL_ENDPOINT = '/schools/join';
-const MEMBERSHIPS_ENDPOINT = '/me/memberships';
-const ACTIVE_SCHOOL_ENDPOINT = '/me/active-school';
 const AUTH_SESSION_STORAGE_KEY = 'mysimoka:auth-session';
 const CURRENT_SCHOOL_STORAGE_KEY = 'mysimoka:current-school';
+export const ROLE_HIERARCHY = ['school_admin', 'teacher', 'user'] as const;
+const ROLE_PRIORITY: Record<string, number> = ROLE_HIERARCHY.reduce(
+  (accumulator, role, index) => ({
+    ...accumulator,
+    [role]: index,
+  }),
+  {} as Record<string, number>,
+);
 
 let authSession: AuthSession = {
   accessToken: null,
@@ -85,6 +89,48 @@ function readNullableString(value: unknown): string | null {
   }
 
   return null;
+}
+
+export function normalizeRoleKey(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'admin_sekolah') {
+    return 'school_admin';
+  }
+  if (normalized === 'school_member' || normalized === 'anggota_sekolah') {
+    return 'teacher';
+  }
+  return normalized;
+}
+
+export function sortRolesByPriority(roles: string[]): string[] {
+  const uniqueRoles = Array.from(new Set(roles.map(normalizeRoleKey)));
+  uniqueRoles.sort((a, b) => {
+    const priorityA = ROLE_PRIORITY[a] ?? Number.MAX_SAFE_INTEGER;
+    const priorityB = ROLE_PRIORITY[b] ?? Number.MAX_SAFE_INTEGER;
+    return priorityA - priorityB;
+  });
+  return uniqueRoles;
+}
+
+function resolveHighestAllowedRoleFromSession(): string | null {
+  const sessionUser = asObject(authSession.user);
+  if (!sessionUser) {
+    return null;
+  }
+
+  const allowedRolesSource = Array.isArray(sessionUser.allowed_roles)
+    ? sessionUser.allowed_roles
+    : Array.isArray(sessionUser.allowedRoles)
+      ? sessionUser.allowedRoles
+      : [];
+  const normalizedRoles = allowedRolesSource
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map(role => normalizeRoleKey(role));
+  if (normalizedRoles.length === 0) {
+    return null;
+  }
+
+  return sortRolesByPriority(normalizedRoles)[0] ?? null;
 }
 
 function normalizePersistedAuthSession(value: unknown): PersistedAuthSession | null {
@@ -315,6 +361,32 @@ export type SchoolMembership = {
   is_active: boolean;
 };
 
+export type DashboardStudentListItem = {
+  id: string;
+  name: string;
+  nisn: string;
+  className: string;
+};
+
+export type CreateStudentPayload = {
+  schoolId: string;
+  fullName: string;
+  nis?: string | null;
+  nisn?: string | null;
+  gender?: 'male' | 'female' | null;
+  birthDate?: string | null;
+};
+
+type SchoolDetailsById = Record<
+  string,
+  {
+    name: string | null;
+    number: string | null;
+    address: string | null;
+    joinCode: string | null;
+  }
+>;
+
 export type CurrentSchoolContext = {
   schoolId: string;
   schoolName: string;
@@ -330,6 +402,25 @@ export type UpdateSchoolProfilePayload = {
   number?: string | null;
   address: string;
 };
+
+export type AcademicYear = {
+  id: string;
+  school_id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+};
+
+function getSessionUserIdOrThrow(): string {
+  const userId =
+    readNullableString(authSession.user?.id) ??
+    (typeof authSession.user?.id === 'number' ? String(authSession.user.id) : null);
+  if (!userId) {
+    throw new Error('Data user tidak ditemukan. Silakan login ulang.');
+  }
+  return userId;
+}
 
 export async function register(payload: RegisterPayload): Promise<RegisterResult> {
   const response = await fetch(`${API_BASE_URL}${REGISTER_ENDPOINT}`, {
@@ -410,108 +501,869 @@ async function parseSchoolConnectionResponse(response: Response): Promise<{
 }
 
 export async function createSchool(payload: CreateSchoolPayload): Promise<void> {
-  const response = await apiRequest<{
-    accessToken?: string;
-    access_token?: string;
-    refreshToken?: string | null;
-    refresh_token?: string | null;
-    data?: {
-      accessToken?: string;
-      access_token?: string;
-      refreshToken?: string | null;
-      refresh_token?: string | null;
-    };
-  }>(CREATE_SCHOOL_ENDPOINT, {
+  const userId = getSessionUserIdOrThrow();
+  const schoolName = payload.name.trim();
+  if (!schoolName) {
+    throw new Error('Nama sekolah wajib diisi.');
+  }
+
+  const mutation = `
+    mutation CreateSchool($name: String!, $number: String, $createdBy: uuid!) {
+      insert_schools_one(
+        object: {
+          name: $name
+          number: $number
+          created_by: $createdBy
+        }
+      ) {
+        id
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
-  });
+    body: JSON.stringify({
+      query: mutation,
+      variables: {
+        name: schoolName,
+        number: payload.number?.trim() || null,
+        createdBy: userId,
+      },
+    }),
+  })) as
+    | {
+        data?: { insert_schools_one?: { id?: string | null } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
 
-  const tokenResult = normalizeTokenResult(response as ApiBody | null);
-  if (!tokenResult) {
-    throw new Error('Respons token koneksi sekolah tidak valid.');
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal membuat sekolah.');
   }
 
-  setAuthSession({
-    accessToken: tokenResult.accessToken,
-    refreshToken: tokenResult.refreshToken ?? authSession.refreshToken,
-  });
+  const schoolId = responseBody?.data?.insert_schools_one?.id;
+  if (!schoolId) {
+    throw new Error('Respons pembuatan sekolah tidak valid.');
+  }
+
+  await setActiveSchool(schoolId, 'school_admin');
 }
 
 export async function joinSchool(payload: JoinSchoolPayload): Promise<void> {
-  const response = await apiRequest<{
-    accessToken?: string;
-    access_token?: string;
-    refreshToken?: string | null;
-    refresh_token?: string | null;
-    data?: {
-      accessToken?: string;
-      access_token?: string;
-      refreshToken?: string | null;
-      refresh_token?: string | null;
-    };
-  }>(JOIN_SCHOOL_ENDPOINT, {
+  const normalizedJoinCode = payload.joinCode.trim().toUpperCase();
+  if (!normalizedJoinCode) {
+    throw new Error('Kode join wajib diisi.');
+  }
+
+  const query = `
+    query FindSchoolByJoinCode($joinCode: String!) {
+      schools(where: { join_code: { _eq: $joinCode } }, limit: 1) {
+        id
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
-  });
+    body: JSON.stringify({
+      query,
+      variables: { joinCode: normalizedJoinCode },
+    }),
+  })) as
+    | {
+        data?: { schools?: Array<{ id?: string | null }> };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
 
-  const tokenResult = normalizeTokenResult(response as ApiBody | null);
-  if (!tokenResult) {
-    throw new Error('Respons token koneksi sekolah tidak valid.');
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal validasi kode join.');
   }
 
-  setAuthSession({
-    accessToken: tokenResult.accessToken,
-    refreshToken: tokenResult.refreshToken ?? authSession.refreshToken,
-  });
+  const schoolId = responseBody?.data?.schools?.[0]?.id ?? null;
+  if (!schoolId) {
+    throw new Error('Kode join sekolah tidak ditemukan.');
+  }
+
+  await setActiveSchool(schoolId, 'school_member');
+}
+
+function normalizeMembership(item: unknown): SchoolMembership | null {
+  const source = asObject(item);
+  if (!source) {
+    return null;
+  }
+
+  const schoolId = readNullableString(source.school_id) ?? readNullableString(source.schoolId);
+  if (!schoolId) {
+    return null;
+  }
+
+  const id = readNullableString(source.id) ?? schoolId;
+  const role = readNullableString(source.role) ?? 'school_member';
+  const status = readNullableString(source.status) ?? 'active';
+  const isActive = source.is_active === true || source.isActive === true;
+
+  return {
+    id,
+    school_id: schoolId,
+    school_name:
+      readNullableString(source.school_name) ??
+      readNullableString(source.schoolName) ??
+      '',
+    school_number:
+      readNullableString(source.school_number) ??
+      readNullableString(source.schoolNumber),
+    school_address:
+      readNullableString(source.school_address) ??
+      readNullableString(source.address),
+    school_join_code:
+      readNullableString(source.school_join_code) ??
+      readNullableString(source.schoolJoinCode) ??
+      '',
+    role,
+    status,
+    is_active: isActive,
+  };
+}
+
+async function fetchSchoolDetailsByIds(schoolIds: string[]): Promise<SchoolDetailsById> {
+  if (schoolIds.length === 0) {
+    return {};
+  }
+
+  const query = `
+    query GetSchoolsByIds($schoolIds: [uuid!]!) {
+      schools(where: { id: { _in: $schoolIds } }) {
+        id
+        name
+        number
+        address
+        join_code
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { schoolIds },
+    }),
+  })) as
+    | {
+        data?: {
+          schools?: Array<Record<string, unknown>>;
+        };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (__DEV__) {
+    console.log('[schoolsByIds][graphql][endpoint]', GRAPHQL_URL);
+    console.log('[schoolsByIds][graphql][raw]', JSON.stringify(responseBody));
+  }
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    const firstMessage = responseBody.errors[0]?.message;
+    throw new Error(firstMessage || 'Gagal mengambil data sekolah dari Hasura.');
+  }
+
+  const schools = Array.isArray(responseBody?.data?.schools) ? responseBody.data.schools : [];
+  const detailsById: SchoolDetailsById = {};
+  for (const school of schools) {
+    const schoolObject = asObject(school);
+    const schoolId = readNullableString(schoolObject?.id);
+    if (!schoolId) {
+      continue;
+    }
+
+    detailsById[schoolId] = {
+      name: readNullableString(schoolObject?.name),
+      number: readNullableString(schoolObject?.number),
+      address: readNullableString(schoolObject?.address),
+      joinCode: readNullableString(schoolObject?.join_code),
+    };
+  }
+
+  return detailsById;
 }
 
 export async function listMemberships(): Promise<SchoolMembership[]> {
-  const response = await apiRequest<{ memberships?: SchoolMembership[] }>(MEMBERSHIPS_ENDPOINT, {
-    method: 'GET',
-    requiresAuth: true,
-  });
+  const userId = getSessionUserIdOrThrow();
+  const query = `
+    query ListMySchoolMemberships($userId: uuid!) {
+      school_memberships(
+        where: { user_id: { _eq: $userId } }
+        order_by: [{ is_active: desc }, { created_at: desc }]
+      ) {
+        id
+        user_id
+        school_id
+        role
+        status
+        is_active
+      }
+    }
+  `;
 
-  return Array.isArray(response?.memberships) ? response.memberships : [];
-}
-
-export async function setActiveSchool(schoolId: string): Promise<void> {
-  const response = await apiRequest<{
-    accessToken?: string;
-    access_token?: string;
-    refreshToken?: string | null;
-    refresh_token?: string | null;
-    data?: {
-      accessToken?: string;
-      access_token?: string;
-      refreshToken?: string | null;
-      refresh_token?: string | null;
-    };
-  }>(ACTIVE_SCHOOL_ENDPOINT, {
+  const response = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ schoolId }),
-  });
+    body: JSON.stringify({
+      query,
+      variables: { userId },
+    }),
+  })) as
+    | {
+        data?: { school_memberships?: unknown[] };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
 
-  const tokenResult = normalizeTokenResult(response as ApiBody | null);
-  if (!tokenResult) {
-    throw new Error('Respons token koneksi sekolah tidak valid.');
+  if (__DEV__) {
+    console.log('[listMemberships][graphql][endpoint]', GRAPHQL_URL);
+    console.log('[listMemberships][graphql][raw]', JSON.stringify(response));
   }
 
-  setAuthSession({
-    accessToken: tokenResult.accessToken,
-    refreshToken: tokenResult.refreshToken ?? authSession.refreshToken,
+  if (Array.isArray(response?.errors) && response.errors.length > 0) {
+    const firstMessage = response.errors[0]?.message;
+    throw new Error(firstMessage || 'Gagal mengambil membership sekolah dari Hasura.');
+  }
+
+  const memberships = Array.isArray(response?.data?.school_memberships)
+    ? response.data.school_memberships
+        .map(normalizeMembership)
+        .filter((item): item is SchoolMembership => item !== null)
+    : [];
+  const uniqueSchoolIds = Array.from(new Set(memberships.map(item => item.school_id)));
+  let schoolDetailsById: SchoolDetailsById = {};
+  try {
+    schoolDetailsById = await fetchSchoolDetailsByIds(uniqueSchoolIds);
+  } catch (error) {
+    if (__DEV__) {
+      console.log(
+        '[schoolsByIds][graphql][error]',
+        error instanceof Error ? error.message : 'unknown error',
+      );
+    }
+    schoolDetailsById = {};
+  }
+
+  const hydratedMemberships = memberships.map(item => {
+    const schoolDetails = schoolDetailsById[item.school_id];
+    if (!schoolDetails) {
+      return item;
+    }
+
+    return {
+      ...item,
+      school_name: schoolDetails.name ?? item.school_name,
+      school_number: schoolDetails.number ?? item.school_number,
+      school_address: schoolDetails.address ?? item.school_address,
+      school_join_code: schoolDetails.joinCode ?? item.school_join_code,
+    };
   });
+
+  if (__DEV__) {
+    console.log('[listMemberships][mapped]', JSON.stringify(hydratedMemberships));
+  }
+  return hydratedMemberships;
+}
+
+export async function listStudentsBySchool(schoolId: string): Promise<DashboardStudentListItem[]> {
+  const normalizedSchoolId = schoolId.trim();
+  if (!normalizedSchoolId) {
+    return [];
+  }
+
+  const query = `
+    query ListStudentsBySchool($schoolId: uuid!) {
+      students(
+        where: {
+          school_id: { _eq: $schoolId },
+          is_active: { _eq: true }
+        }
+        order_by: [{ full_name: asc }, { created_at: desc }]
+      ) {
+        id
+        full_name
+        student_number
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { schoolId: normalizedSchoolId },
+    }),
+  })) as
+    | {
+        data?: { students?: Array<Record<string, unknown>> };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (__DEV__) {
+    console.log('[studentsBySchool][graphql][endpoint]', GRAPHQL_URL);
+    console.log('[studentsBySchool][graphql][raw]', JSON.stringify(responseBody));
+  }
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil data siswa dari Hasura.');
+  }
+
+  const rows = Array.isArray(responseBody?.data?.students) ? responseBody.data.students : [];
+  return rows
+    .map(row => {
+      const source = asObject(row);
+      const id = readNullableString(source?.id);
+      const fullName = readNullableString(source?.full_name);
+      if (!id || !fullName) {
+        return null;
+      }
+
+      return {
+        id,
+        name: fullName,
+        nisn: readNullableString(source?.student_number) ?? '-',
+        className: '-',
+      } satisfies DashboardStudentListItem;
+    })
+    .filter((item): item is DashboardStudentListItem => item !== null);
+}
+
+export async function createStudent(payload: CreateStudentPayload): Promise<void> {
+  const normalizedSchoolId = payload.schoolId.trim();
+  const normalizedName = payload.fullName.trim();
+  if (!normalizedSchoolId || !normalizedName) {
+    throw new Error('Nama siswa wajib diisi.');
+  }
+
+  const normalizedNis = payload.nis?.trim() ?? '';
+  const normalizedNisn = payload.nisn?.trim() ?? '';
+  const resolvedStudentNumber = normalizedNisn || normalizedNis || undefined;
+
+  const mutation = `
+    mutation CreateStudent(
+      $schoolId: uuid!,
+      $fullName: String!,
+      $studentNumber: String,
+      $nis: String,
+      $nisn: String,
+      $gender: String,
+      $birthDate: date
+    ) {
+      insert_students_one(
+        object: {
+          school_id: $schoolId,
+          full_name: $fullName,
+          student_number: $studentNumber,
+          nis: $nis,
+          nisn: $nisn,
+          gender: $gender,
+          birth_date: $birthDate,
+          is_active: true
+        }
+      ) {
+        id
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: {
+        schoolId: normalizedSchoolId,
+        fullName: normalizedName,
+        studentNumber: resolvedStudentNumber ?? null,
+        nis: normalizedNis || null,
+        nisn: normalizedNisn || null,
+        gender: payload.gender ?? null,
+        birthDate: payload.birthDate?.trim() || null,
+      },
+    }),
+  })) as
+    | {
+        data?: { insert_students_one?: { id?: string | null } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (__DEV__) {
+    console.log('[createStudent][graphql][endpoint]', GRAPHQL_URL);
+    console.log('[createStudent][graphql][raw]', JSON.stringify(responseBody));
+  }
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan data siswa.');
+  }
+
+  const createdId = responseBody?.data?.insert_students_one?.id;
+  if (!createdId) {
+    throw new Error('Respons simpan siswa tidak valid.');
+  }
+}
+
+export async function listAcademicYears(schoolId: string): Promise<AcademicYear[]> {
+  const normalizedSchoolId = schoolId.trim();
+  if (!normalizedSchoolId) {
+    return [];
+  }
+
+  const query = `
+    query ListAcademicYears($schoolId: uuid!) {
+      academic_years(
+        where: { school_id: { _eq: $schoolId } }
+        order_by: [{ start_date: desc }, { created_at: desc }]
+      ) {
+        id
+        school_id
+        name
+        start_date
+        end_date
+        is_active
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { schoolId: normalizedSchoolId },
+    }),
+  })) as
+    | {
+        data?: { academic_years?: Array<Record<string, unknown>> };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil data tahun akademik.');
+  }
+
+  const rows = Array.isArray(responseBody?.data?.academic_years) ? responseBody.data.academic_years : [];
+  return rows
+    .map(row => {
+      const source = asObject(row);
+      const id = readNullableString(source?.id);
+      const rowSchoolId = readNullableString(source?.school_id);
+      const name = readNullableString(source?.name);
+      const startDate = readNullableString(source?.start_date);
+      const endDate = readNullableString(source?.end_date);
+      if (!id || !rowSchoolId || !name || !startDate || !endDate) {
+        return null;
+      }
+      return {
+        id,
+        school_id: rowSchoolId,
+        name,
+        start_date: startDate,
+        end_date: endDate,
+        is_active: source?.is_active === true,
+      } satisfies AcademicYear;
+    })
+    .filter((item): item is AcademicYear => item !== null);
+}
+
+export async function createAcademicYear(payload: {
+  schoolId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+}): Promise<AcademicYear> {
+  const userId = getSessionUserIdOrThrow();
+  const schoolId = payload.schoolId.trim();
+  const name = payload.name.trim();
+  if (!schoolId || !name) {
+    throw new Error('Data tahun akademik tidak valid.');
+  }
+
+  const mutation = `
+    mutation CreateAcademicYear(
+      $schoolId: uuid!,
+      $userId: uuid!,
+      $name: String!,
+      $startDate: date!,
+      $endDate: date!
+    ) {
+      insert_academic_years_one(
+        object: {
+          school_id: $schoolId,
+          created_by: $userId,
+          name: $name,
+          start_date: $startDate,
+          end_date: $endDate,
+          is_active: false
+        }
+      ) {
+        id
+        school_id
+        name
+        start_date
+        end_date
+        is_active
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: {
+        schoolId,
+        userId,
+        name,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+      },
+    }),
+  })) as
+    | {
+        data?: { insert_academic_years_one?: Record<string, unknown> | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal menambah tahun akademik.');
+  }
+
+  const created = asObject(responseBody?.data?.insert_academic_years_one);
+  const id = readNullableString(created?.id);
+  const rowSchoolId = readNullableString(created?.school_id);
+  const createdName = readNullableString(created?.name);
+  const startDate = readNullableString(created?.start_date);
+  const endDate = readNullableString(created?.end_date);
+  if (!id || !rowSchoolId || !createdName || !startDate || !endDate) {
+    throw new Error('Respons tambah tahun akademik tidak valid.');
+  }
+
+  return {
+    id,
+    school_id: rowSchoolId,
+    name: createdName,
+    start_date: startDate,
+    end_date: endDate,
+    is_active: created?.is_active === true,
+  };
+}
+
+export async function setActiveAcademicYear(payload: {
+  schoolId: string;
+  academicYearId: string;
+}): Promise<void> {
+  const userId = getSessionUserIdOrThrow();
+  const schoolId = payload.schoolId.trim();
+  const academicYearId = payload.academicYearId.trim();
+  if (!schoolId || !academicYearId) {
+    throw new Error('Data aktivasi tahun akademik tidak valid.');
+  }
+
+  const deactivateMutation = `
+    mutation DeactivateAcademicYears($schoolId: uuid!, $userId: uuid!) {
+      update_academic_years(
+        where: {
+          school_id: { _eq: $schoolId },
+          created_by: { _eq: $userId },
+          is_active: { _eq: true }
+        }
+        _set: { is_active: false }
+      ) {
+        affected_rows
+      }
+    }
+  `;
+  const activateMutation = `
+    mutation ActivateAcademicYear($academicYearId: uuid!, $userId: uuid!) {
+      update_academic_years(
+        where: {
+          id: { _eq: $academicYearId },
+          created_by: { _eq: $userId }
+        }
+        _set: { is_active: true }
+      ) {
+        affected_rows
+      }
+    }
+  `;
+
+  const deactivateResponse = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: deactivateMutation,
+      variables: { schoolId, userId },
+    }),
+  })) as { errors?: Array<{ message?: string }> } | null;
+  if (Array.isArray(deactivateResponse?.errors) && deactivateResponse.errors.length > 0) {
+    throw new Error(deactivateResponse.errors[0]?.message || 'Gagal menonaktifkan tahun akademik lama.');
+  }
+
+  const activateResponse = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: activateMutation,
+      variables: { academicYearId, userId },
+    }),
+  })) as
+    | {
+        data?: { update_academic_years?: { affected_rows?: number } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(activateResponse?.errors) && activateResponse.errors.length > 0) {
+    throw new Error(activateResponse.errors[0]?.message || 'Gagal mengaktifkan tahun akademik.');
+  }
+
+  const affectedRows = activateResponse?.data?.update_academic_years?.affected_rows ?? 0;
+  if (affectedRows < 1) {
+    throw new Error('Tahun akademik tidak ditemukan atau tidak memiliki akses untuk mengubahnya.');
+  }
+}
+
+export async function deleteAcademicYear(payload: { academicYearId: string }): Promise<void> {
+  const userId = getSessionUserIdOrThrow();
+  const academicYearId = payload.academicYearId.trim();
+  if (!academicYearId) {
+    throw new Error('Data tahun akademik tidak valid.');
+  }
+
+  const mutation = `
+    mutation DeleteAcademicYear($academicYearId: uuid!, $userId: uuid!) {
+      delete_academic_years(
+        where: {
+          id: { _eq: $academicYearId },
+          created_by: { _eq: $userId }
+        }
+      ) {
+        affected_rows
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { academicYearId, userId },
+    }),
+  })) as
+    | {
+        data?: { delete_academic_years?: { affected_rows?: number } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal menghapus tahun akademik.');
+  }
+
+  const affectedRows = responseBody?.data?.delete_academic_years?.affected_rows ?? 0;
+  if (affectedRows < 1) {
+    throw new Error('Tahun akademik tidak ditemukan atau tidak memiliki akses untuk menghapusnya.');
+  }
+}
+
+export async function updateAcademicYear(payload: {
+  academicYearId: string;
+  name: string;
+}): Promise<void> {
+  const userId = getSessionUserIdOrThrow();
+  const academicYearId = payload.academicYearId.trim();
+  const name = payload.name.trim();
+  if (!academicYearId || !name) {
+    throw new Error('Data tahun akademik tidak valid.');
+  }
+
+  const mutation = `
+    mutation UpdateAcademicYear($academicYearId: uuid!, $userId: uuid!, $name: String!) {
+      update_academic_years(
+        where: {
+          id: { _eq: $academicYearId },
+          created_by: { _eq: $userId }
+        }
+        _set: { name: $name }
+      ) {
+        affected_rows
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { academicYearId, userId, name },
+    }),
+  })) as
+    | {
+        data?: { update_academic_years?: { affected_rows?: number } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengubah tahun akademik.');
+  }
+
+  const affectedRows = responseBody?.data?.update_academic_years?.affected_rows ?? 0;
+  if (affectedRows < 1) {
+    throw new Error('Tahun akademik tidak ditemukan atau tidak memiliki akses untuk mengubahnya.');
+  }
+}
+
+export async function setActiveSchool(schoolId: string, role = 'school_member'): Promise<void> {
+  const userId = getSessionUserIdOrThrow();
+  const normalizedSchoolId = schoolId.trim();
+  if (!normalizedSchoolId) {
+    throw new Error('Sekolah aktif tidak valid.');
+  }
+
+  const upsertMembershipMutation = `
+    mutation UpsertSchoolMembership(
+      $userId: uuid!,
+      $schoolId: uuid!,
+      $role: String!
+    ) {
+      insert_school_memberships_one(
+        object: {
+          user_id: $userId
+          school_id: $schoolId
+          role: $role
+          status: "active"
+          is_active: true
+        }
+        on_conflict: {
+          constraint: school_membership_unique
+          update_columns: [status, is_active, role]
+        }
+      ) {
+        id
+      }
+    }
+  `;
+
+  const deactivateOtherMembershipsMutation = `
+    mutation DeactivateOtherMemberships($userId: uuid!, $schoolId: uuid!) {
+      update_school_memberships(
+        where: {
+          user_id: { _eq: $userId }
+          school_id: { _neq: $schoolId }
+          is_active: { _eq: true }
+        }
+        _set: { is_active: false }
+      ) {
+        affected_rows
+      }
+    }
+  `;
+
+  const upsertResponse = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: upsertMembershipMutation,
+      variables: {
+        userId,
+        schoolId: normalizedSchoolId,
+        role,
+      },
+    }),
+  })) as { errors?: Array<{ message?: string }> } | null;
+
+  if (Array.isArray(upsertResponse?.errors) && upsertResponse.errors.length > 0) {
+    throw new Error(upsertResponse.errors[0]?.message || 'Gagal menghubungkan sekolah.');
+  }
+
+  const deactivateResponse = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: deactivateOtherMembershipsMutation,
+      variables: {
+        userId,
+        schoolId: normalizedSchoolId,
+      },
+    }),
+  })) as { errors?: Array<{ message?: string }> } | null;
+
+  if (Array.isArray(deactivateResponse?.errors) && deactivateResponse.errors.length > 0) {
+    if (__DEV__) {
+      console.log(
+        '[setActiveSchool][warn][deactivate]',
+        deactivateResponse.errors[0]?.message || 'unknown error',
+      );
+    }
+  }
+
+  const refreshedAccessToken = await refreshAccessToken();
+  if (!refreshedAccessToken) {
+    if (__DEV__) {
+      console.log('[setActiveSchool][warn][refresh]', 'token refresh skipped/failed after school switch');
+    }
+  }
 }
 
 export async function updateMyProfile(payload: UpdateMyProfilePayload): Promise<Record<string, unknown>> {
@@ -639,7 +1491,6 @@ export async function updateSchoolProfile(
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
-      'x-hasura-role': 'school_admin',
     },
     body: JSON.stringify({
       query: mutation,
@@ -678,17 +1529,80 @@ export async function regenerateSchoolJoinCode(schoolId: string): Promise<Record
     throw new Error('Sekolah aktif tidak ditemukan.');
   }
 
-  const responseBody = (await apiRequest(`/schools/${normalizedSchoolId}/regenerate-join-code`, {
-    method: 'POST',
-    requiresAuth: true,
-  })) as { school?: Record<string, unknown> } | null;
+  const mutation = `
+    mutation RegenerateSchoolJoinCode($schoolId: uuid!, $joinCode: String!) {
+      update_schools_by_pk(
+        pk_columns: { id: $schoolId }
+        _set: { join_code: $joinCode }
+      ) {
+        id
+        name
+        number
+        address
+        join_code
+        created_by
+        created_at
+        updated_at
+      }
+    }
+  `;
 
-  const school = asObject(responseBody?.school);
-  if (!school) {
-    throw new Error('Respons generate kode gabung tidak valid.');
+  const buildJoinCode = (): string => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let value = '';
+    for (let index = 0; index < 8; index += 1) {
+      value += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return value;
+  };
+
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const candidateJoinCode = buildJoinCode();
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: mutation,
+        variables: {
+          schoolId: normalizedSchoolId,
+          joinCode: candidateJoinCode,
+        },
+      }),
+    })) as
+      | {
+          data?: {
+            update_schools_by_pk?: Record<string, unknown> | null;
+          };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+    if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      const firstMessage = responseBody.errors[0]?.message ?? 'Gagal memperbarui kode gabung.';
+      const lowerFirstMessage = firstMessage.toLowerCase();
+      const isUniqueViolation =
+        lowerFirstMessage.includes('unique') ||
+        lowerFirstMessage.includes('duplicate') ||
+        lowerFirstMessage.includes('constraint');
+      if (isUniqueViolation && attempt < maxAttempts) {
+        continue;
+      }
+      throw new Error(firstMessage);
+    }
+
+    const school = asObject(responseBody?.data?.update_schools_by_pk);
+    if (!school) {
+      throw new Error('Respons generate kode gabung tidak valid.');
+    }
+
+    return school;
   }
 
-  return school;
+  throw new Error('Gagal generate kode gabung. Silakan coba lagi.');
 }
 
 export async function saveCurrentSchoolContext(context: CurrentSchoolContext): Promise<void> {
@@ -854,6 +1768,42 @@ function withAuthorizationHeader(headers: Headers, token: string): Headers {
   return headers;
 }
 
+function hasGraphqlAuthError(responseBody: unknown): boolean {
+  const source = asObject(responseBody);
+  const graphqlErrors = source?.errors;
+  if (!Array.isArray(graphqlErrors) || graphqlErrors.length === 0) {
+    return false;
+  }
+
+  return graphqlErrors.some(errorItem => {
+    const errorObject = asObject(errorItem);
+    const message = readNullableString(errorObject?.message)?.toLowerCase() ?? '';
+    const extensionCode = readNullableString(asObject(errorObject?.extensions)?.code)?.toLowerCase() ?? '';
+
+    return (
+      message.includes('jwt') ||
+      message.includes('unauthorized') ||
+      message.includes('invalid token') ||
+      message.includes('access denied') ||
+      extensionCode.includes('jwt') ||
+      extensionCode.includes('unauthorized')
+    );
+  });
+}
+
+function buildRetryHeaders(originalHeaders: HeadersInit | undefined, accessToken: string): Headers {
+  const retryHeaders = new Headers(originalHeaders);
+  retryHeaders.set('Accept', 'application/json');
+  withAuthorizationHeader(retryHeaders, accessToken);
+  if (!retryHeaders.has('x-hasura-role')) {
+    const highestAllowedRole = resolveHighestAllowedRoleFromSession();
+    if (highestAllowedRole) {
+      retryHeaders.set('x-hasura-role', highestAllowedRole);
+    }
+  }
+  return retryHeaders;
+}
+
 export async function apiRequest<TResponse = unknown>(
   endpoint: string,
   options: ApiRequestOptions = {},
@@ -871,6 +1821,12 @@ export async function apiRequest<TResponse = unknown>(
     }
 
     withAuthorizationHeader(requestHeaders, activeAccessToken);
+    if (!requestHeaders.has('x-hasura-role')) {
+      const highestAllowedRole = resolveHighestAllowedRoleFromSession();
+      if (highestAllowedRole) {
+        requestHeaders.set('x-hasura-role', highestAllowedRole);
+      }
+    }
   }
 
   let response = await fetch(requestUrl, {
@@ -886,9 +1842,7 @@ export async function apiRequest<TResponse = unknown>(
     }
 
     activeAccessToken = refreshedAccessToken;
-    const retryHeaders = new Headers(headers);
-    retryHeaders.set('Accept', 'application/json');
-    withAuthorizationHeader(retryHeaders, activeAccessToken);
+    const retryHeaders = buildRetryHeaders(headers, activeAccessToken);
 
     response = await fetch(requestUrl, {
       ...requestInit,
@@ -906,5 +1860,34 @@ export async function apiRequest<TResponse = unknown>(
     return undefined as TResponse;
   }
 
-  return (await parseUnknownResponseBody(response)) as TResponse;
+  let parsedResponseBody = await parseUnknownResponseBody(response);
+
+  if (requiresAuth && hasGraphqlAuthError(parsedResponseBody)) {
+    const refreshedAccessToken = await refreshAccessToken();
+    if (!refreshedAccessToken) {
+      clearAuthSession();
+      throw new Error('Sesi berakhir. Silakan login ulang.');
+    }
+
+    activeAccessToken = refreshedAccessToken;
+    const retryHeaders = buildRetryHeaders(headers, activeAccessToken);
+    const retryResponse = await fetch(requestUrl, {
+      ...requestInit,
+      headers: retryHeaders,
+    });
+
+    if (!retryResponse.ok) {
+      const retryResponseBody = (await parseUnknownResponseBody(retryResponse)) as ApiBody | null;
+      const retryMessage = normalizeApiErrorMessage(retryResponseBody);
+      throw new Error(retryMessage ?? 'Permintaan ke server gagal.');
+    }
+
+    if (retryResponse.status === 204) {
+      return undefined as TResponse;
+    }
+
+    parsedResponseBody = await parseUnknownResponseBody(retryResponse);
+  }
+
+  return parsedResponseBody as TResponse;
 }

@@ -37,14 +37,22 @@ import { SchoolSelectionScreen } from '../screens/setup/school-selection/SchoolS
 import {
   clearAuthSession,
   clearCurrentSchoolContext,
+  createAcademicYear,
+  deleteAcademicYear,
+  API_BASE_URL,
   getAuthSession,
   hydrateAuthSession,
+  listAcademicYears,
   listMemberships,
   loadCurrentSchoolContext,
+  normalizeRoleKey,
   regenerateSchoolJoinCode,
   saveCurrentSchoolContext,
+  setActiveAcademicYear,
   setAuthSession,
   setActiveSchool,
+  sortRolesByPriority,
+  updateAcademicYear,
 } from '../services';
 import { colors, radius, spacing, typography } from '../theme';
 import type { CreateSessionPayload } from '../types';
@@ -72,6 +80,8 @@ const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
 };
 
 const DEFAULT_SCHOOL_NAME = 'Sekolah';
+const BOOTSTRAP_FALLBACK_DELAY_MS = 8000;
+const HEALTHCHECK_TIMEOUT_MS = 5000;
 
 type UnknownObject = Record<string, unknown>;
 
@@ -157,6 +167,21 @@ function extractSchoolNameFromLoginUser(user: unknown): string | null {
   );
 }
 
+function isAuthSessionInvalidError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalizedMessage = error.message.trim().toLowerCase();
+  return (
+    normalizedMessage.includes('jwt') ||
+    normalizedMessage.includes('invalid token') ||
+    normalizedMessage.includes('sesi berakhir') ||
+    normalizedMessage.includes('silakan login ulang') ||
+    normalizedMessage.includes('unauthorized')
+  );
+}
+
 type ProfileSettingsData = {
   fullName: string;
   roleLabels: string;
@@ -173,6 +198,9 @@ type ProfileSettingsData = {
 function toRoleLabel(value: string): string {
   if (value === 'school_admin') {
     return 'Admin Sekolah';
+  }
+  if (value === 'teacher') {
+    return 'Guru';
   }
   if (value === 'school_member') {
     return 'Anggota Sekolah';
@@ -200,19 +228,30 @@ function buildProfileSettingsData(
       : [];
   const normalizedAllowedRoles = allowedRoles
     .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .map(item => item.trim());
+    .map(item => normalizeRoleKey(item));
   const fallbackRole =
-    readStringValue(user, ['active_school_role']) ??
-    readStringValue(user, ['default_role', 'defaultRole']) ??
+    normalizeRoleKey(
+      readStringValue(user, ['active_school_role']) ??
+        readStringValue(user, ['default_role', 'defaultRole']) ??
+        'user',
+    ) ??
     'user';
-  const uniqueRoles = Array.from(new Set([...normalizedAllowedRoles, fallbackRole]));
+  const uniqueRoles = sortRolesByPriority([...normalizedAllowedRoles, fallbackRole]);
   const activeMembership =
     memberships.find(item => item.status === 'active' && item.is_active) ??
     memberships.find(item => item.status === 'active') ??
     null;
-  const normalizedRole = activeMembership?.role?.trim().toLowerCase() ?? null;
-  const canEditSchoolProfile =
-    normalizedRole === 'school_admin' || normalizedRole === 'admin_sekolah';
+  const activeMembershipObject = asObject(activeMembership as unknown);
+  const activeMembershipSchoolObject =
+    readObjectValue(activeMembershipObject, 'school') ??
+    readObjectValue(activeMembershipObject, 'school_data') ??
+    readObjectValue(activeMembershipObject, 'schoolData');
+  const normalizedRole = activeMembership?.role ? normalizeRoleKey(activeMembership.role) : null;
+  const canEditSchoolProfile = normalizedRole === 'school_admin';
+  const schoolAddress =
+    readStringValue(activeMembershipObject, ['address', 'school_address']) ??
+    readStringValue(activeMembershipSchoolObject, ['address', 'school_address']) ??
+    null;
 
   return {
     fullName,
@@ -223,13 +262,16 @@ function buildProfileSettingsData(
     canEditSchoolProfile,
     schoolName: activeMembership?.school_name ?? DEFAULT_SCHOOL_NAME,
     schoolNumber: activeMembership?.school_number ?? null,
-    schoolAddress: activeMembership?.school_address ?? null,
+    schoolAddress,
     schoolJoinCode: activeMembership?.school_join_code ?? null,
   };
 }
 
 export function RootNavigator() {
   const [isBootstrappingAuth, setIsBootstrappingAuth] = useState(true);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const [isBootstrapSlow, setIsBootstrapSlow] = useState(false);
+  const [bootstrapHealthError, setBootstrapHealthError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentSchool, setCurrentSchool] = useState(DEFAULT_SCHOOL_NAME);
   const [currentSchoolId, setCurrentSchoolId] = useState<string | null>(null);
@@ -267,14 +309,111 @@ export function RootNavigator() {
     useState<ProfileRoute>('profile-overview');
   const [isRegeneratingJoinCode, setIsRegeneratingJoinCode] = useState(false);
   const [schoolActionError, setSchoolActionError] = useState<string | null>(null);
+  const [academicYears, setAcademicYears] = useState<
+    Array<{ id: string; label: string; isActive: boolean }>
+  >([]);
+  const [isLoadingAcademicYears, setIsLoadingAcademicYears] = useState(false);
+  const [isSavingAcademicYear, setIsSavingAcademicYear] = useState(false);
+  const [academicYearActionError, setAcademicYearActionError] = useState<string | null>(null);
   const sessionUser = asObject(getAuthSession().user);
   const profileData = buildProfileSettingsData(sessionUser, schoolMemberships);
 
+  const checkStartupHealth = async (): Promise<void> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, HEALTHCHECK_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Health check gagal (${response.status}).`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Health check timeout. Service auth tidak merespons.');
+      }
+      throw error instanceof Error
+        ? error
+        : new Error('Tidak bisa terhubung ke service auth.');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'profile' || !profileData.schoolId) {
+      setAcademicYears([]);
+      setAcademicYearActionError(null);
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingAcademicYears(true);
+    listAcademicYears(profileData.schoolId)
+      .then(rows => {
+        if (!isMounted) {
+          return;
+        }
+        setAcademicYears(rows.map(row => ({ id: row.id, label: row.name, isActive: row.is_active })));
+        setAcademicYearActionError(null);
+      })
+      .catch(error => {
+        if (!isMounted) {
+          return;
+        }
+        setAcademicYearActionError(
+          error instanceof Error ? error.message : 'Gagal memuat data tahun akademik.',
+        );
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingAcademicYears(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, profileData.schoolId]);
+
   useEffect(() => {
     let isMounted = true;
+    const slowTimer = setTimeout(() => {
+      if (isMounted) {
+        setIsBootstrapSlow(true);
+      }
+    }, BOOTSTRAP_FALLBACK_DELAY_MS);
 
     const bootstrapAuth = async () => {
+      let canContinue = true;
       try {
+        setIsBootstrapSlow(false);
+        setBootstrapHealthError(null);
+        try {
+          await checkStartupHealth();
+        } catch (error) {
+          canContinue = false;
+          if (isMounted) {
+            setIsBootstrapSlow(true);
+            const message =
+              error instanceof Error
+                ? error.message
+                : 'Tidak bisa terhubung ke service auth.';
+            setBootstrapHealthError(
+              `${message} Endpoint: ${API_BASE_URL}/health`,
+            );
+          }
+          return;
+        }
+
         const restoredSession = await hydrateAuthSession();
         if (!isMounted) {
           return;
@@ -288,12 +427,34 @@ export function RootNavigator() {
             memberships = await listMemberships();
             setSchoolMemberships(memberships);
             hasSchoolMembership = memberships.some(item => item.status === 'active');
-          } catch {
+          } catch (error) {
+            if (isAuthSessionInvalidError(error)) {
+              clearAuthSession();
+              clearCurrentSchoolContext().catch(() => {});
+              setSchoolMemberships([]);
+              setIsAuthenticated(false);
+              setAuthRoute('login');
+              if (__DEV__) {
+                console.log(
+                  '[bootstrap][auth][invalid-session]',
+                  error instanceof Error ? error.message : 'unknown error',
+                );
+              }
+              return;
+            }
             hasSchoolMembership = false;
           }
         }
 
         const shouldOpenSchoolConnection = hasActiveSession && !hasSchoolMembership;
+        if (__DEV__) {
+          console.log('[bootstrap][auth]', JSON.stringify({
+            hasActiveSession,
+            hasSchoolMembership,
+            shouldOpenSchoolConnection,
+            memberships,
+          }));
+        }
         setIsAuthenticated(hasActiveSession && hasSchoolMembership);
         if (shouldOpenSchoolConnection) {
           setAuthRoute('school-connection');
@@ -321,7 +482,7 @@ export function RootNavigator() {
         }
       } finally {
         if (isMounted) {
-          setIsBootstrappingAuth(false);
+          setIsBootstrappingAuth(!canContinue ? true : false);
         }
       }
     };
@@ -334,13 +495,34 @@ export function RootNavigator() {
 
     return () => {
       isMounted = false;
+      clearTimeout(slowTimer);
     };
-  }, []);
+  }, [bootstrapAttempt]);
 
   if (isBootstrappingAuth) {
     return (
       <View style={styles.bootstrapContainer}>
         <ActivityIndicator color={colors.brand.primary500} size="small" />
+        {isBootstrapSlow ? (
+          <>
+            <Text style={styles.bootstrapTitle}>Membuka aplikasi lebih lama dari biasanya.</Text>
+            <Text style={styles.bootstrapCaption}>
+              {bootstrapHealthError ?? 'Periksa koneksi lalu coba lagi.'}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setIsBootstrappingAuth(true);
+                setBootstrapAttempt(prev => prev + 1);
+              }}
+              style={({ pressed }) => [
+                styles.bootstrapRetryButton,
+                pressed && styles.bootstrapRetryButtonPressed,
+              ]}>
+              <Text style={styles.bootstrapRetryLabel}>Coba Lagi</Text>
+            </Pressable>
+          </>
+        ) : null}
       </View>
     );
   }
@@ -448,8 +630,10 @@ export function RootNavigator() {
     return (
       <SchoolSelectionScreen
         memberships={schoolMemberships}
+        errorMessage={schoolActionError}
         selectedSchoolId={currentSchoolId}
         onSelectSchool={membership => {
+          setSchoolActionError(null);
           setActiveSchool(membership.school_id)
             .then(async () => {
               setCurrentSchoolId(membership.school_id);
@@ -467,7 +651,14 @@ export function RootNavigator() {
               setIsSchoolSelectionVisible(false);
               setIsAuthenticated(true);
             })
-            .catch(() => undefined);
+            .catch(error => {
+              const message =
+                error instanceof Error ? error.message : 'Gagal memilih sekolah aktif.';
+              setSchoolActionError(message);
+              if (__DEV__) {
+                console.log('[schoolSelection][select][error]', message);
+              }
+            });
         }}
       />
     );
@@ -488,6 +679,7 @@ export function RootNavigator() {
       {activeTab === 'dashboard'
         ? renderDashboardStack({
             currentSchool,
+            currentSchoolId,
             dashboardRoute,
             onBackToDashboard: () => setDashboardRoute('dashboard'),
             onOpenClassList: () => setDashboardRoute('class-list'),
@@ -622,12 +814,12 @@ export function RootNavigator() {
                 return;
               }
 
-              setSchoolActionError(null);
               setIsRegeneratingJoinCode(true);
               regenerateSchoolJoinCode(profileData.schoolId)
                 .then(() => listMemberships())
                 .then(memberships => {
                   setSchoolMemberships(memberships);
+                  setSchoolActionError(null);
                 })
                 .catch(error => {
                   setSchoolActionError(
@@ -638,6 +830,132 @@ export function RootNavigator() {
                 })
                 .finally(() => {
                   setIsRegeneratingJoinCode(false);
+                });
+            },
+            onAddAcademicYear: (name: string) => {
+              if (!profileData.schoolId || isSavingAcademicYear) {
+                return;
+              }
+
+              const normalizedName = name.trim();
+              const parsed = normalizedName.match(/^(\d{4})\/(\d{4})$/);
+              if (!parsed) {
+                setAcademicYearActionError('Format nama tahun ajaran harus YYYY/YYYY, contoh 2026/2027.');
+                return;
+              }
+              const startYear = Number(parsed[1]);
+              const endYear = Number(parsed[2]);
+              if (!Number.isFinite(startYear) || !Number.isFinite(endYear) || endYear !== startYear + 1) {
+                setAcademicYearActionError('Rentang tahun ajaran tidak valid.');
+                return;
+              }
+
+              setIsSavingAcademicYear(true);
+              setAcademicYearActionError(null);
+              createAcademicYear({
+                schoolId: profileData.schoolId,
+                name: normalizedName,
+                startDate: `${startYear}-07-01`,
+                endDate: `${endYear}-06-30`,
+              })
+                .then(() => listAcademicYears(profileData.schoolId as string))
+                .then(rows => {
+                  setAcademicYears(
+                    rows.map(row => ({ id: row.id, label: row.name, isActive: row.is_active })),
+                  );
+                })
+                .catch(error => {
+                  setAcademicYearActionError(
+                    error instanceof Error ? error.message : 'Gagal menambah tahun akademik.',
+                  );
+                })
+                .finally(() => {
+                  setIsSavingAcademicYear(false);
+                });
+            },
+            onSetActiveAcademicYear: (academicYearId: string) => {
+              if (!profileData.schoolId || isSavingAcademicYear) {
+                return;
+              }
+
+              setIsSavingAcademicYear(true);
+              setAcademicYearActionError(null);
+              setActiveAcademicYear({
+                schoolId: profileData.schoolId,
+                academicYearId,
+              })
+                .then(() => listAcademicYears(profileData.schoolId as string))
+                .then(rows => {
+                  setAcademicYears(
+                    rows.map(row => ({ id: row.id, label: row.name, isActive: row.is_active })),
+                  );
+                })
+                .catch(error => {
+                  setAcademicYearActionError(
+                    error instanceof Error ? error.message : 'Gagal mengubah tahun akademik aktif.',
+                  );
+                })
+                .finally(() => {
+                  setIsSavingAcademicYear(false);
+                });
+            },
+            onUpdateAcademicYear: (academicYearId: string, name: string) => {
+              if (!profileData.schoolId || isSavingAcademicYear) {
+                return;
+              }
+
+              const normalizedName = name.trim();
+              const parsed = normalizedName.match(/^(\d{4})\/(\d{4})$/);
+              if (!parsed) {
+                setAcademicYearActionError('Format nama tahun ajaran harus YYYY/YYYY, contoh 2026/2027.');
+                return;
+              }
+              const startYear = Number(parsed[1]);
+              const endYear = Number(parsed[2]);
+              if (!Number.isFinite(startYear) || !Number.isFinite(endYear) || endYear !== startYear + 1) {
+                setAcademicYearActionError('Rentang tahun ajaran tidak valid.');
+                return;
+              }
+
+              setIsSavingAcademicYear(true);
+              setAcademicYearActionError(null);
+              updateAcademicYear({ academicYearId, name: normalizedName })
+                .then(() => listAcademicYears(profileData.schoolId as string))
+                .then(rows => {
+                  setAcademicYears(
+                    rows.map(row => ({ id: row.id, label: row.name, isActive: row.is_active })),
+                  );
+                })
+                .catch(error => {
+                  setAcademicYearActionError(
+                    error instanceof Error ? error.message : 'Gagal mengubah tahun akademik.',
+                  );
+                })
+                .finally(() => {
+                  setIsSavingAcademicYear(false);
+                });
+            },
+            onDeleteAcademicYear: (academicYearId: string) => {
+              if (!profileData.schoolId || isSavingAcademicYear) {
+                return;
+              }
+
+              setIsSavingAcademicYear(true);
+              setAcademicYearActionError(null);
+              deleteAcademicYear({ academicYearId })
+                .then(() => listAcademicYears(profileData.schoolId as string))
+                .then(rows => {
+                  setAcademicYears(
+                    rows.map(row => ({ id: row.id, label: row.name, isActive: row.is_active })),
+                  );
+                })
+                .catch(error => {
+                  setAcademicYearActionError(
+                    error instanceof Error ? error.message : 'Gagal menghapus tahun akademik.',
+                  );
+                })
+                .finally(() => {
+                  setIsSavingAcademicYear(false);
                 });
             },
             onSchoolProfileSaved: () => {
@@ -700,6 +1018,10 @@ export function RootNavigator() {
             },
             isRegeneratingJoinCode,
             schoolActionError,
+            academicYears,
+            isLoadingAcademicYears,
+            isSavingAcademicYear,
+            academicYearActionError,
           })
         : null}
     </MainAppShell>
@@ -753,6 +1075,7 @@ function MainAppShell({
 
 type DashboardStackOptions = {
   currentSchool: string;
+  currentSchoolId: string | null;
   dashboardRoute: DashboardRoute;
   onBackToDashboard: () => void;
   onOpenClassList: () => void;
@@ -779,6 +1102,7 @@ type DashboardStackOptions = {
 
 function renderDashboardStack({
   currentSchool,
+  currentSchoolId,
   dashboardRoute,
   onBackToDashboard,
   onOpenClassList,
@@ -822,6 +1146,7 @@ function renderDashboardStack({
     case 'student-list':
       return (
         <StudentListScreen
+          schoolId={currentSchoolId}
           onBack={onBackToDashboard}
           onOpenStudentProfile={onOpenStudentFromList}
         />
@@ -1052,6 +1377,14 @@ type ProfileStackOptions = {
   onLogout: () => void;
   isRegeneratingJoinCode: boolean;
   schoolActionError: string | null;
+  academicYears: Array<{ id: string; label: string; isActive: boolean }>;
+  isLoadingAcademicYears: boolean;
+  isSavingAcademicYear: boolean;
+  academicYearActionError: string | null;
+  onAddAcademicYear: (name: string) => void;
+  onUpdateAcademicYear: (academicYearId: string, name: string) => void;
+  onSetActiveAcademicYear: (academicYearId: string) => void;
+  onDeleteAcademicYear: (academicYearId: string) => void;
 };
 
 function renderProfileStack({
@@ -1069,6 +1402,14 @@ function renderProfileStack({
   isRegeneratingJoinCode,
   schoolActionError,
   profileData,
+  academicYears,
+  isLoadingAcademicYears,
+  isSavingAcademicYear,
+  academicYearActionError,
+  onAddAcademicYear,
+  onUpdateAcademicYear,
+  onSetActiveAcademicYear,
+  onDeleteAcademicYear,
 }: ProfileStackOptions) {
   switch (profileRoute) {
     case 'edit-profile':
@@ -1122,6 +1463,14 @@ function renderProfileStack({
           schoolJoinCode={profileData.schoolJoinCode}
           schoolName={profileData.schoolName}
           schoolNumber={profileData.schoolNumber}
+          academicYears={academicYears}
+          isLoadingAcademicYears={isLoadingAcademicYears}
+          isSavingAcademicYear={isSavingAcademicYear}
+          academicYearActionError={academicYearActionError}
+          onAddAcademicYear={onAddAcademicYear}
+          onUpdateAcademicYear={onUpdateAcademicYear}
+          onSetActiveAcademicYear={onSetActiveAcademicYear}
+          onDeleteAcademicYear={onDeleteAcademicYear}
         />
       );
   }
@@ -1195,6 +1544,34 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.app,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing[20],
+    gap: spacing[16],
+  },
+  bootstrapTitle: {
+    ...typography.bodySm,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  bootstrapCaption: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    textAlign: 'center',
+  },
+  bootstrapRetryButton: {
+    marginTop: spacing[6],
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.brand.primary500,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing[20],
+    paddingVertical: spacing[12],
+  },
+  bootstrapRetryButtonPressed: {
+    opacity: 0.85,
+  },
+  bootstrapRetryLabel: {
+    ...typography.labelMd,
+    color: colors.brand.primary500,
   },
   container: {
     flex: 1,

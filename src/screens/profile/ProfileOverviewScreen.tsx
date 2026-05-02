@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { InfoCard, Screen } from '../../shared/components';
@@ -24,26 +24,15 @@ type ProfileOverviewScreenProps = {
   canEditSchoolProfile: boolean;
   isRegeneratingJoinCode: boolean;
   schoolActionError: string | null;
+  academicYears: Array<{ id: string; label: string; isActive: boolean }>;
+  isLoadingAcademicYears: boolean;
+  isSavingAcademicYear: boolean;
+  academicYearActionError: string | null;
+  onAddAcademicYear: (name: string) => void;
+  onUpdateAcademicYear: (academicYearId: string, name: string) => void;
+  onSetActiveAcademicYear: (academicYearId: string) => void;
+  onDeleteAcademicYear: (academicYearId: string) => void;
 };
-
-type AcademicYearItem = {
-  id: string;
-  label: string;
-  isActive: boolean;
-};
-
-const INITIAL_ACADEMIC_YEARS: AcademicYearItem[] = [
-  {
-    id: 'academic-year-1',
-    label: '2024/2025',
-    isActive: false,
-  },
-  {
-    id: 'academic-year-2',
-    label: '2025/2026',
-    isActive: true,
-  },
-];
 
 function buildInitials(name: string): string {
   const parts = name
@@ -81,36 +70,84 @@ export function ProfileOverviewScreen({
   canEditSchoolProfile,
   isRegeneratingJoinCode,
   schoolActionError,
+  academicYears,
+  isLoadingAcademicYears,
+  isSavingAcademicYear,
+  academicYearActionError,
+  onAddAcademicYear,
+  onUpdateAcademicYear,
+  onSetActiveAcademicYear,
+  onDeleteAcademicYear,
 }: ProfileOverviewScreenProps) {
   const shouldShowWhatsApp = false;
   const insets = useSafeAreaInsets();
   const headerHeight = insets.top + 72;
-  const [academicYears, setAcademicYears] =
-    useState<AcademicYearItem[]>(INITIAL_ACADEMIC_YEARS);
+  const [persistentSchoolError, setPersistentSchoolError] = useState<string | null>(null);
+  const [isAcademicYearModalVisible, setIsAcademicYearModalVisible] = useState(false);
+  const [newAcademicYearName, setNewAcademicYearName] = useState('');
+  const [academicYearModalError, setAcademicYearModalError] = useState<string | null>(null);
+  const [editingAcademicYear, setEditingAcademicYear] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [editingAcademicYearName, setEditingAcademicYearName] = useState('');
+  const [editingAcademicYearError, setEditingAcademicYearError] = useState<string | null>(null);
 
-  const handleAddAcademicYear = () => {
-    setAcademicYears(current => {
-      const parsedStartYears = current
-        .map(item => {
-          const parsed = item.label.match(/^(\d{4})\/(\d{4})$/);
-          return parsed ? Number(parsed[1]) : null;
-        })
-        .filter((year): year is number => year !== null);
+  useEffect(() => {
+    if (schoolActionError) {
+      setPersistentSchoolError(schoolActionError);
+      return;
+    }
 
-      const nextStartYear =
-        parsedStartYears.length > 0
-          ? Math.max(...parsedStartYears) + 1
-          : new Date().getFullYear();
+    if (!isRegeneratingJoinCode) {
+      setPersistentSchoolError(null);
+    }
+  }, [isRegeneratingJoinCode, schoolActionError]);
 
-      return [
-        {
-          id: `academic-year-${Date.now()}`,
-          label: `${nextStartYear}/${nextStartYear + 1}`,
-          isActive: false,
-        },
-        ...current,
-      ];
-    });
+  const handleSubmitAcademicYear = () => {
+    const normalizedName = newAcademicYearName.trim();
+    const parsed = normalizedName.match(/^(\d{4})\/(\d{4})$/);
+    if (!parsed) {
+      setAcademicYearModalError('Format wajib YYYY/YYYY, contoh 2026/2027.');
+      return;
+    }
+
+    const startYear = Number(parsed[1]);
+    const endYear = Number(parsed[2]);
+    if (!Number.isFinite(startYear) || !Number.isFinite(endYear) || endYear !== startYear + 1) {
+      setAcademicYearModalError('Rentang tahun ajaran tidak valid.');
+      return;
+    }
+
+    onAddAcademicYear(normalizedName);
+    setIsAcademicYearModalVisible(false);
+    setNewAcademicYearName('');
+    setAcademicYearModalError(null);
+  };
+
+  const handleSubmitEditAcademicYear = () => {
+    if (!editingAcademicYear) {
+      return;
+    }
+
+    const normalizedName = editingAcademicYearName.trim();
+    const parsed = normalizedName.match(/^(\d{4})\/(\d{4})$/);
+    if (!parsed) {
+      setEditingAcademicYearError('Format wajib YYYY/YYYY, contoh 2026/2027.');
+      return;
+    }
+
+    const startYear = Number(parsed[1]);
+    const endYear = Number(parsed[2]);
+    if (!Number.isFinite(startYear) || !Number.isFinite(endYear) || endYear !== startYear + 1) {
+      setEditingAcademicYearError('Rentang tahun ajaran tidak valid.');
+      return;
+    }
+
+    onUpdateAcademicYear(editingAcademicYear.id, normalizedName);
+    setEditingAcademicYear(null);
+    setEditingAcademicYearName('');
+    setEditingAcademicYearError(null);
   };
 
   return (
@@ -182,7 +219,17 @@ export function ProfileOverviewScreen({
           </View>
         </InfoCard>
 
-        <InfoCard eyebrow="Informasi Sekolah">
+        <InfoCard>
+          <View style={styles.schoolInfoHeaderRow}>
+            <Text style={styles.schoolInfoHeaderLabel}>Informasi Sekolah</Text>
+            <Pressable
+              disabled={!canEditSchoolProfile}
+              onPress={onEditSchoolProfile}
+              style={styles.rowEditAction}>
+              <Text style={styles.rowEditText}>Edit</Text>
+            </Pressable>
+          </View>
+
           <View style={styles.schoolInfoList}>
             <View style={styles.schoolInfoRow}>
               <Text style={styles.schoolInfoLabel}>Nama Sekolah</Text>
@@ -195,51 +242,35 @@ export function ProfileOverviewScreen({
             </View>
             <View style={styles.divider} />
             <View style={styles.schoolInfoRow}>
-              <Text style={styles.schoolInfoLabel}>Address</Text>
+              <Text style={styles.schoolInfoLabel}>Alamat</Text>
               <Text style={styles.schoolInfoValue}>{schoolAddress ?? '-'}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.schoolInfoRow}>
               <Text style={styles.schoolInfoLabel}>Kode Gabung</Text>
-              <Text style={styles.schoolInfoValue}>{schoolJoinCode ?? '-'}</Text>
+              <View style={styles.joinCodeRow}>
+                <Text style={styles.schoolInfoValue}>{schoolJoinCode ?? '-'}</Text>
+                <Pressable
+                  accessibilityLabel="Generate ulang kode gabung"
+                  disabled={!canEditSchoolProfile || isRegeneratingJoinCode}
+                  onPress={onRegenerateJoinCode}
+                  style={styles.regenerateIconButton}>
+                  <Text style={styles.regenerateButtonLabel}>Ganti Kode</Text>
+                </Pressable>
+              </View>
+              {isRegeneratingJoinCode ? (
+                <Text style={styles.schoolInfoHelperText}>Memproses generate ulang kode gabung...</Text>
+              ) : null}
+              {persistentSchoolError ? (
+                <Text style={styles.schoolEditErrorText}>{persistentSchoolError}</Text>
+              ) : null}
             </View>
           </View>
-          <View style={styles.schoolContextNotice}>
-            <Text style={styles.schoolContextNoticeText}>
-              Pengaturan ini hanya untuk sekolah aktif. Untuk ganti sekolah, kembali ke pemilihan
-              sekolah.
-            </Text>
-          </View>
-          <Pressable
-            disabled={!canEditSchoolProfile}
-            onPress={onEditSchoolProfile}
-            style={[styles.schoolEditAction, !canEditSchoolProfile && styles.schoolEditActionDisabled]}>
-            <Text
-              style={[
-                styles.schoolEditActionText,
-                !canEditSchoolProfile && styles.schoolEditActionTextDisabled,
-              ]}>
-              Edit Profil Sekolah
-            </Text>
-          </Pressable>
           {!canEditSchoolProfile ? (
-            <Text style={styles.schoolEditHelperText}>
+            <Text style={styles.schoolInfoHelperText}>
               Hanya admin_sekolah yang dapat memperbarui profil sekolah.
             </Text>
           ) : null}
-          {schoolActionError ? <Text style={styles.schoolEditErrorText}>{schoolActionError}</Text> : null}
-          <Pressable
-            disabled={!canEditSchoolProfile || isRegeneratingJoinCode}
-            onPress={onRegenerateJoinCode}
-            style={[styles.schoolEditAction, !canEditSchoolProfile && styles.schoolEditActionDisabled]}>
-            <Text
-              style={[
-                styles.schoolEditActionText,
-                !canEditSchoolProfile && styles.schoolEditActionTextDisabled,
-              ]}>
-              {isRegeneratingJoinCode ? 'Memproses...' : 'Generate Ulang Kode Gabung'}
-            </Text>
-          </Pressable>
         </InfoCard>
 
         <InfoCard>
@@ -247,7 +278,8 @@ export function ProfileOverviewScreen({
             <Text style={styles.academicYearHeaderLabel}>Tahun Akademik</Text>
             <Pressable
               accessibilityLabel="Tambah tahun akademik"
-              onPress={handleAddAcademicYear}
+              disabled={isSavingAcademicYear}
+              onPress={() => setIsAcademicYearModalVisible(true)}
               style={styles.addAcademicYearIconButton}>
               <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
                 <Path
@@ -261,38 +293,179 @@ export function ProfileOverviewScreen({
           </View>
 
           <View style={styles.academicYearList}>
+            {isLoadingAcademicYears ? (
+              <Text style={styles.schoolInfoHelperText}>Memuat tahun akademik...</Text>
+            ) : null}
+            {!isLoadingAcademicYears && academicYears.length === 0 ? (
+              <Text style={styles.schoolInfoHelperText}>Belum ada tahun akademik.</Text>
+            ) : null}
             {academicYears.map((academicYear, index) => (
               <View key={academicYear.id}>
                 <View style={styles.academicYearRow}>
-                  <View style={styles.academicYearMeta}>
-                    <Text style={styles.academicYearLabel}>{academicYear.label}</Text>
-                  </View>
-                  <Switch
-                    value={academicYear.isActive}
-                    onValueChange={nextValue =>
-                      setAcademicYears(current => {
-                        if (!nextValue) {
-                          return current;
+                  <View style={styles.academicYearInfo}>
+                    <Pressable
+                      accessibilityLabel={`Pilih tahun akademik ${academicYear.label}`}
+                      disabled={isSavingAcademicYear}
+                      onPress={() => {
+                        if (academicYear.isActive) {
+                          return;
                         }
-
-                        return current.map(item => ({
-                          ...item,
-                          isActive: item.id === academicYear.id,
-                        }));
-                      })
-                    }
-                    trackColor={{
-                      false: colors.border.strong,
-                      true: colors.brand.primary300,
-                    }}
-                    thumbColor={academicYear.isActive ? colors.brand.primary700 : colors.neutral[0]}
-                  />
+                        onSetActiveAcademicYear(academicYear.id);
+                      }}
+                      style={[
+                        styles.academicYearRadioOuter,
+                        academicYear.isActive && styles.academicYearRadioOuterActive,
+                      ]}>
+                      {academicYear.isActive ? <View style={styles.academicYearRadioInner} /> : null}
+                    </Pressable>
+                    <View style={styles.academicYearMeta}>
+                      <Text style={styles.academicYearLabel}>{academicYear.label}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.academicYearActions}>
+                    <Pressable
+                      accessibilityLabel="Edit tahun akademik"
+                      disabled={isSavingAcademicYear}
+                      onPress={() => {
+                        setEditingAcademicYear({ id: academicYear.id, name: academicYear.label });
+                        setEditingAcademicYearName(academicYear.label);
+                        setEditingAcademicYearError(null);
+                      }}
+                      style={styles.rowEditAction}>
+                      <Text style={styles.rowEditText}>Edit</Text>
+                    </Pressable>
+                  </View>
                 </View>
                 {index < academicYears.length - 1 ? <View style={styles.divider} /> : null}
               </View>
             ))}
+            {academicYearActionError ? (
+              <Text style={styles.schoolEditErrorText}>{academicYearActionError}</Text>
+            ) : null}
           </View>
         </InfoCard>
+
+        <Modal
+          animationType="fade"
+          transparent
+          visible={isAcademicYearModalVisible}
+          onRequestClose={() => setIsAcademicYearModalVisible(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Tambah Tahun Akademik</Text>
+              <Text style={styles.modalHelperText}>Gunakan format `YYYY/YYYY`.</Text>
+              <TextInput
+                autoCapitalize="none"
+                placeholder="Contoh: 2026/2027"
+                placeholderTextColor={colors.text.muted}
+                style={styles.modalInput}
+                value={newAcademicYearName}
+                onChangeText={value => {
+                  setNewAcademicYearName(value);
+                  if (academicYearModalError) {
+                    setAcademicYearModalError(null);
+                  }
+                }}
+              />
+              {academicYearModalError ? (
+                <Text style={styles.schoolEditErrorText}>{academicYearModalError}</Text>
+              ) : null}
+              <View style={styles.modalActionsRow}>
+                <Pressable
+                  onPress={() => {
+                    setIsAcademicYearModalVisible(false);
+                    setAcademicYearModalError(null);
+                  }}
+                  style={styles.modalSecondaryButton}>
+                  <Text style={styles.modalSecondaryButtonText}>Batal</Text>
+                </Pressable>
+                <Pressable
+                  disabled={isSavingAcademicYear}
+                  onPress={handleSubmitAcademicYear}
+                  style={styles.modalPrimaryButton}>
+                  <Text style={styles.modalPrimaryButtonText}>Simpan</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          animationType="fade"
+          transparent
+          visible={editingAcademicYear !== null}
+          onRequestClose={() => setEditingAcademicYear(null)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Edit Tahun Akademik</Text>
+              <Text style={styles.modalHelperText}>Gunakan format `YYYY/YYYY`.</Text>
+              <TextInput
+                autoCapitalize="none"
+                placeholder="Contoh: 2026/2027"
+                placeholderTextColor={colors.text.muted}
+                style={styles.modalInput}
+                value={editingAcademicYearName}
+                onChangeText={value => {
+                  setEditingAcademicYearName(value);
+                  if (editingAcademicYearError) {
+                    setEditingAcademicYearError(null);
+                  }
+                }}
+              />
+              {editingAcademicYearError ? (
+                <Text style={styles.schoolEditErrorText}>{editingAcademicYearError}</Text>
+              ) : null}
+              <View style={styles.modalActionsRowBetween}>
+                <Pressable
+                  disabled={isSavingAcademicYear || !editingAcademicYear}
+                  onPress={() => {
+                    if (!editingAcademicYear) {
+                      return;
+                    }
+                    Alert.alert(
+                      'Hapus Tahun Akademik',
+                      `Yakin hapus tahun akademik ${editingAcademicYear.name}?`,
+                      [
+                        {
+                          text: 'Batal',
+                          style: 'cancel',
+                        },
+                        {
+                          text: 'Hapus',
+                          style: 'destructive',
+                          onPress: () => {
+                            onDeleteAcademicYear(editingAcademicYear.id);
+                            setEditingAcademicYear(null);
+                            setEditingAcademicYearName('');
+                            setEditingAcademicYearError(null);
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                  style={styles.modalDangerButton}>
+                  <Text style={styles.modalDangerButtonText}>Hapus</Text>
+                </Pressable>
+                <View style={styles.modalActionsRow}>
+                  <Pressable
+                    onPress={() => {
+                      setEditingAcademicYear(null);
+                      setEditingAcademicYearError(null);
+                    }}
+                    style={styles.modalSecondaryButton}>
+                    <Text style={styles.modalSecondaryButtonText}>Batal</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isSavingAcademicYear}
+                    onPress={handleSubmitEditAcademicYear}
+                    style={styles.modalPrimaryButton}>
+                    <Text style={styles.modalPrimaryButtonText}>Simpan</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <InfoCard eyebrow="Informasi Aplikasi">
           <View style={styles.appInfoRow}>
@@ -417,6 +590,17 @@ const styles = StyleSheet.create({
   schoolInfoList: {
     marginTop: spacing[4],
   },
+  schoolInfoHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  schoolInfoHeaderLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
   schoolInfoRow: {
     gap: spacing[2],
     paddingVertical: spacing[8],
@@ -431,40 +615,30 @@ const styles = StyleSheet.create({
     ...typography.bodyMd,
     color: colors.text.primary,
   },
-  schoolContextNotice: {
-    marginTop: spacing[12],
-    borderRadius: radius.md,
-    backgroundColor: colors.feedback.infoBackground,
-    paddingHorizontal: spacing[12],
-    paddingVertical: spacing[8],
+  joinCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[10],
   },
-  schoolContextNoticeText: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  schoolEditAction: {
-    alignSelf: 'flex-start',
-    marginTop: spacing[12],
+  regenerateIconButton: {
+    minHeight: 32,
+    height: 32,
     borderWidth: 1,
     borderColor: colors.border.strong,
     borderRadius: radius.md,
-    paddingHorizontal: spacing[12],
-    paddingVertical: spacing[8],
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[8],
     backgroundColor: colors.surface.secondary,
   },
-  schoolEditActionDisabled: {
-    backgroundColor: colors.neutral[200],
-  },
-  schoolEditActionText: {
-    ...typography.labelMd,
+  regenerateButtonLabel: {
+    ...typography.labelSm,
     color: colors.brand.primary700,
   },
-  schoolEditActionTextDisabled: {
-    color: colors.text.secondary,
-  },
-  schoolEditHelperText: {
+  schoolInfoHelperText: {
     ...typography.bodySm,
-    marginTop: spacing[10],
+    marginTop: spacing[12],
     color: colors.text.secondary,
   },
   schoolEditErrorText: {
@@ -536,6 +710,35 @@ const styles = StyleSheet.create({
     gap: spacing[12],
     paddingVertical: spacing[12],
   },
+  academicYearInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[16],
+  },
+  academicYearActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+  },
+  academicYearRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.border.strong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  academicYearRadioOuterActive: {
+    borderColor: colors.brand.primary700,
+  },
+  academicYearRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brand.primary700,
+  },
   academicYearMeta: {
     flex: 1,
     gap: spacing[2],
@@ -587,6 +790,83 @@ const styles = StyleSheet.create({
   },
   logoutButtonText: {
     ...typography.labelLg,
+    color: colors.status.device.error,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[24],
+  },
+  modalCard: {
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface.primary,
+    padding: spacing[16],
+    gap: spacing[8],
+  },
+  modalTitle: {
+    ...typography.labelLg,
+    color: colors.text.primary,
+  },
+  modalHelperText: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    borderRadius: radius.md,
+    minHeight: 44,
+    paddingHorizontal: spacing[12],
+    color: colors.text.primary,
+    ...typography.bodyMd,
+  },
+  modalActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing[8],
+  },
+  modalActionsRowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing[8],
+    gap: spacing[10],
+  },
+  modalSecondaryButton: {
+    minHeight: 36,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    paddingHorizontal: spacing[12],
+    justifyContent: 'center',
+  },
+  modalSecondaryButtonText: {
+    ...typography.labelMd,
+    color: colors.text.secondary,
+  },
+  modalPrimaryButton: {
+    minHeight: 36,
+    borderRadius: radius.md,
+    backgroundColor: colors.brand.primary700,
+    paddingHorizontal: spacing[12],
+    justifyContent: 'center',
+  },
+  modalPrimaryButtonText: {
+    ...typography.labelMd,
+    color: colors.neutral[0],
+  },
+  modalDangerButton: {
+    minHeight: 36,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.status.device.error,
+    backgroundColor: colors.feedback.errorBackground,
+    paddingHorizontal: spacing[12],
+    justifyContent: 'center',
+  },
+  modalDangerButtonText: {
+    ...typography.labelMd,
     color: colors.status.device.error,
   },
 });
