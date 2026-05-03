@@ -17,7 +17,10 @@ export function SchoolSelectionScreen({
   selectedSchoolId = null,
   errorMessage = null,
 }: SchoolSelectionScreenProps) {
-  const activeMemberships = memberships.filter(item => item.status === 'active');
+  const activeMemberships = memberships.filter(item => {
+    const normalizedStatus = item.status.trim().toLowerCase();
+    return item.is_active || normalizedStatus === 'active' || normalizedStatus === 'approved' || normalizedStatus === 'accepted';
+  });
 
   return (
     <Screen contentContainerStyle={styles.content}>
@@ -34,6 +37,12 @@ export function SchoolSelectionScreen({
 
       <View style={styles.list}>
         {activeMemberships.map(membership => {
+          const schoolName =
+            membership.name.trim().length > 0
+              ? membership.name
+              : membership.school_name.trim().length > 0
+                ? membership.school_name
+              : `Sekolah ${membership.school_id.slice(0, 8).toUpperCase()}`;
           const isSelected =
             selectedSchoolId === membership.school_id ||
             (selectedSchoolId === null && membership.is_active);
@@ -43,7 +52,7 @@ export function SchoolSelectionScreen({
               key={membership.id}
               onPress={() => onSelectSchool(membership)}
               style={[styles.card, isSelected && styles.cardSelected]}>
-              <Text style={styles.cardTitle}>{membership.school_name}</Text>
+              <Text style={styles.cardTitle}>{schoolName}</Text>
               <Text style={styles.cardBody}>
                 {isSelected ? 'Sekolah aktif saat ini' : 'Tap untuk aktifkan sekolah ini'}
               </Text>

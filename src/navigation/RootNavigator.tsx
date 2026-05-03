@@ -108,6 +108,14 @@ function readStringValue(source: UnknownObject | null, keys: string[]): string |
   return null;
 }
 
+function toDisplayValue(value: string | null | undefined, fallback: string): string {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
 function readStringOrNumberValue(source: UnknownObject | null, keys: string[]): string | null {
   if (!source) {
     return null;
@@ -182,6 +190,20 @@ function isAuthSessionInvalidError(error: unknown): boolean {
   );
 }
 
+function isActiveMembershipStatus(status: string): boolean {
+  const normalized = status.trim().toLowerCase();
+  return normalized === 'active' || normalized === 'approved' || normalized === 'accepted';
+}
+
+function isMembershipConnected(
+  membership: Awaited<ReturnType<typeof listMemberships>>[number],
+): boolean {
+  if (membership.is_active) {
+    return true;
+  }
+  return isActiveMembershipStatus(membership.status);
+}
+
 type ProfileSettingsData = {
   fullName: string;
   roleLabels: string;
@@ -238,8 +260,8 @@ function buildProfileSettingsData(
     'user';
   const uniqueRoles = sortRolesByPriority([...normalizedAllowedRoles, fallbackRole]);
   const activeMembership =
-    memberships.find(item => item.status === 'active' && item.is_active) ??
-    memberships.find(item => item.status === 'active') ??
+    memberships.find(item => isMembershipConnected(item) && item.is_active) ??
+    memberships.find(item => isMembershipConnected(item)) ??
     null;
   const activeMembershipObject = asObject(activeMembership as unknown);
   const activeMembershipSchoolObject =
@@ -252,6 +274,9 @@ function buildProfileSettingsData(
     readStringValue(activeMembershipObject, ['address', 'school_address']) ??
     readStringValue(activeMembershipSchoolObject, ['address', 'school_address']) ??
     null;
+  const schoolName = toDisplayValue(activeMembership?.school_name, DEFAULT_SCHOOL_NAME);
+  const schoolNumber = toDisplayValue(activeMembership?.school_number ?? null, '-');
+  const schoolJoinCode = toDisplayValue(activeMembership?.school_join_code, '-');
 
   return {
     fullName,
@@ -260,10 +285,10 @@ function buildProfileSettingsData(
     schoolId: activeMembership?.school_id ?? null,
     activeSchoolRole: activeMembership?.role ?? null,
     canEditSchoolProfile,
-    schoolName: activeMembership?.school_name ?? DEFAULT_SCHOOL_NAME,
-    schoolNumber: activeMembership?.school_number ?? null,
+    schoolName,
+    schoolNumber: schoolNumber === '-' ? null : schoolNumber,
     schoolAddress,
-    schoolJoinCode: activeMembership?.school_join_code ?? null,
+    schoolJoinCode: schoolJoinCode === '-' ? null : schoolJoinCode,
   };
 }
 
@@ -426,7 +451,7 @@ export function RootNavigator() {
           try {
             memberships = await listMemberships();
             setSchoolMemberships(memberships);
-            hasSchoolMembership = memberships.some(item => item.status === 'active');
+            hasSchoolMembership = memberships.some(item => isMembershipConnected(item));
           } catch (error) {
             if (isAuthSessionInvalidError(error)) {
               clearAuthSession();
@@ -459,7 +484,7 @@ export function RootNavigator() {
         if (shouldOpenSchoolConnection) {
           setAuthRoute('school-connection');
         }
-        const activeMemberships = memberships.filter(item => item.status === 'active');
+        const activeMemberships = memberships.filter(item => isMembershipConnected(item));
         const cachedSchool = await loadCurrentSchoolContext();
         const selectedMembership =
           (cachedSchool
@@ -566,7 +591,7 @@ export function RootNavigator() {
           onConnected={() => {
             listMemberships()
               .then(memberships => {
-                const activeMemberships = memberships.filter(item => item.status === 'active');
+                const activeMemberships = memberships.filter(item => isMembershipConnected(item));
                 setSchoolMemberships(memberships);
                 if (activeMemberships.length === 0) {
                   setAuthRoute('school-connection');
@@ -605,7 +630,7 @@ export function RootNavigator() {
 
           listMemberships()
             .then(memberships => {
-              const activeMemberships = memberships.filter(item => item.status === 'active');
+              const activeMemberships = memberships.filter(item => isMembershipConnected(item));
               setSchoolMemberships(memberships);
 
               if (activeMemberships.length === 0) {
@@ -634,7 +659,7 @@ export function RootNavigator() {
         selectedSchoolId={currentSchoolId}
         onSelectSchool={membership => {
           setSchoolActionError(null);
-          setActiveSchool(membership.school_id)
+          setActiveSchool(membership.school_id, normalizeRoleKey(membership.role))
             .then(async () => {
               setCurrentSchoolId(membership.school_id);
               setCurrentSchool(membership.school_name);
@@ -968,7 +993,7 @@ export function RootNavigator() {
             onSwitchSchool: () => {
               listMemberships()
                 .then(memberships => {
-                  const activeMemberships = memberships.filter(item => item.status === 'active');
+                  const activeMemberships = memberships.filter(item => isMembershipConnected(item));
                   setSchoolMemberships(memberships);
                   if (activeMemberships.length === 0) {
                     setAuthRoute('school-connection');

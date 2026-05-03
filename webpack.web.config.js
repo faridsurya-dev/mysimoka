@@ -11,6 +11,8 @@ const transpileModules = [
   path.resolve(appDirectory, 'node_modules/react-native-safe-area-context'),
   path.resolve(appDirectory, 'node_modules/react-native-svg'),
   path.resolve(appDirectory, 'node_modules/react-native-gifted-charts'),
+  path.resolve(appDirectory, 'node_modules/@react-native-community/datetimepicker'),
+  path.resolve(appDirectory, 'node_modules/@react-native-async-storage/async-storage'),
 ];
 
 module.exports = {
@@ -34,6 +36,12 @@ module.exports = {
   },
   module: {
     rules: [
+      {
+        test: /\.m?js$/,
+        resolve: {
+          fullySpecified: false,
+        },
+      },
       {
         test: /\.[jt]sx?$/,
         include: transpileModules,

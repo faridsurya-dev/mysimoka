@@ -41,6 +41,7 @@ type ApiBody = {
   refreshToken?: string;
   user?: unknown;
   data?: unknown;
+  memberships?: unknown;
 };
 
 type ApiValidationErrorItem = {
@@ -131,6 +132,36 @@ function resolveHighestAllowedRoleFromSession(): string | null {
   }
 
   return sortRolesByPriority(normalizedRoles)[0] ?? null;
+}
+
+function syncSessionUserRole(role: string): void {
+  const normalizedRole = normalizeRoleKey(role);
+  const sessionUser = asObject(authSession.user);
+  if (!sessionUser) {
+    return;
+  }
+
+  const allowedRolesSource = Array.isArray(sessionUser.allowed_roles)
+    ? sessionUser.allowed_roles
+    : Array.isArray(sessionUser.allowedRoles)
+      ? sessionUser.allowedRoles
+      : [];
+  const mergedAllowedRoles = sortRolesByPriority([
+    ...allowedRolesSource
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map(item => normalizeRoleKey(item)),
+    normalizedRole,
+  ]);
+
+  setAuthSession({
+    user: {
+      ...sessionUser,
+      allowed_roles: mergedAllowedRoles,
+      allowedRoles: mergedAllowedRoles,
+      active_school_role: normalizedRole,
+      activeSchoolRole: normalizedRole,
+    },
+  });
 }
 
 function normalizePersistedAuthSession(value: unknown): PersistedAuthSession | null {
@@ -290,6 +321,56 @@ function readObjectValue(source: ApiBody | null, key: string): Record<string, un
   return null;
 }
 
+function readFirstNonEmptyString(source: Record<string, unknown> | null, keys: string[]): string | null {
+  if (!source) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = readNullableString(source[key]);
+    if (value) {
+      return value;
+    }
+    if (typeof source[key] === 'number' && Number.isFinite(source[key] as number)) {
+      return String(source[key]);
+    }
+  }
+
+  return null;
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const base64Payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+  const padLength = (4 - (base64Payload.length % 4)) % 4;
+  const paddedPayload = `${base64Payload}${'='.repeat(padLength)}`;
+  try {
+    const atobFn =
+      typeof globalThis.atob === 'function' ? globalThis.atob.bind(globalThis) : null;
+    if (!atobFn) {
+      return null;
+    }
+    const decoded = atobFn(paddedPayload);
+    const parsed = JSON.parse(decoded) as unknown;
+    return asObject(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function readArrayValue(source: ApiBody | null, key: string): unknown[] | null {
+  if (!source) {
+    return null;
+  }
+
+  const value = source[key as keyof ApiBody];
+  return Array.isArray(value) ? value : null;
+}
+
 function looksLikeUserObject(source: Record<string, unknown> | null): boolean {
   if (!source) {
     return false;
@@ -302,6 +383,44 @@ function looksLikeUserObject(source: Record<string, unknown> | null): boolean {
   const hasSchoolObject = Boolean(asObject(source.school));
 
   return hasId || hasEmail || hasName || hasSchoolId || hasSchoolObject;
+}
+
+type LoginMembership = {
+  role: string | null;
+  status: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+};
+
+function normalizeLoginMembership(item: unknown): LoginMembership | null {
+  const source = asObject(item);
+  if (!source) {
+    return null;
+  }
+
+  const role = readNullableString(source.role);
+  const status = readNullableString(source.status);
+  const isDefault = source.is_default === true || source.isDefault === true;
+  const isActive = source.is_active === true || source.isActive === true;
+
+  if (!role && !status && !isDefault && !isActive) {
+    return null;
+  }
+
+  return {
+    role: role ? normalizeRoleKey(role) : null,
+    status: status ? status.trim().toLowerCase() : null,
+    isDefault,
+    isActive,
+  };
+}
+
+function isConnectedMembershipStatus(status: string | null): boolean {
+  if (!status) {
+    return false;
+  }
+
+  return status === 'active' || status === 'approved' || status === 'accepted';
 }
 
 function normalizeLoginResult(body: ApiBody | null): LoginResult | null {
@@ -320,9 +439,55 @@ function normalizeLoginResult(body: ApiBody | null): LoginResult | null {
   const userFromBody = readObjectValue(body, 'user');
   const userFromData = readObjectValue(nestedData as ApiBody | null, 'user');
   const inferredUser = looksLikeUserObject(nestedData) ? nestedData : null;
-  const user = userFromBody ?? userFromData ?? inferredUser;
-  const rawRequiresSchoolConnection = asObject(body)?.requiresSchoolConnection;
-  const requiresSchoolConnection = rawRequiresSchoolConnection === true;
+  const rawMemberships =
+    readArrayValue(body, 'memberships') ??
+    readArrayValue(nestedData as ApiBody | null, 'memberships') ??
+    [];
+  const memberships = rawMemberships
+    .map(normalizeLoginMembership)
+    .filter((item): item is LoginMembership => item !== null);
+  const connectedMemberships = memberships.filter(
+    item => item.isActive || isConnectedMembershipStatus(item.status),
+  );
+  const allowedRoles = sortRolesByPriority(
+    memberships.map(item => item.role).filter((item): item is string => Boolean(item)),
+  );
+  const selectedMembership =
+    connectedMemberships.find(item => item.isActive || item.isDefault) ??
+    connectedMemberships[0] ??
+    memberships.find(item => item.isDefault) ??
+    memberships[0] ??
+    null;
+  const selectedRole = selectedMembership?.role ?? null;
+  const baseUser = userFromBody ?? userFromData ?? inferredUser;
+  const user = baseUser
+    ? {
+        ...baseUser,
+        ...(allowedRoles.length > 0 ? { allowed_roles: allowedRoles, allowedRoles } : {}),
+        ...(selectedRole
+          ? { active_school_role: selectedRole, activeSchoolRole: selectedRole }
+          : {}),
+      }
+    : baseUser;
+  const bodyObject = asObject(body as unknown);
+  const nestedDataObject = asObject(nestedData as unknown);
+  const rawRequiresSchoolConnection =
+    bodyObject?.requiresSchoolConnection ??
+    nestedDataObject?.requiresSchoolConnection;
+  const rawSchoolFlag =
+    readNullableString(bodyObject?.school_status) ??
+    readNullableString(bodyObject?.schoolStatus) ??
+    readNullableString(bodyObject?.flag) ??
+    readNullableString(nestedDataObject?.school_status) ??
+    readNullableString(nestedDataObject?.schoolStatus) ??
+    readNullableString(nestedDataObject?.flag);
+  const hasNoSchoolFlag = rawSchoolFlag?.trim().toUpperCase() === 'NO_SCHOOL';
+  const requiresSchoolConnection =
+    rawRequiresSchoolConnection === true || hasNoSchoolFlag
+      ? true
+      : memberships.length > 0
+        ? connectedMemberships.length === 0
+        : false;
 
   return {
     accessToken,
@@ -352,6 +517,7 @@ export type JoinSchoolPayload = {
 export type SchoolMembership = {
   id: string;
   school_id: string;
+  name: string;
   school_name: string;
   school_number: string | null;
   school_address: string | null;
@@ -413,9 +579,18 @@ export type AcademicYear = {
 };
 
 function getSessionUserIdOrThrow(): string {
-  const userId =
-    readNullableString(authSession.user?.id) ??
-    (typeof authSession.user?.id === 'number' ? String(authSession.user.id) : null);
+  const sessionUser = asObject(authSession.user);
+  const userIdFromUserObject = readFirstNonEmptyString(sessionUser, ['id', 'user_id', 'userId']);
+  const jwtPayload =
+    authSession.accessToken && authSession.accessToken.trim().length > 0
+      ? decodeJwtPayload(authSession.accessToken)
+      : null;
+  const hasuraClaims = asObject(jwtPayload?.['https://hasura.io/jwt/claims']);
+  const userIdFromClaims = readFirstNonEmptyString(hasuraClaims, [
+    'x-hasura-user-id',
+    'x_hasura_user_id',
+  ]);
+  const userId = userIdFromUserObject ?? userIdFromClaims;
   if (!userId) {
     throw new Error('Data user tidak ditemukan. Silakan login ulang.');
   }
@@ -594,7 +769,7 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<void> {
     throw new Error('Kode join sekolah tidak ditemukan.');
   }
 
-  await setActiveSchool(schoolId, 'school_member');
+  await setActiveSchool(schoolId, 'teacher');
 }
 
 function normalizeMembership(item: unknown): SchoolMembership | null {
@@ -602,6 +777,7 @@ function normalizeMembership(item: unknown): SchoolMembership | null {
   if (!source) {
     return null;
   }
+  const schoolObject = asObject(source.school);
 
   const schoolId = readNullableString(source.school_id) ?? readNullableString(source.schoolId);
   if (!schoolId) {
@@ -609,26 +785,35 @@ function normalizeMembership(item: unknown): SchoolMembership | null {
   }
 
   const id = readNullableString(source.id) ?? schoolId;
-  const role = readNullableString(source.role) ?? 'school_member';
+  const role = normalizeRoleKey(readNullableString(source.role) ?? 'teacher');
   const status = readNullableString(source.status) ?? 'active';
   const isActive = source.is_active === true || source.isActive === true;
 
   return {
     id,
     school_id: schoolId,
+    name:
+      readNullableString(source.name) ??
+      readNullableString(schoolObject?.name) ??
+      '',
     school_name:
+      readNullableString(source.name) ??
       readNullableString(source.school_name) ??
       readNullableString(source.schoolName) ??
+      readNullableString(schoolObject?.name) ??
       '',
     school_number:
       readNullableString(source.school_number) ??
-      readNullableString(source.schoolNumber),
+      readNullableString(source.schoolNumber) ??
+      readNullableString(schoolObject?.number),
     school_address:
       readNullableString(source.school_address) ??
-      readNullableString(source.address),
+      readNullableString(source.address) ??
+      readNullableString(schoolObject?.address),
     school_join_code:
       readNullableString(source.school_join_code) ??
       readNullableString(source.schoolJoinCode) ??
+      readNullableString(schoolObject?.join_code) ??
       '',
     role,
     status,
@@ -636,7 +821,7 @@ function normalizeMembership(item: unknown): SchoolMembership | null {
   };
 }
 
-async function fetchSchoolDetailsByIds(schoolIds: string[]): Promise<SchoolDetailsById> {
+async function fetchSchoolDetailsByIds(schoolIds: string[], hasuraRole?: string): Promise<SchoolDetailsById> {
   if (schoolIds.length === 0) {
     return {};
   }
@@ -658,6 +843,7 @@ async function fetchSchoolDetailsByIds(schoolIds: string[]): Promise<SchoolDetai
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
+      ...(hasuraRole ? { 'x-hasura-role': hasuraRole } : {}),
     },
     body: JSON.stringify({
       query,
@@ -674,6 +860,7 @@ async function fetchSchoolDetailsByIds(schoolIds: string[]): Promise<SchoolDetai
 
   if (__DEV__) {
     console.log('[schoolsByIds][graphql][endpoint]', GRAPHQL_URL);
+    console.log('[schoolsByIds][graphql][role]', hasuraRole ?? '(auto/highest)');
     console.log('[schoolsByIds][graphql][raw]', JSON.stringify(responseBody));
   }
 
@@ -716,6 +903,12 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
         role
         status
         is_active
+        school {
+          name
+          number
+          address
+          join_code
+        }
       }
     }
   `;
@@ -738,6 +931,7 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
     | null;
 
   if (__DEV__) {
+    console.log('[listMemberships][userId]', userId);
     console.log('[listMemberships][graphql][endpoint]', GRAPHQL_URL);
     console.log('[listMemberships][graphql][raw]', JSON.stringify(response));
   }
@@ -753,9 +947,10 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
         .filter((item): item is SchoolMembership => item !== null)
     : [];
   const uniqueSchoolIds = Array.from(new Set(memberships.map(item => item.school_id)));
+  const highestRole = resolveHighestAllowedRoleFromSession();
   let schoolDetailsById: SchoolDetailsById = {};
   try {
-    schoolDetailsById = await fetchSchoolDetailsByIds(uniqueSchoolIds);
+    schoolDetailsById = await fetchSchoolDetailsByIds(uniqueSchoolIds, highestRole ?? undefined);
   } catch (error) {
     if (__DEV__) {
       console.log(
@@ -774,6 +969,7 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
 
     return {
       ...item,
+      name: schoolDetails.name ?? item.name,
       school_name: schoolDetails.name ?? item.school_name,
       school_number: schoolDetails.number ?? item.school_number,
       school_address: schoolDetails.address ?? item.school_address,
@@ -1268,7 +1464,7 @@ export async function updateAcademicYear(payload: {
   }
 }
 
-export async function setActiveSchool(schoolId: string, role = 'school_member'): Promise<void> {
+export async function setActiveSchool(schoolId: string, role = 'teacher'): Promise<void> {
   const userId = getSessionUserIdOrThrow();
   const normalizedSchoolId = schoolId.trim();
   if (!normalizedSchoolId) {
@@ -1364,6 +1560,8 @@ export async function setActiveSchool(schoolId: string, role = 'school_member'):
       console.log('[setActiveSchool][warn][refresh]', 'token refresh skipped/failed after school switch');
     }
   }
+
+  syncSessionUserRole(role);
 }
 
 export async function updateMyProfile(payload: UpdateMyProfilePayload): Promise<Record<string, unknown>> {
@@ -1742,6 +1940,7 @@ async function refreshAccessToken(): Promise<string | null> {
     },
     body: JSON.stringify({
       refreshToken: authSession.refreshToken,
+      refresh_token: authSession.refreshToken,
     }),
   });
 
@@ -1758,6 +1957,7 @@ async function refreshAccessToken(): Promise<string | null> {
   setAuthSession({
     accessToken: refreshedResult.accessToken,
     refreshToken: refreshedResult.refreshToken ?? authSession.refreshToken,
+    user: refreshedResult.user ?? authSession.user,
   });
 
   return refreshedResult.accessToken;
