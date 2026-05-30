@@ -3,11 +3,21 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { PrimaryButton, Screen } from '../../shared/components';
+import { S400_BIND_KEY } from '../../services/environment';
 import {
   bleManager,
+  setDeviceMacAddress,
   ensureBlePoweredOn,
   getBleDeviceName,
+  handleS400Advertisement,
+  handleS400ManufacturerData,
   requestBlePermissions,
+  setS400BindKey,
+  setConnectedBleDevice,
+  subscribeWeightScaleDebugLog,
+  startMonitoringWeightScale,
+  stopMonitoringWeightScale,
+  useDeviceSession,
 } from '../../features/device';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -20,16 +30,152 @@ type DetectedDevice = {
   isConnected: boolean;
 };
 
+
+function formatWeightKg(weightKg: number) {
+  if (!Number.isFinite(weightKg)) {
+    return null;
+  }
+
+  return `${weightKg.toFixed(2)} kg`;
+}
+
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  try {
+    return date.toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function isLikelyS400Device(name: string) {
+  return /s400|xmtzc/i.test(name);
+}
+
 export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   const insets = useSafeAreaInsets();
   const headerHeight = insets.top + 72;
+  const deviceSession = useDeviceSession();
+  const formattedLatestWeight =
+    deviceSession.latestWeightKg !== null
+      ? formatWeightKg(deviceSession.latestWeightKg) ?? '-'
+      : '-';
+  const formattedLatestWeightAt = deviceSession.latestWeightAt
+    ? formatTimestamp(deviceSession.latestWeightAt)
+    : null;
+  const latestWeightDisplay = formattedLatestWeightAt
+    ? `${formattedLatestWeight} • ${formattedLatestWeightAt}`
+    : formattedLatestWeight;
   const [isScanning, setIsScanning] = useState(false);
   const [detectedDevices, setDetectedDevices] = useState<DetectedDevice[]>([]);
   const [busyDeviceId, setBusyDeviceId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<'connect' | 'disconnect' | null>(null);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [measurementLogs, setMeasurementLogs] = useState<string[]>([]);
   const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const broadcastScanActiveRef = useRef(false);
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
+
+  useEffect(() => {
+    const unsubscribe = subscribeWeightScaleDebugLog(entry => {
+      const timeLabel = formatTimestamp(entry.timestamp) ?? entry.timestamp;
+      const weightLabel =
+        entry.parsedWeightKg === null ? 'null' : `${entry.parsedWeightKg.toFixed(2)}kg`;
+      const logLine =
+        `[${timeLabel}] ${entry.source} | ${entry.message} | value=${entry.rawValueBase64 ?? '-'} | parsed=${weightLabel}`;
+
+      setMeasurementLogs(currentLogs => [logLine, ...currentLogs].slice(0, 50));
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    setS400BindKey(S400_BIND_KEY);
+  }, []);
+
+  useEffect(() => {
+    if (!connectedDevice) {
+      if (broadcastScanActiveRef.current) {
+        bleManager.stopDeviceScan().catch(() => undefined);
+        broadcastScanActiveRef.current = false;
+      }
+      return;
+    }
+
+    const startBroadcastScan = async () => {
+      try {
+        await bleManager.stopDeviceScan();
+      } catch {
+        // no-op
+      }
+
+      try {
+        await bleManager.startDeviceScan(null, { allowDuplicates: true }, (error, scannedDevice) => {
+          if (error) {
+            setScanMessage(current =>
+              current ?? `Scan broadcast gagal: ${error.message || 'unknown error'}`,
+            );
+            return;
+          }
+
+          if (!scannedDevice) {
+            return;
+          }
+
+          const scannedName = getBleDeviceName(scannedDevice);
+          const connectedId = connectedDevice.id.toLowerCase();
+          const scannedId = scannedDevice.id.toLowerCase();
+          const isSameDeviceById = scannedId === connectedId;
+          const hasS400NameHint = /s400|xmtzc/i.test(scannedName);
+          const serviceData =
+            (scannedDevice as unknown as { serviceData?: Record<string, string> }).serviceData ?? null;
+          const hasManufacturerPacket = handleS400ManufacturerData(
+            scannedDevice.id,
+            scannedDevice.manufacturerData,
+          );
+          setDeviceMacAddress(scannedDevice.id, scannedDevice.id);
+
+          const isS400Packet = handleS400Advertisement(
+            scannedDevice.id,
+            serviceData,
+          );
+
+          if (isS400Packet || hasManufacturerPacket) {
+            setScanMessage('Menerima broadcast data S400 (service data terdeteksi).');
+            return;
+          }
+
+          if (isSameDeviceById || hasS400NameHint) {
+            const hasServiceData = !!serviceData && Object.keys(serviceData).length > 0;
+            const serviceKeys = hasServiceData ? Object.keys(serviceData).join(',') : '-';
+            const hasManufacturerData = !!scannedDevice.manufacturerData;
+            const logLine =
+              `[scan] id=${scannedDevice.id} name=${scannedName} serviceKeys=${serviceKeys} manufacturerData=${hasManufacturerData ? 'yes' : 'no'}`;
+            setMeasurementLogs(currentLogs => [logLine, ...currentLogs].slice(0, 50));
+          }
+        });
+        broadcastScanActiveRef.current = true;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Gagal memulai scan broadcast perangkat.';
+        setScanMessage(message);
+      }
+    };
+
+    startBroadcastScan();
+
+    return () => {
+      if (broadcastScanActiveRef.current) {
+        bleManager.stopDeviceScan().catch(() => undefined);
+        broadcastScanActiveRef.current = false;
+      }
+    };
+  }, [connectedDevice]);
 
   useEffect(() => {
     return () => {
@@ -37,6 +183,7 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
         clearTimeout(scanTimeoutRef.current);
       }
       bleManager.stopDeviceScan().catch(() => undefined);
+      broadcastScanActiveRef.current = false;
     };
   }, []);
 
@@ -46,6 +193,8 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     }
 
     const disconnectSubscription = bleManager.onDeviceDisconnected(connectedDevice.id, () => {
+      stopMonitoringWeightScale(connectedDevice.id);
+      setConnectedBleDevice(null);
       setDetectedDevices(currentDevices =>
         currentDevices.map(device =>
           device.id === connectedDevice.id ? { ...device, isConnected: false } : device,
@@ -102,6 +251,13 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
         }
 
         const deviceName = getBleDeviceName(device);
+        setDeviceMacAddress(device.id, device.id);
+        handleS400Advertisement(
+          device.id,
+          (device as unknown as { serviceData?: Record<string, string> }).serviceData ?? null,
+        );
+        handleS400ManufacturerData(device.id, device.manufacturerData);
+
         setDetectedDevices(currentDevices => {
           const existingDevice = currentDevices.find(item => item.id === device.id);
 
@@ -151,14 +307,51 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
 
     try {
       await bleManager.stopDeviceScan();
-      await bleManager.connectToDevice(deviceId, { timeout: 10000 });
+      const target = detectedDevices.find(item => item.id === deviceId) ?? null;
+      const fallbackName = target?.name ?? deviceId;
+
+      const shouldPreferBroadcast = isLikelyS400Device(fallbackName);
+      const device = shouldPreferBroadcast
+        ? await bleManager.connectToDevice(deviceId, { timeout: 6000 }).catch(() => null)
+        : await bleManager.connectToDevice(deviceId, { timeout: 10000 });
+
+      if (!device && shouldPreferBroadcast) {
+        setConnectedBleDevice({ id: deviceId, name: fallbackName });
+        setDetectedDevices(currentDevices =>
+          currentDevices.map(item => ({
+            ...item,
+            isConnected: item.id === deviceId,
+          })),
+        );
+        setScanMessage(
+          'S400 aktif dalam mode broadcast. Menunggu paket iklan untuk pembacaan berat.',
+        );
+        return;
+      }
+
+      if (!device) {
+        throw new Error('Perangkat tidak bisa dihubungkan.');
+      }
+
+      const deviceName = getBleDeviceName(device);
+      setConnectedBleDevice({ id: device.id, name: deviceName });
+
+      const canReadWeight = isLikelyS400Device(deviceName)
+        ? true
+        : await startMonitoringWeightScale(device);
       setDetectedDevices(currentDevices =>
-        currentDevices.map(device => ({
-          ...device,
-          isConnected: device.id === deviceId,
+        currentDevices.map(item => ({
+          ...item,
+          isConnected: item.id === deviceId,
         })),
       );
-      setScanMessage('Perangkat BLT berhasil terhubung.');
+      setScanMessage(
+        isLikelyS400Device(deviceName)
+          ? 'Perangkat S400 terhubung. Menunggu paket terenkripsi dan proses decode berat.'
+          : canReadWeight
+            ? 'Perangkat BLT berhasil terhubung. Pembacaan berat via BLE aktif.'
+            : 'Perangkat BLT berhasil terhubung, tapi layanan timbangan (GATT Weight Scale) tidak terdeteksi.',
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Gagal menghubungkan perangkat.';
       setScanMessage(message);
@@ -175,7 +368,13 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     setScanMessage(null);
 
     try {
-      await bleManager.cancelDeviceConnection(deviceId);
+      stopMonitoringWeightScale(deviceId);
+      const connectedName =
+        detectedDevices.find(item => item.id === deviceId)?.name ?? deviceId;
+      if (!isLikelyS400Device(connectedName)) {
+        await bleManager.cancelDeviceConnection(deviceId);
+      }
+      setConnectedBleDevice(null);
       setDetectedDevices(currentDevices =>
         currentDevices.map(device =>
           device.id === deviceId ? { ...device, isConnected: false } : device,
@@ -219,6 +418,11 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
             Satu HP hanya dapat terhubung ke satu perangkat BLT. Lakukan scan untuk
             menampilkan perangkat yang terdeteksi di sekitar operator.
           </Text>
+          <Text style={styles.scanMessage}>
+            {S400_BIND_KEY
+              ? 'S400 bind key aktif dari ENV.'
+              : 'S400 bind key ENV belum terisi (`MYSIMOKA_S400_BLE_KEY`).'}
+          </Text>
           <PrimaryButton
             label={isScanning ? 'Memindai perangkat...' : 'Scan Perangkat'}
             loading={isScanning}
@@ -227,6 +431,16 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
             style={styles.scanButton}
           />
           {scanMessage ? <Text style={styles.scanMessage}>{scanMessage}</Text> : null}
+          {measurementLogs.length > 0 ? (
+            <View style={styles.debugLogContainer}>
+              <Text style={styles.debugLogTitle}>Log BLE Timbangan (raw)</Text>
+              {measurementLogs.map((logItem, logIndex) => (
+                <Text key={`${logIndex}-${logItem}`} style={styles.debugLogItem}>
+                  {logItem}
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.detectedSection}>
@@ -297,6 +511,13 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                     </Pressable>
                   )}
                 </View>
+
+                {device.isConnected && device.id === deviceSession.connectedDeviceId ? (
+                  <View style={styles.latestWeightRow}>
+                    <Text style={styles.latestWeightLabel}>Berat terakhir</Text>
+                    <Text style={styles.latestWeightValue}>{latestWeightDisplay}</Text>
+                  </View>
+                ) : null}
               </View>
             ))
           )}
@@ -361,6 +582,24 @@ const styles = StyleSheet.create({
     ...typography.bodySm,
     color: colors.text.secondary,
   },
+  debugLogContainer: {
+    marginTop: spacing[8],
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[10],
+    gap: spacing[6],
+  },
+  debugLogTitle: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  debugLogItem: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
   detectedSection: {
     gap: spacing[12],
   },
@@ -418,6 +657,20 @@ const styles = StyleSheet.create({
     ...typography.headingMd,
     color: colors.text.primary,
     flex: 1,
+  },
+  latestWeightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[12],
+  },
+  latestWeightLabel: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  latestWeightValue: {
+    ...typography.labelMd,
+    color: colors.text.primary,
   },
   connectAction: {
     minHeight: 36,

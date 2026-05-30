@@ -86,6 +86,40 @@ You've successfully run and modified your React Native App. :partying_face:
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
+## "Unable to load script" (Android device)
+
+This usually means the app cannot reach Metro on port `8081`.
+
+1) Make sure Metro is running:
+
+```sh
+npm run start:reset
+```
+
+2) If you run on a **physical device via USB**, enable port forwarding:
+
+```sh
+npm run adb:reverse
+```
+
+Then run:
+
+```sh
+npm run android
+```
+
+Or use the combined command:
+
+```sh
+npm run android:dev
+```
+
+3) If you run on a **physical device over Wi‑Fi** (no USB reverse), set the dev server host:
+
+- Open the Dev Menu → **Dev Settings** → **Debug server host & port for device**
+- Fill with your PC/Laptop LAN IP, for example: `192.168.1.10:8081`
+- Ensure Windows Firewall allows inbound TCP `8081`
+
 # Learn More
 
 To learn more about React Native, take a look at the following resources:

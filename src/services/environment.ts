@@ -6,6 +6,7 @@ const DEFAULT_DEV_DEVICE_HOST = '192.168.0.150';
 type RuntimeEnv = {
   MYSIMOKA_API_BASE_URL?: string;
   MYSIMOKA_GRAPHQL_URL?: string;
+  MYSIMOKA_S400_BLE_KEY?: string;
 };
 
 const runtimeEnv: RuntimeEnv | undefined = (
@@ -52,3 +53,14 @@ const rawGraphqlUrl = __DEV__
   : runtimeEnv?.MYSIMOKA_GRAPHQL_URL ?? deriveGraphqlUrlFromApiBase(API_BASE_URL);
 
 export const GRAPHQL_URL = rawGraphqlUrl.replace(/\/+$/, '');
+
+function normalizeS400BindKey(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return /^[0-9a-f]{32}$/.test(normalized) ? normalized : null;
+}
+
+export const S400_BIND_KEY = normalizeS400BindKey(runtimeEnv?.MYSIMOKA_S400_BLE_KEY);

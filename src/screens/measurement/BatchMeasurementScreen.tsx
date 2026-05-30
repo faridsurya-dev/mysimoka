@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { useDeviceSession } from '../../features/device';
 import { DEFAULT_BATCH_ACTIVE_STUDENT } from '../../features/measurement';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
@@ -13,6 +14,17 @@ type BatchMeasurementScreenProps = {
 };
 
 const keepDigitsOnly = (value: string) => value.replace(/\D+/g, '');
+const keepDecimalNumber = (value: string) => {
+  const sanitized = value.replace(/[^0-9.]/g, '');
+  const dotIndex = sanitized.indexOf('.');
+  if (dotIndex === -1) {
+    return sanitized;
+  }
+
+  return `${sanitized.slice(0, dotIndex + 1)}${sanitized
+    .slice(dotIndex + 1)
+    .replace(/\./g, '')}`;
+};
 
 export function BatchMeasurementScreen({
   activeStudentName,
@@ -22,6 +34,7 @@ export function BatchMeasurementScreen({
   const insets = useSafeAreaInsets();
   const [heightValue, setHeightValue] = useState('');
   const [weightValue, setWeightValue] = useState('');
+  const deviceSession = useDeviceSession();
 
   const activeStudent = {
     name: activeStudentName ?? DEFAULT_BATCH_ACTIVE_STUDENT.name,
@@ -30,7 +43,7 @@ export function BatchMeasurementScreen({
 
   const deviceConnection = {
     heightConnected: true,
-    weightConnected: false,
+    weightConnected: deviceSession.connectedDeviceId !== null,
   };
 
   const allDevicesConnected =
@@ -44,6 +57,15 @@ export function BatchMeasurementScreen({
 
     return 'Ada alat belum terhubung. Kolom pengisian dinonaktifkan sampai koneksi siap.';
   }, [allDevicesConnected]);
+
+  useEffect(() => {
+    if (!deviceSession.latestWeightKg) {
+      return;
+    }
+
+    const formatted = deviceSession.latestWeightKg.toFixed(1).replace(/\.0$/, '');
+    setWeightValue(formatted);
+  }, [deviceSession.latestWeightKg]);
 
   return (
     <View style={styles.container}>
@@ -164,9 +186,9 @@ export function BatchMeasurementScreen({
             <Text style={styles.fieldLabel}>Berat badan</Text>
             <TextInput
               editable={allDevicesConnected}
-              inputMode="numeric"
-              keyboardType="number-pad"
-              onChangeText={value => setWeightValue(keepDigitsOnly(value))}
+              inputMode="decimal"
+              keyboardType="decimal-pad"
+              onChangeText={value => setWeightValue(keepDecimalNumber(value))}
               placeholder="00"
               placeholderTextColor={allDevicesConnected ? colors.text.muted : colors.text.secondary}
               style={[styles.fieldInput, !allDevicesConnected && styles.fieldInputDisabled]}
