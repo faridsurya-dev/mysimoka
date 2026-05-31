@@ -1,12 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { PrimaryButton, Screen } from '../../shared/components';
+import { listTeachersBySchool } from '../../services';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { TeacherListItem } from '../../types';
 
 type TeacherListScreenProps = {
+  schoolId?: string | null;
   onBack: () => void;
   onOpenTeacherDetail: (teacherId: string) => void;
   onAddTeacher: (teacher: TeacherListItem) => void;
@@ -14,6 +16,7 @@ type TeacherListScreenProps = {
 };
 
 export function TeacherListScreen({
+  schoolId = null,
   onBack,
   onOpenTeacherDetail,
   onAddTeacher,
@@ -26,19 +29,51 @@ export function TeacherListScreen({
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [serverTeachers, setServerTeachers] = useState<TeacherListItem[]>([]);
+  const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
+  const [loadTeachersError, setLoadTeachersError] = useState<string | null>(null);
+  const displayedTeachers = serverTeachers.length > 0 ? serverTeachers : teachers;
+
+  const loadTeachers = useCallback(async () => {
+    if (!schoolId) {
+      setServerTeachers([]);
+      return;
+    }
+
+    setIsLoadingTeachers(true);
+    setLoadTeachersError(null);
+
+    try {
+      const rows = await listTeachersBySchool(schoolId);
+      setServerTeachers(rows);
+    } catch (error) {
+      setServerTeachers([]);
+      setLoadTeachersError(error instanceof Error ? error.message : 'Gagal memuat daftar guru.');
+    } finally {
+      setIsLoadingTeachers(false);
+    }
+  }, [schoolId]);
+
+  useEffect(() => {
+    loadTeachers().catch(() => {
+      setServerTeachers([]);
+      setLoadTeachersError('Gagal memuat daftar guru.');
+      setIsLoadingTeachers(false);
+    });
+  }, [loadTeachers]);
 
   const filteredTeachers = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) {
-      return teachers;
+      return displayedTeachers;
     }
 
-    return teachers.filter(item =>
+    return displayedTeachers.filter(item =>
       `${item.name} ${item.homeroom} ${item.handledClasses}`
         .toLowerCase()
         .includes(keyword)
     );
-  }, [query, teachers]);
+  }, [displayedTeachers, query]);
 
   const isSaveDisabled = useMemo(() => {
     return email.trim().length === 0 || fullName.trim().length === 0 || password.length === 0;
@@ -176,6 +211,19 @@ export function TeacherListScreen({
         </View>
 
         <View style={styles.list}>
+          {isLoadingTeachers ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Memuat guru...</Text>
+            </View>
+          ) : null}
+
+          {loadTeachersError ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Daftar guru belum bisa dimuat</Text>
+              <Text style={styles.emptyDescription}>{loadTeachersError}</Text>
+            </View>
+          ) : null}
+
           {filteredTeachers.map(item => (
             <Pressable
               key={item.id}

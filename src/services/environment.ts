@@ -1,10 +1,13 @@
 const DEFAULT_API_BASE_URL = 'https://api.mysimoka.sunhouse.co.id/';
+const DEFAULT_AUTH_BASE_URL = 'https://auth.mysimoka.sunhouse.co.id/';
+const DEFAULT_GRAPHQL_URL = 'https://hasura.mysimoka.sunhouse.co.id/v1/graphql';
 const DEFAULT_DEV_API_PORT = '4001';
 const DEFAULT_DEV_HASURA_PORT = '8080';
 const DEFAULT_DEV_DEVICE_HOST = '192.168.0.150';
 
 type RuntimeEnv = {
   MYSIMOKA_API_BASE_URL?: string;
+  MYSIMOKA_AUTH_BASE_URL?: string;
   MYSIMOKA_GRAPHQL_URL?: string;
   MYSIMOKA_S400_BLE_KEY?: string;
 };
@@ -14,13 +17,11 @@ const runtimeEnv: RuntimeEnv | undefined = (
 ).process?.env;
 
 function buildDevApiBaseUrl(): string | null {
-  const host = DEFAULT_DEV_DEVICE_HOST;
-  return `http://${host}:${DEFAULT_DEV_API_PORT}`;
+  return DEFAULT_API_BASE_URL;
 }
 
 function buildDevGraphqlUrl(): string | null {
-  const host = DEFAULT_DEV_DEVICE_HOST;
-  return `http://${host}:${DEFAULT_DEV_HASURA_PORT}/v1/graphql`;
+  return DEFAULT_GRAPHQL_URL;
 }
 
 const rawApiBaseUrl = __DEV__
@@ -31,26 +32,17 @@ const rawApiBaseUrl = __DEV__
 
 export const API_BASE_URL = rawApiBaseUrl.replace(/\/+$/, '');
 
-function deriveGraphqlUrlFromApiBase(apiBaseUrl: string): string {
-  try {
-    const parsedUrl = new URL(apiBaseUrl);
-    if (parsedUrl.port === '4001') {
-      parsedUrl.port = '8080';
-    }
-    parsedUrl.pathname = '/v1/graphql';
-    parsedUrl.search = '';
-    parsedUrl.hash = '';
-    return parsedUrl.toString().replace(/\/+$/, '');
-  } catch {
-    return `${apiBaseUrl.replace(/\/+$/, '')}/v1/graphql`;
-  }
-}
+const rawAuthBaseUrl = __DEV__
+  ? runtimeEnv?.MYSIMOKA_AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL
+  : runtimeEnv?.MYSIMOKA_AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
+
+export const AUTH_BASE_URL = rawAuthBaseUrl.replace(/\/+$/, '');
 
 const rawGraphqlUrl = __DEV__
   ? runtimeEnv?.MYSIMOKA_GRAPHQL_URL ??
     buildDevGraphqlUrl() ??
     `http://${DEFAULT_DEV_DEVICE_HOST}:${DEFAULT_DEV_HASURA_PORT}/v1/graphql`
-  : runtimeEnv?.MYSIMOKA_GRAPHQL_URL ?? deriveGraphqlUrlFromApiBase(API_BASE_URL);
+  : runtimeEnv?.MYSIMOKA_GRAPHQL_URL ?? DEFAULT_GRAPHQL_URL;
 
 export const GRAPHQL_URL = rawGraphqlUrl.replace(/\/+$/, '');
 

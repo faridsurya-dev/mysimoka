@@ -39,7 +39,7 @@ import {
   clearCurrentSchoolContext,
   createAcademicYear,
   deleteAcademicYear,
-  API_BASE_URL,
+  AUTH_BASE_URL,
   getAuthSession,
   hydrateAuthSession,
   listAcademicYears,
@@ -350,7 +350,7 @@ export function RootNavigator() {
     }, HEALTHCHECK_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/health`, {
+      const response = await fetch(`${AUTH_BASE_URL}/health`, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -433,7 +433,7 @@ export function RootNavigator() {
                 ? error.message
                 : 'Tidak bisa terhubung ke service auth.';
             setBootstrapHealthError(
-              `${message} Endpoint: ${API_BASE_URL}/health`,
+              `${message} Endpoint: ${AUTH_BASE_URL}/health`,
             );
           }
           return;
@@ -590,18 +590,42 @@ export function RootNavigator() {
         <SchoolConnectionScreen
           onConnected={() => {
             listMemberships()
-              .then(memberships => {
+              .then(async memberships => {
                 const activeMemberships = memberships.filter(item => isMembershipConnected(item));
                 setSchoolMemberships(memberships);
                 if (activeMemberships.length === 0) {
                   setAuthRoute('school-connection');
                   return;
                 }
-                setIsSchoolSelectionVisible(true);
+
+                const selectedMembership =
+                  activeMemberships.find(item => item.is_active) ?? activeMemberships[0];
+                setCurrentSchoolId(selectedMembership.school_id);
+                setCurrentSchool(selectedMembership.school_name);
+                setSchoolMemberships(previous =>
+                  previous.map(item => ({
+                    ...item,
+                    is_active: item.school_id === selectedMembership.school_id,
+                  })),
+                );
+                await saveCurrentSchoolContext({
+                  schoolId: selectedMembership.school_id,
+                  schoolName: selectedMembership.school_name,
+                });
+                setIsSchoolSelectionVisible(false);
                 setIsAuthenticated(true);
+                setActiveTab('dashboard');
+                setDashboardRoute('dashboard');
               })
-              .catch(() => {
-                setAuthRoute('login');
+              .catch(error => {
+                if (isAuthSessionInvalidError(error)) {
+                  clearAuthSession();
+                  clearCurrentSchoolContext().catch(() => undefined);
+                  setAuthRoute('login');
+                  return;
+                }
+
+                setAuthRoute('school-connection');
               });
           }}
           onLogout={() => {
@@ -774,6 +798,7 @@ export function RootNavigator() {
 
       {activeTab === 'measurement'
         ? renderMeasurementStack({
+            schoolId: currentSchoolId,
             identifiedStudentName,
             measurementRoute,
             measurementProgram,
@@ -1155,6 +1180,7 @@ function renderDashboardStack({
     case 'class-list':
       return (
         <ClassListScreen
+          schoolId={currentSchoolId}
           onBack={onBackToDashboard}
           onOpenClassDetail={onOpenClassDetail}
         />
@@ -1162,6 +1188,7 @@ function renderDashboardStack({
     case 'teacher-list':
       return (
         <TeacherListScreen
+          schoolId={currentSchoolId}
           onBack={onBackToDashboard}
           onOpenTeacherDetail={onOpenTeacherDetail}
           onAddTeacher={onAddTeacher}
@@ -1180,6 +1207,7 @@ function renderDashboardStack({
       if (!selectedTeacher) {
         return (
           <TeacherListScreen
+            schoolId={currentSchoolId}
             onBack={onBackToDashboard}
             onOpenTeacherDetail={onOpenTeacherDetail}
             onAddTeacher={onAddTeacher}
@@ -1226,6 +1254,7 @@ function renderDashboardStack({
     case 'student-search-results':
       return (
         <StudentSearchResultsScreen
+          schoolId={currentSchoolId}
           keyword={studentSearchKeyword}
           onBack={onBackToDashboard}
           onOpenStudentProfile={onOpenStudentFromSearchResults}
@@ -1247,6 +1276,7 @@ function renderDashboardStack({
 }
 
 type MeasurementStackOptions = {
+  schoolId: string | null;
   identifiedStudentName: string | null;
   measurementRoute: MeasurementRoute;
   measurementProgram: 'measurement' | 'immunization';
@@ -1271,6 +1301,7 @@ type MeasurementStackOptions = {
 };
 
 function renderMeasurementStack({
+  schoolId,
   identifiedStudentName,
   measurementRoute,
   measurementProgram,
@@ -1297,6 +1328,7 @@ function renderMeasurementStack({
     case 'create-session':
       return (
         <CreateSessionScreen
+          schoolId={schoolId}
           mode={measurementProgram}
           onBack={onBackToSessionList}
           onCreateSession={onCreateSession}

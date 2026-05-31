@@ -1,17 +1,23 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { CLASS_LIST_ITEMS, TEACHER_NAME_OPTIONS } from '../../features/dashboard';
+import { TEACHER_NAME_OPTIONS } from '../../features/dashboard';
+import {
+  createClassroom,
+  listClassroomsBySchool,
+  type ClassroomListItem,
+} from '../../services';
 import { PrimaryButton, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type ClassListScreenProps = {
+  schoolId: string | null;
   onBack: () => void;
   onOpenClassDetail: () => void;
 };
 
-export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenProps) {
+export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassListScreenProps) {
   const classLevelOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => `${index + 1}`), []);
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
@@ -24,17 +30,51 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
   const [teacherName, setTeacherName] = useState('');
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
   const [isTeacherDropdownOpen, setIsTeacherDropdownOpen] = useState(false);
+  const [classes, setClasses] = useState<ClassroomListItem[]>([]);
+  const [isLoadingClasses, setIsLoadingClasses] = useState(false);
+  const [loadClassesError, setLoadClassesError] = useState<string | null>(null);
+  const [saveClassError, setSaveClassError] = useState<string | null>(null);
+  const [isSavingClass, setIsSavingClass] = useState(false);
+
+  const loadClasses = useCallback(async () => {
+    if (!schoolId) {
+      setClasses([]);
+      setLoadClassesError('Sekolah aktif belum dipilih.');
+      return;
+    }
+
+    setIsLoadingClasses(true);
+    setLoadClassesError(null);
+
+    try {
+      const rows = await listClassroomsBySchool(schoolId);
+      setClasses(rows);
+    } catch (error) {
+      setClasses([]);
+      setLoadClassesError(error instanceof Error ? error.message : 'Gagal memuat daftar kelas.');
+    } finally {
+      setIsLoadingClasses(false);
+    }
+  }, [schoolId]);
+
+  useEffect(() => {
+    loadClasses().catch(() => {
+      setClasses([]);
+      setLoadClassesError('Gagal memuat daftar kelas.');
+      setIsLoadingClasses(false);
+    });
+  }, [loadClasses]);
 
   const filteredClasses = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) {
-      return CLASS_LIST_ITEMS;
+      return classes;
     }
 
-    return CLASS_LIST_ITEMS.filter(item =>
+    return classes.filter(item =>
       `${item.name} ${item.teacher}`.toLowerCase().includes(keyword)
     );
-  }, [query]);
+  }, [classes, query]);
 
   const isSaveDisabled = useMemo(() => {
     return (
@@ -66,13 +106,39 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
     setClassInitial('');
     setTeacherName('');
     setTeacherSearchQuery('');
+    setSaveClassError(null);
     setIsClassLevelDropdownOpen(false);
     setIsTeacherDropdownOpen(false);
     setIsAddClassDialogVisible(true);
   }
 
-  function handleSaveClass() {
-    handleCloseDialog();
+  async function handleSaveClass() {
+    if (isSaveDisabled || isSavingClass) {
+      return;
+    }
+
+    if (!schoolId) {
+      setSaveClassError('Sekolah aktif belum dipilih.');
+      return;
+    }
+
+    setIsSavingClass(true);
+    setSaveClassError(null);
+
+    try {
+      await createClassroom({
+        schoolId,
+        name: className.trim(),
+        gradeLevel: Number(classLevel),
+        description: classInitial.trim().toUpperCase(),
+      });
+      handleCloseDialog();
+      await loadClasses();
+    } catch (error) {
+      setSaveClassError(error instanceof Error ? error.message : 'Gagal menyimpan kelas.');
+    } finally {
+      setIsSavingClass(false);
+    }
   }
 
   function handleTeacherSearchChange(value: string) {
@@ -168,6 +234,19 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
         </View>
 
         <View style={styles.list}>
+          {isLoadingClasses ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Memuat kelas...</Text>
+            </View>
+          ) : null}
+
+          {loadClassesError ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Daftar kelas belum bisa dimuat</Text>
+              <Text style={styles.emptyDescription}>{loadClassesError}</Text>
+            </View>
+          ) : null}
+
           {filteredClasses.map(item => (
             <Pressable
               key={item.id}
@@ -410,6 +489,8 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
               </View>
             </View>
 
+            {saveClassError ? <Text style={styles.dialogErrorText}>{saveClassError}</Text> : null}
+
             <View style={styles.dialogActions}>
               <Pressable
                 onPress={handleCloseDialog}
@@ -420,8 +501,8 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                 <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
               </Pressable>
               <PrimaryButton
-                disabled={isSaveDisabled}
-                label="Simpan"
+                disabled={isSaveDisabled || isSavingClass}
+                label={isSavingClass ? 'Menyimpan...' : 'Simpan'}
                 onPress={handleSaveClass}
                 style={styles.dialogPrimaryButton}
               />
@@ -752,5 +833,9 @@ const styles = StyleSheet.create({
   },
   dialogPrimaryButton: {
     minWidth: 120,
+  },
+  dialogErrorText: {
+    ...typography.bodySm,
+    color: colors.accent.red,
   },
 });

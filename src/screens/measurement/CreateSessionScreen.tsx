@@ -1,13 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { CLASS_OPTIONS_MOCK } from '../../features/session';
+import { listClassroomsBySchool } from '../../services';
 import { PrimaryButton, Screen, TextField } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { CreateSessionPayload } from '../../types';
 
 type CreateSessionScreenProps = {
+  schoolId?: string | null;
   onBack: () => void;
   mode?: 'measurement' | 'immunization';
   onCreateSession: (payload: CreateSessionPayload) => void;
@@ -65,6 +66,7 @@ function changeMonth(baseDate: Date, delta: number) {
 }
 
 export function CreateSessionScreen({
+  schoolId = null,
   onBack,
   mode = 'measurement',
   onCreateSession,
@@ -88,16 +90,42 @@ export function CreateSessionScreen({
   const [immunizationOfficer, setImmunizationOfficer] = useState('Petugas UKS');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isClassSuggestionOpen, setIsClassSuggestionOpen] = useState(false);
+  const [classOptions, setClassOptions] = useState<string[]>([]);
+  const [classOptionsError, setClassOptionsError] = useState<string | null>(null);
+
+  const loadClassOptions = useCallback(async () => {
+    if (!schoolId) {
+      setClassOptions([]);
+      setClassOptionsError('Sekolah aktif belum dipilih.');
+      return;
+    }
+
+    try {
+      const rows = await listClassroomsBySchool(schoolId);
+      setClassOptions(rows.map(row => row.name));
+      setClassOptionsError(null);
+    } catch (error) {
+      setClassOptions([]);
+      setClassOptionsError(error instanceof Error ? error.message : 'Gagal memuat daftar kelas.');
+    }
+  }, [schoolId]);
+
+  useEffect(() => {
+    loadClassOptions().catch(() => {
+      setClassOptions([]);
+      setClassOptionsError('Gagal memuat daftar kelas.');
+    });
+  }, [loadClassOptions]);
 
   const filteredClassOptions = useMemo(() => {
     const keyword = className.trim().toLowerCase();
 
     if (!keyword) {
-      return CLASS_OPTIONS_MOCK;
+      return classOptions;
     }
 
-    return CLASS_OPTIONS_MOCK.filter(option => option.toLowerCase().includes(keyword));
-  }, [className]);
+    return classOptions.filter(option => option.toLowerCase().includes(keyword));
+  }, [className, classOptions]);
 
   const calendarDays = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
 
@@ -253,7 +281,9 @@ export function CreateSessionScreen({
                   ))
                 ) : (
                   <View style={styles.emptySuggestion}>
-                    <Text style={styles.emptySuggestionLabel}>Kelas tidak ditemukan</Text>
+                    <Text style={styles.emptySuggestionLabel}>
+                      {classOptionsError ?? 'Kelas tidak ditemukan'}
+                    </Text>
                   </View>
                 )}
               </View>

@@ -20,7 +20,7 @@ import {
   DASHBOARD_QUICK_MENUS,
   DASHBOARD_WEIGHT_TREND,
 } from '../../features/dashboard';
-import { apiRequest, getAuthSession, listMemberships } from '../../services';
+import { getAuthSession, getMyProfile, listMemberships } from '../../services';
 import { InfoCard, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -285,9 +285,7 @@ export function DashboardScreen({
 
       try {
         if (userId) {
-          const response = await apiRequest(`/api/users/${encodeURIComponent(userId)}`, {
-            requiresAuth: true,
-          });
+          const response = await getMyProfile();
           const userName = extractUserDisplayName(response);
           if (isMounted && userName) {
             setServerUserName(userName);

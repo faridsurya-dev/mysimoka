@@ -1,4 +1,4 @@
-import { API_BASE_URL, GRAPHQL_URL } from './environment';
+import { API_BASE_URL, AUTH_BASE_URL, GRAPHQL_URL } from './environment';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type RegisterPayload = {
@@ -114,6 +114,24 @@ export function sortRolesByPriority(roles: string[]): string[] {
 }
 
 function resolveHighestAllowedRoleFromSession(): string | null {
+  const jwtPayload =
+    authSession.accessToken && authSession.accessToken.trim().length > 0
+      ? decodeJwtPayload(authSession.accessToken)
+      : null;
+  const hasuraClaims = asObject(jwtPayload?.['https://hasura.io/jwt/claims']);
+  const jwtAllowedRolesSource =
+    hasuraClaims && Array.isArray(hasuraClaims['x-hasura-allowed-roles'])
+      ? hasuraClaims['x-hasura-allowed-roles']
+      : hasuraClaims && Array.isArray(hasuraClaims.x_hasura_allowed_roles)
+        ? hasuraClaims.x_hasura_allowed_roles
+        : [];
+  const jwtAllowedRoles = jwtAllowedRolesSource
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map(role => normalizeRoleKey(role));
+  if (jwtAllowedRoles.length > 0) {
+    return sortRolesByPriority(jwtAllowedRoles)[0] ?? null;
+  }
+
   const sessionUser = asObject(authSession.user);
   if (!sessionUser) {
     return null;
@@ -274,6 +292,15 @@ function createRequestUrl(endpoint: string): string {
   return `${API_BASE_URL}${normalizedEndpoint}`;
 }
 
+function createAuthRequestUrl(endpoint: string): string {
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${AUTH_BASE_URL}${normalizedEndpoint}`;
+}
+
 async function parseUnknownResponseBody(response: Response): Promise<unknown> {
   const contentType = response.headers.get('content-type') ?? '';
   const text = await response.text();
@@ -349,8 +376,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const padLength = (4 - (base64Payload.length % 4)) % 4;
   const paddedPayload = `${base64Payload}${'='.repeat(padLength)}`;
   try {
-    const atobFn =
-      typeof globalThis.atob === 'function' ? globalThis.atob.bind(globalThis) : null;
+    const atobFn = (globalThis as { atob?: (value: string) => string }).atob;
     if (!atobFn) {
       return null;
     }
@@ -534,6 +560,44 @@ export type DashboardStudentListItem = {
   className: string;
 };
 
+export type DashboardStudentSearchItem = DashboardStudentListItem;
+
+export type ClassroomListItem = {
+  id: string;
+  name: string;
+  total: number;
+  teacher: string;
+  lastMeasuredAt: string;
+  coverage: string;
+};
+
+export type TeacherDirectoryItem = {
+  id: string;
+  name: string;
+  email: string;
+  password: string;
+  code: string;
+  homeroom: string;
+  handledClasses: string;
+  totalStudents: number;
+};
+
+export type CreateClassroomPayload = {
+  schoolId: string;
+  name: string;
+  gradeLevel: number;
+  description?: string | null;
+  homeroomTeacherMembershipId?: string | null;
+};
+
+export type UpdateClassroomPayload = {
+  classroomId: string;
+  name: string;
+  gradeLevel: number;
+  description?: string | null;
+  homeroomTeacherMembershipId?: string | null;
+};
+
 export type CreateStudentPayload = {
   schoolId: string;
   fullName: string;
@@ -598,7 +662,7 @@ function getSessionUserIdOrThrow(): string {
 }
 
 export async function register(payload: RegisterPayload): Promise<RegisterResult> {
-  const response = await fetch(`${API_BASE_URL}${REGISTER_ENDPOINT}`, {
+  const response = await fetch(createAuthRequestUrl(REGISTER_ENDPOINT), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -619,7 +683,7 @@ export async function register(payload: RegisterPayload): Promise<RegisterResult
 }
 
 export async function verifyEmailToken(payload: VerifyEmailPayload): Promise<void> {
-  const response = await fetch(createRequestUrl(VERIFY_EMAIL_ENDPOINT), {
+  const response = await fetch(createAuthRequestUrl(VERIFY_EMAIL_ENDPOINT), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -637,12 +701,151 @@ export async function verifyEmailToken(payload: VerifyEmailPayload): Promise<voi
   throw new Error(normalizedMessage ?? 'Verifikasi email gagal. Silakan coba lagi.');
 }
 
+export async function getMyProfile(): Promise<Record<string, unknown>> {
+  const userId = getSessionUserIdOrThrow();
+  const query = `
+    query GetMyProfile($userId: uuid!) {
+      auth_users_by_pk(id: $userId) {
+        id
+        email
+        full_name
+        image_url
+        is_email_verified
+        is_blocked
+        blocked_at
+        blocked_reason
+        created_at
+        updated_at
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { userId },
+    }),
+  })) as
+    | {
+        data?: { auth_users_by_pk?: Record<string, unknown> | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil profil user.');
+  }
+
+  const profile = asObject(responseBody?.data?.auth_users_by_pk);
+  if (!profile) {
+    throw new Error('Profil user tidak ditemukan.');
+  }
+
+  setAuthSession({
+    user: {
+      ...(authSession.user ?? {}),
+      ...profile,
+    },
+  });
+
+  return profile;
+}
+
 function requireAccessToken(): string {
   if (!authSession.accessToken) {
     throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
   }
 
   return authSession.accessToken;
+}
+
+function buildTeacherCode(name: string): string {
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length === 0) {
+    return 'GR';
+  }
+
+  if (words.length === 1) {
+    return words[0].slice(0, 2).toUpperCase();
+  }
+
+  return words
+    .slice(0, 2)
+    .map(word => word[0])
+    .join('')
+    .toUpperCase();
+}
+
+function readCountAggregate(value: unknown): number {
+  const source = asObject(value);
+  const aggregate = asObject(source?.aggregate);
+  const count = aggregate?.count;
+  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
+}
+
+function formatClassTeacherName(value: string | null): string {
+  return value ? `Wali kelas: ${value}` : 'Wali kelas belum ditentukan';
+}
+
+function normalizeClassroomListItem(row: unknown): ClassroomListItem | null {
+  const source = asObject(row);
+  const id = readNullableString(source?.id);
+  const name = readNullableString(source?.name);
+  if (!id || !name) {
+    return null;
+  }
+
+  const membership = asObject(source?.school_membership);
+  const membershipUser = asObject(membership?.user);
+  const teacherName = readNullableString(membershipUser?.full_name);
+  const total = readCountAggregate(source?.student_classrooms_aggregate);
+
+  return {
+    id,
+    name,
+    total,
+    teacher: formatClassTeacherName(teacherName),
+    lastMeasuredAt: 'Belum ada pengukuran',
+    coverage: `${total} siswa terdaftar`,
+  };
+}
+
+function normalizeStudentListItem(row: unknown): DashboardStudentListItem | null {
+  const source = asObject(row);
+  const id = readNullableString(source?.id);
+  const fullName = readNullableString(source?.full_name);
+  if (!id || !fullName) {
+    return null;
+  }
+
+  const studentClassrooms = Array.isArray(source?.student_classrooms)
+    ? source.student_classrooms
+    : [];
+  const activeClassroom = studentClassrooms
+    .map(item => asObject(item))
+    .find(item => item?.is_active === true) ?? asObject(studentClassrooms[0]);
+  const classroom = asObject(activeClassroom?.classroom);
+  const className = readNullableString(classroom?.name) ?? '-';
+
+  return {
+    id,
+    name: fullName,
+    nisn:
+      readNullableString(source?.nisn) ??
+      readNullableString(source?.student_number) ??
+      readNullableString(source?.nis) ??
+      '-',
+    className,
+  };
 }
 
 function normalizeTokenResult(body: ApiBody | null): { accessToken: string; refreshToken: string | null } | null {
@@ -682,7 +885,16 @@ export async function createSchool(payload: CreateSchoolPayload): Promise<void> 
     throw new Error('Nama sekolah wajib diisi.');
   }
 
-  const mutation = `
+  const variables = {
+    name: schoolName,
+    number: payload.number?.trim() || null,
+    createdBy: userId,
+  };
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-hasura-role': 'user',
+  };
+  const insertOneMutation = `
     mutation CreateSchool($name: String!, $number: String, $createdBy: uuid!) {
       insert_schools_one(
         object: {
@@ -695,33 +907,65 @@ export async function createSchool(payload: CreateSchoolPayload): Promise<void> 
       }
     }
   `;
+  const insertManyMutation = `
+    mutation CreateSchool($name: String!, $number: String, $createdBy: uuid!) {
+      insert_schools(
+        objects: [
+          {
+            name: $name
+            number: $number
+            created_by: $createdBy
+          }
+        ]
+      ) {
+        returning {
+          id
+        }
+      }
+    }
+  `;
 
-  const responseBody = (await apiRequest(GRAPHQL_URL, {
+  let responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
-      query: mutation,
-      variables: {
-        name: schoolName,
-        number: payload.number?.trim() || null,
-        createdBy: userId,
-      },
+      query: insertOneMutation,
+      variables,
     }),
   })) as
     | {
-        data?: { insert_schools_one?: { id?: string | null } | null };
+        data?: {
+          insert_schools_one?: { id?: string | null } | null;
+          insert_schools?: { returning?: Array<{ id?: string | null }> | null } | null;
+        };
         errors?: Array<{ message?: string }>;
       }
     | null;
+
+  const firstErrorMessage = responseBody?.errors?.[0]?.message ?? '';
+  if (
+    Array.isArray(responseBody?.errors) &&
+    firstErrorMessage.includes("field 'insert_schools_one' not found")
+  ) {
+    responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers,
+      body: JSON.stringify({
+        query: insertManyMutation,
+        variables,
+      }),
+    })) as typeof responseBody;
+  }
 
   if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
     throw new Error(responseBody.errors[0]?.message || 'Gagal membuat sekolah.');
   }
 
-  const schoolId = responseBody?.data?.insert_schools_one?.id;
+  const schoolId =
+    responseBody?.data?.insert_schools_one?.id ??
+    responseBody?.data?.insert_schools?.returning?.[0]?.id;
   if (!schoolId) {
     throw new Error('Respons pembuatan sekolah tidak valid.');
   }
@@ -983,6 +1227,306 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
   return hydratedMemberships;
 }
 
+export async function listClassroomsBySchool(schoolId: string): Promise<ClassroomListItem[]> {
+  const normalizedSchoolId = schoolId.trim();
+  if (!normalizedSchoolId) {
+    return [];
+  }
+
+  const query = `
+    query ListClassroomsBySchool($schoolId: uuid!) {
+      classrooms(
+        where: {
+          school_id: { _eq: $schoolId },
+          is_active: { _eq: true }
+        }
+        order_by: [{ grade_level: asc }, { name: asc }]
+      ) {
+        id
+        name
+        grade_level
+        updated_at
+        school_membership {
+          id
+          user {
+            full_name
+            email
+          }
+        }
+        student_classrooms_aggregate(where: { is_active: { _eq: true } }) {
+          aggregate {
+            count
+          }
+        }
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { schoolId: normalizedSchoolId },
+    }),
+  })) as
+    | {
+        data?: { classrooms?: unknown[] };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil daftar kelas.');
+  }
+
+  return (responseBody?.data?.classrooms ?? [])
+    .map(normalizeClassroomListItem)
+    .filter((item): item is ClassroomListItem => item !== null);
+}
+
+async function getActiveAcademicYearIdOrThrow(schoolId: string): Promise<string> {
+  const academicYears = await listAcademicYears(schoolId);
+  const activeAcademicYear = academicYears.find(item => item.is_active) ?? academicYears[0];
+  if (!activeAcademicYear) {
+    throw new Error('Tahun akademik aktif belum tersedia. Tambahkan tahun akademik dulu.');
+  }
+  return activeAcademicYear.id;
+}
+
+export async function createClassroom(payload: CreateClassroomPayload): Promise<ClassroomListItem> {
+  const userId = getSessionUserIdOrThrow();
+  const schoolId = payload.schoolId.trim();
+  const name = payload.name.trim();
+  if (!schoolId || !name || !Number.isFinite(payload.gradeLevel)) {
+    throw new Error('Data kelas tidak valid.');
+  }
+
+  const academicYearId = await getActiveAcademicYearIdOrThrow(schoolId);
+  const mutation = `
+    mutation CreateClassroom(
+      $schoolId: uuid!,
+      $academicYearId: uuid!,
+      $createdBy: uuid!,
+      $name: String!,
+      $gradeLevel: Int!,
+      $description: String,
+      $homeroomTeacherMembershipId: uuid
+    ) {
+      insert_classrooms_one(
+        object: {
+          school_id: $schoolId,
+          academic_year_id: $academicYearId,
+          created_by: $createdBy,
+          name: $name,
+          grade_level: $gradeLevel,
+          description: $description,
+          homeroom_teacher_membership_id: $homeroomTeacherMembershipId,
+          is_active: true
+        }
+      ) {
+        id
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: {
+        schoolId,
+        academicYearId,
+        createdBy: userId,
+        name,
+        gradeLevel: payload.gradeLevel,
+        description: payload.description?.trim() || null,
+        homeroomTeacherMembershipId: payload.homeroomTeacherMembershipId?.trim() || null,
+      },
+    }),
+  })) as
+    | {
+        data?: { insert_classrooms_one?: { id?: string | null } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal membuat kelas.');
+  }
+
+  const createdId = responseBody?.data?.insert_classrooms_one?.id;
+  if (!createdId) {
+    throw new Error('Respons pembuatan kelas tidak valid.');
+  }
+
+  const classrooms = await listClassroomsBySchool(schoolId);
+  const created = classrooms.find(item => item.id === createdId);
+  if (!created) {
+    throw new Error('Kelas berhasil dibuat, tetapi tidak bisa dimuat ulang.');
+  }
+  return created;
+}
+
+export async function updateClassroom(payload: UpdateClassroomPayload): Promise<void> {
+  const classroomId = payload.classroomId.trim();
+  const name = payload.name.trim();
+  if (!classroomId || !name || !Number.isFinite(payload.gradeLevel)) {
+    throw new Error('Data kelas tidak valid.');
+  }
+
+  const mutation = `
+    mutation UpdateClassroom(
+      $classroomId: uuid!,
+      $name: String!,
+      $gradeLevel: Int!,
+      $description: String,
+      $homeroomTeacherMembershipId: uuid
+    ) {
+      update_classrooms_by_pk(
+        pk_columns: { id: $classroomId },
+        _set: {
+          name: $name,
+          grade_level: $gradeLevel,
+          description: $description,
+          homeroom_teacher_membership_id: $homeroomTeacherMembershipId
+        }
+      ) {
+        id
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: {
+        classroomId,
+        name,
+        gradeLevel: payload.gradeLevel,
+        description: payload.description?.trim() || null,
+        homeroomTeacherMembershipId: payload.homeroomTeacherMembershipId?.trim() || null,
+      },
+    }),
+  })) as
+    | {
+        data?: { update_classrooms_by_pk?: { id?: string | null } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengubah kelas.');
+  }
+
+  if (!responseBody?.data?.update_classrooms_by_pk?.id) {
+    throw new Error('Kelas tidak ditemukan atau tidak memiliki akses untuk mengubahnya.');
+  }
+}
+
+export async function listTeachersBySchool(schoolId: string): Promise<TeacherDirectoryItem[]> {
+  const normalizedSchoolId = schoolId.trim();
+  if (!normalizedSchoolId) {
+    return [];
+  }
+
+  const query = `
+    query ListTeachersBySchool($schoolId: uuid!) {
+      school_memberships(
+        where: {
+          school_id: { _eq: $schoolId },
+          role: { _eq: "teacher" }
+        }
+        order_by: [{ created_at: desc }]
+      ) {
+        id
+        role
+        is_active
+        user {
+          id
+          email
+          full_name
+        }
+        classrooms(where: { is_active: { _eq: true } }) {
+          id
+          name
+          student_classrooms_aggregate(where: { is_active: { _eq: true } }) {
+            aggregate {
+              count
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { schoolId: normalizedSchoolId },
+    }),
+  })) as
+    | {
+        data?: { school_memberships?: unknown[] };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil daftar guru.');
+  }
+
+  return (responseBody?.data?.school_memberships ?? [])
+    .map(item => {
+      const membership = asObject(item);
+      const user = asObject(membership?.user);
+      const id = readNullableString(membership?.id);
+      const name = readNullableString(user?.full_name);
+      if (!id || !name) {
+        return null;
+      }
+
+      const classrooms = Array.isArray(membership?.classrooms) ? membership.classrooms : [];
+      const classroomNames = classrooms
+        .map(classroom => readNullableString(asObject(classroom)?.name))
+        .filter((value): value is string => Boolean(value));
+      const totalStudents = classrooms.reduce(
+        (total, classroom) =>
+          total + readCountAggregate(asObject(classroom)?.student_classrooms_aggregate),
+        0,
+      );
+
+      return {
+        id,
+        name,
+        email: readNullableString(user?.email) ?? '-',
+        password: '',
+        code: buildTeacherCode(name),
+        homeroom: classroomNames[0] ? `Wali kelas ${classroomNames[0]}` : 'Belum ditentukan',
+        handledClasses: classroomNames.length > 0 ? classroomNames.join(', ') : 'Belum ada kelas',
+        totalStudents,
+      } satisfies TeacherDirectoryItem;
+    })
+    .filter((item): item is TeacherDirectoryItem => item !== null);
+}
+
 export async function listStudentsBySchool(schoolId: string): Promise<DashboardStudentListItem[]> {
   const normalizedSchoolId = schoolId.trim();
   if (!normalizedSchoolId) {
@@ -1000,7 +1544,19 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
       ) {
         id
         full_name
+        nis
+        nisn
         student_number
+        student_classrooms(
+          where: { is_active: { _eq: true } }
+          order_by: [{ created_at: desc }]
+          limit: 1
+        ) {
+          is_active
+          classroom {
+            name
+          }
+        }
       }
     }
   `;
@@ -1033,25 +1589,83 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
 
   const rows = Array.isArray(responseBody?.data?.students) ? responseBody.data.students : [];
   return rows
-    .map(row => {
-      const source = asObject(row);
-      const id = readNullableString(source?.id);
-      const fullName = readNullableString(source?.full_name);
-      if (!id || !fullName) {
-        return null;
-      }
-
-      return {
-        id,
-        name: fullName,
-        nisn: readNullableString(source?.student_number) ?? '-',
-        className: '-',
-      } satisfies DashboardStudentListItem;
-    })
+    .map(normalizeStudentListItem)
     .filter((item): item is DashboardStudentListItem => item !== null);
 }
 
+export async function searchStudentsBySchool(
+  schoolId: string,
+  keyword: string,
+): Promise<DashboardStudentSearchItem[]> {
+  const normalizedSchoolId = schoolId.trim();
+  const normalizedKeyword = `%${keyword.trim()}%`;
+  if (!normalizedSchoolId) {
+    return [];
+  }
+
+  const query = `
+    query SearchStudentsBySchool($schoolId: uuid!, $keyword: String!) {
+      students(
+        where: {
+          school_id: { _eq: $schoolId },
+          is_active: { _eq: true },
+          _or: [
+            { full_name: { _ilike: $keyword } },
+            { nis: { _ilike: $keyword } },
+            { nisn: { _ilike: $keyword } },
+            { student_number: { _ilike: $keyword } }
+          ]
+        }
+        order_by: [{ full_name: asc }]
+        limit: 50
+      ) {
+        id
+        full_name
+        nis
+        nisn
+        student_number
+        student_classrooms(
+          where: { is_active: { _eq: true } }
+          order_by: [{ created_at: desc }]
+          limit: 1
+        ) {
+          is_active
+          classroom {
+            name
+          }
+        }
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { schoolId: normalizedSchoolId, keyword: normalizedKeyword },
+    }),
+  })) as
+    | {
+        data?: { students?: unknown[] };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mencari siswa.');
+  }
+
+  return (responseBody?.data?.students ?? [])
+    .map(normalizeStudentListItem)
+    .filter((item): item is DashboardStudentSearchItem => item !== null);
+}
+
 export async function createStudent(payload: CreateStudentPayload): Promise<void> {
+  const userId = getSessionUserIdOrThrow();
   const normalizedSchoolId = payload.schoolId.trim();
   const normalizedName = payload.fullName.trim();
   if (!normalizedSchoolId || !normalizedName) {
@@ -1070,17 +1684,20 @@ export async function createStudent(payload: CreateStudentPayload): Promise<void
       $nis: String,
       $nisn: String,
       $gender: String,
-      $birthDate: date
+      $birthDate: date,
+      $createdBy: uuid!
     ) {
       insert_students_one(
         object: {
           school_id: $schoolId,
+          created_by: $createdBy,
           full_name: $fullName,
           student_number: $studentNumber,
           nis: $nis,
           nisn: $nisn,
           gender: $gender,
           birth_date: $birthDate,
+          status: "active",
           is_active: true
         }
       ) {
@@ -1105,6 +1722,7 @@ export async function createStudent(payload: CreateStudentPayload): Promise<void
         nisn: normalizedNisn || null,
         gender: payload.gender ?? null,
         birthDate: payload.birthDate?.trim() || null,
+        createdBy: userId,
       },
     }),
   })) as
@@ -1471,8 +2089,22 @@ export async function setActiveSchool(schoolId: string, role = 'teacher'): Promi
     throw new Error('Sekolah aktif tidak valid.');
   }
 
-  const upsertMembershipMutation = `
-    mutation UpsertSchoolMembership(
+  const findMembershipQuery = `
+    query FindSchoolMembership($userId: uuid!, $schoolId: uuid!) {
+      school_memberships(
+        where: {
+          user_id: { _eq: $userId }
+          school_id: { _eq: $schoolId }
+        }
+        limit: 1
+      ) {
+        id
+      }
+    }
+  `;
+
+  const insertMembershipMutation = `
+    mutation InsertSchoolMembership(
       $userId: uuid!,
       $schoolId: uuid!,
       $role: String!
@@ -1484,10 +2116,6 @@ export async function setActiveSchool(schoolId: string, role = 'teacher'): Promi
           role: $role
           status: "active"
           is_active: true
-        }
-        on_conflict: {
-          constraint: school_membership_unique
-          update_columns: [status, is_active, role]
         }
       ) {
         id
@@ -1510,24 +2138,59 @@ export async function setActiveSchool(schoolId: string, role = 'teacher'): Promi
     }
   `;
 
-  const upsertResponse = (await apiRequest(GRAPHQL_URL, {
+  const membershipHeaders = {
+    'Content-Type': 'application/json',
+    'x-hasura-role': 'user',
+  };
+  const membershipLookupVariables = {
+    userId,
+    schoolId: normalizedSchoolId,
+  };
+  const membershipInsertVariables = {
+    userId,
+    schoolId: normalizedSchoolId,
+    role,
+  };
+
+  const existingMembershipResponse = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: membershipHeaders,
     body: JSON.stringify({
-      query: upsertMembershipMutation,
-      variables: {
-        userId,
-        schoolId: normalizedSchoolId,
-        role,
-      },
+      query: findMembershipQuery,
+      variables: membershipLookupVariables,
     }),
-  })) as { errors?: Array<{ message?: string }> } | null;
+  })) as
+    | {
+        data?: { school_memberships?: Array<{ id?: string | null }> };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
 
-  if (Array.isArray(upsertResponse?.errors) && upsertResponse.errors.length > 0) {
-    throw new Error(upsertResponse.errors[0]?.message || 'Gagal menghubungkan sekolah.');
+  if (
+    Array.isArray(existingMembershipResponse?.errors) &&
+    existingMembershipResponse.errors.length > 0
+  ) {
+    throw new Error(
+      existingMembershipResponse.errors[0]?.message || 'Gagal mengecek koneksi sekolah.',
+    );
+  }
+
+  const existingMembershipId = existingMembershipResponse?.data?.school_memberships?.[0]?.id;
+  if (!existingMembershipId) {
+    const insertResponse = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: membershipHeaders,
+      body: JSON.stringify({
+        query: insertMembershipMutation,
+        variables: membershipInsertVariables,
+      }),
+    })) as { errors?: Array<{ message?: string }> } | null;
+
+    if (Array.isArray(insertResponse?.errors) && insertResponse.errors.length > 0) {
+      throw new Error(insertResponse.errors[0]?.message || 'Gagal menghubungkan sekolah.');
+    }
   }
 
   const deactivateResponse = (await apiRequest(GRAPHQL_URL, {
@@ -1835,7 +2498,7 @@ export async function clearCurrentSchoolContext(): Promise<void> {
 }
 
 export async function login(payload: LoginPayload): Promise<LoginResult> {
-  const response = await fetch(`${API_BASE_URL}${LOGIN_ENDPOINT}`, {
+  const response = await fetch(createAuthRequestUrl(LOGIN_ENDPOINT), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1932,7 +2595,7 @@ async function refreshAccessToken(): Promise<string | null> {
     return null;
   }
 
-  const response = await fetch(createRequestUrl(REFRESH_ENDPOINT), {
+  const response = await fetch(createAuthRequestUrl(REFRESH_ENDPOINT), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1991,7 +2654,7 @@ function hasGraphqlAuthError(responseBody: unknown): boolean {
   });
 }
 
-function buildRetryHeaders(originalHeaders: HeadersInit | undefined, accessToken: string): Headers {
+function buildRetryHeaders(originalHeaders: RequestInit['headers'], accessToken: string): Headers {
   const retryHeaders = new Headers(originalHeaders);
   retryHeaders.set('Accept', 'application/json');
   withAuthorizationHeader(retryHeaders, accessToken);

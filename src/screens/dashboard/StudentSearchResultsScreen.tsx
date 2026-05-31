@@ -1,29 +1,72 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { DASHBOARD_STUDENT_SEARCH_ITEMS } from '../../features/dashboard';
+import {
+  searchStudentsBySchool,
+  type DashboardStudentSearchItem,
+} from '../../services';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type StudentSearchResultsScreenProps = {
+  schoolId: string | null;
   keyword: string;
   onBack: () => void;
   onOpenStudentProfile: () => void;
 };
 
 export function StudentSearchResultsScreen({
+  schoolId,
   keyword,
   onBack,
   onOpenStudentProfile,
 }: StudentSearchResultsScreenProps) {
   const insets = useSafeAreaInsets();
-  const normalizedKeyword = keyword.trim().toLowerCase();
-  const results = DASHBOARD_STUDENT_SEARCH_ITEMS.filter(student =>
-    `${student.name} ${student.nisn} ${student.className}`
-      .toLowerCase()
-      .includes(normalizedKeyword),
-  );
+  const [results, setResults] = useState<DashboardStudentSearchItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadResults = async () => {
+      if (!schoolId) {
+        setResults([]);
+        setLoadError('Sekolah aktif belum dipilih.');
+        return;
+      }
+
+      setIsLoading(true);
+      setLoadError(null);
+      try {
+        const rows = await searchStudentsBySchool(schoolId, keyword);
+        if (isMounted) {
+          setResults(rows);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setResults([]);
+          setLoadError(error instanceof Error ? error.message : 'Gagal mencari siswa.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadResults().catch(() => {
+      if (isMounted) {
+        setResults([]);
+        setLoadError('Gagal mencari siswa.');
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [keyword, schoolId]);
 
   return (
     <View style={styles.container}>
@@ -46,7 +89,20 @@ export function StudentSearchResultsScreen({
       </View>
 
       <Screen contentContainerStyle={styles.content}>
-        {results.length > 0 ? (
+        {isLoading ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Mencari siswa...</Text>
+          </View>
+        ) : null}
+
+        {loadError ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Pencarian belum bisa dimuat</Text>
+            <Text style={styles.emptyBody}>{loadError}</Text>
+          </View>
+        ) : null}
+
+        {!isLoading && !loadError && results.length > 0 ? (
           <View style={styles.list}>
             {results.map(student => (
               <Pressable
@@ -68,14 +124,14 @@ export function StudentSearchResultsScreen({
               </Pressable>
             ))}
           </View>
-        ) : (
+        ) : !isLoading && !loadError ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>Siswa tidak ditemukan</Text>
             <Text style={styles.emptyBody}>
               Coba gunakan nama lain, NISN, atau kata kunci kelas.
             </Text>
           </View>
-        )}
+        ) : null}
       </Screen>
     </View>
   );
