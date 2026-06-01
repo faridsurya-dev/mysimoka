@@ -21,12 +21,17 @@ import {
 import { detectFaces } from 'react-native-vision-camera-face-detector';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Svg, { Path } from 'react-native-svg';
+import {
+  listStudentsBySchool,
+  registerStudentFacesBulk,
+  type DashboardStudentListItem,
+} from '../../services';
 import { PrimaryButton } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type FaceRegistrationScreenProps = {
   onBack: () => void;
-  studentNames: string[];
+  schoolId: string | null;
 };
 
 type CapturedPhoto = {
@@ -149,7 +154,7 @@ function intersectRect(a: CropRect, b: CropRect): CropRect | null {
   };
 }
 
-export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistrationScreenProps) {
+export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScreenProps) {
   const insets = useSafeAreaInsets();
   const { hasPermission, requestPermission } = useCameraPermission();
   const [imageSource, setImageSource] = useState<'camera' | 'device'>('camera');
@@ -174,6 +179,10 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
   const [assignedByCropId, setAssignedByCropId] = useState<Record<string, string | null>>({});
   const [uploadedByCropId, setUploadedByCropId] = useState<Record<string, boolean>>({});
   const [uploadingCropId, setUploadingCropId] = useState<string | null>(null);
+  const [isUploadingAll, setIsUploadingAll] = useState(false);
+  const [students, setStudents] = useState<DashboardStudentListItem[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [studentsError, setStudentsError] = useState<string | null>(null);
   const [sliderWidth, setSliderWidth] = useState(1);
   const cameraRef = useRef<VisionCamera | null>(null);
   const faceSliderRef = useRef<FlatList<CapturedFaceCrop> | null>(null);
@@ -219,6 +228,45 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
     setIsCameraInitialized(false);
   }, [device?.id]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!schoolId) {
+      setStudents([]);
+      setStudentsError('Sekolah aktif belum dipilih.');
+      setIsLoadingStudents(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setIsLoadingStudents(true);
+    setStudentsError(null);
+    listStudentsBySchool(schoolId)
+      .then(rows => {
+        if (!isMounted) {
+          return;
+        }
+        setStudents(rows);
+      })
+      .catch(error => {
+        if (!isMounted) {
+          return;
+        }
+        setStudents([]);
+        setStudentsError(error instanceof Error ? error.message : 'Gagal memuat daftar siswa.');
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingStudents(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [schoolId]);
+
   const isCameraReady =
     imageSource === 'camera' && hasPermission && !!device && isAppActive && !capturedPhoto;
   const activeCameraFacing = device?.position === 'back' ? 'back' : 'front';
@@ -240,6 +288,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
     setAssignedByCropId({});
     setUploadedByCropId({});
     setUploadingCropId(null);
+    setIsUploadingAll(false);
     setSelectedCropIndex(0);
     setCameraErrorText(null);
   };
@@ -283,6 +332,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
       setAssignedByCropId({});
       setUploadedByCropId({});
       setUploadingCropId(null);
+      setIsUploadingAll(false);
       setSelectedCropIndex(0);
       setCameraErrorText(null);
     } catch (error) {
@@ -324,6 +374,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
       setAssignedByCropId({});
       setUploadedByCropId({});
       setUploadingCropId(null);
+      setIsUploadingAll(false);
       setSelectedCropIndex(0);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Gagal memilih gambar perangkat.';
@@ -361,7 +412,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
       });
 
       // Fallback for photos where face occupies a smaller portion (commonly landscape/gallery images).
-      if (faces.length === 0 && primaryMinFaceSize !== FALLBACK_MIN_FACE_SIZE) {
+      if (faces.length === 0) {
         faces = await detectFaces({
           image: capturedPhoto.imageUri,
           options: {
@@ -453,6 +504,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
       setAssignedByCropId({});
       setUploadedByCropId({});
       setUploadingCropId(null);
+      setIsUploadingAll(false);
       setSelectedCropIndex(0);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Gagal memproses crop wajah.';
@@ -519,7 +571,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
     handleResetCapturedState();
   };
 
-  const handleAssignName = (name: string) => {
+  const handleAssignStudent = (studentId: string) => {
     const selectedCrop = faceCrops[selectedCropIndex];
     if (!selectedCrop) {
       return;
@@ -529,12 +581,12 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
       const next = { ...previous };
 
       Object.keys(next).forEach(cropId => {
-        if (next[cropId] === name) {
+        if (next[cropId] === studentId) {
           next[cropId] = null;
         }
       });
 
-      next[selectedCrop.id] = name;
+      next[selectedCrop.id] = studentId;
       return next;
     });
     setUploadedByCropId(previous => ({
@@ -543,12 +595,12 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
     }));
   };
 
-  const handleUnassignName = (name: string) => {
+  const handleUnassignStudent = (studentId: string) => {
     const unassignedCropIds: string[] = [];
     setAssignedByCropId(previous => {
       const next = { ...previous };
       Object.keys(next).forEach(cropId => {
-        if (next[cropId] === name) {
+        if (next[cropId] === studentId) {
           next[cropId] = null;
           unassignedCropIds.push(cropId);
         }
@@ -566,25 +618,100 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
     }
   };
 
-  const handleSimulateUpload = async () => {
+  const getStudentNameById = useCallback(
+    (studentId: string | null | undefined) => {
+      if (!studentId) {
+        return null;
+      }
+
+      return students.find(student => student.id === studentId)?.name ?? studentId;
+    },
+    [students],
+  );
+
+  const handleUploadSelectedFace = async () => {
     const selectedCrop = faceCrops[selectedCropIndex];
     if (!selectedCrop) {
       return;
     }
 
-    if (!assignedByCropId[selectedCrop.id]) {
+    const studentId = assignedByCropId[selectedCrop.id];
+    if (!studentId || !capturedPhoto) {
       return;
     }
 
     try {
       setUploadingCropId(selectedCrop.id);
-      await new Promise(resolve => setTimeout(resolve, 1600));
+      await registerStudentFacesBulk({
+        images: [
+          {
+            uri: capturedPhoto.imageUri,
+            name: `${selectedCrop.id}.jpg`,
+            type: 'image/jpeg',
+          },
+        ],
+        studentIds: [studentId],
+      });
       setUploadedByCropId(previous => ({
         ...previous,
         [selectedCrop.id]: true,
       }));
+    } catch (error) {
+      Alert.alert(
+        'Upload wajah gagal',
+        error instanceof Error ? error.message : 'Gagal mengunggah data wajah.',
+      );
     } finally {
       setUploadingCropId(null);
+    }
+  };
+
+  const handleFinish = async () => {
+    if (!capturedPhoto) {
+      onBack();
+      return;
+    }
+
+    const pendingPairs = faceCrops
+      .map(crop => ({
+        crop,
+        studentId: assignedByCropId[crop.id],
+      }))
+      .filter(
+        (item): item is { crop: CapturedFaceCrop; studentId: string } =>
+          !!item.studentId && uploadedByCropId[item.crop.id] !== true,
+      );
+
+    if (pendingPairs.length === 0) {
+      onBack();
+      return;
+    }
+
+    try {
+      setIsUploadingAll(true);
+      await registerStudentFacesBulk({
+        images: pendingPairs.map(({ crop }) => ({
+          uri: capturedPhoto.imageUri,
+          name: `${crop.id}.jpg`,
+          type: 'image/jpeg',
+        })),
+        studentIds: pendingPairs.map(({ studentId }) => studentId),
+      });
+      setUploadedByCropId(previous => {
+        const next = { ...previous };
+        pendingPairs.forEach(({ crop }) => {
+          next[crop.id] = true;
+        });
+        return next;
+      });
+      onBack();
+    } catch (error) {
+      Alert.alert(
+        'Upload wajah gagal',
+        error instanceof Error ? error.message : 'Gagal mengunggah data wajah.',
+      );
+    } finally {
+      setIsUploadingAll(false);
     }
   };
 
@@ -930,7 +1057,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
               {selectedCrop ? `Face ${selectedCropIndex + 1} dari ${faceCrops.length}` : 'Tidak ada face crop'}
             </Text>
             <Text style={styles.stepTwoHeaderHint}>
-              Foto di tengah adalah face terseleksi. Pilih nama di daftar untuk memasangkan.
+              Foto di tengah adalah face terseleksi. Pilih siswa di daftar untuk memasangkan.
             </Text>
           </View>
 
@@ -958,8 +1085,9 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
                 }}
                 renderItem={({ item, index }) => {
                   const isSelected = index === selectedCropIndex;
-                  const assignedName = assignedByCropId[item.id];
-                  const isAssigned = !!assignedName;
+                  const assignedStudentId = assignedByCropId[item.id];
+                  const assignedName = getStudentNameById(assignedStudentId);
+                  const isAssigned = !!assignedStudentId;
                   const isRegistered = isAssigned && uploadedByCropId[item.id] === true;
                   return (
                     <View style={styles.slideItemWrap}>
@@ -993,19 +1121,29 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
 
           <View style={styles.stepTwoListSection}>
             <FlatList
-              data={studentNames}
-              keyExtractor={name => name}
+              data={students}
+              keyExtractor={student => student.id}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.studentListContent}
-              renderItem={({ item: name }) => {
+              ListEmptyComponent={
+                <View style={styles.studentListEmpty}>
+                  <Text style={styles.studentListEmptyTitle}>
+                    {isLoadingStudents ? 'Memuat siswa...' : 'Siswa belum tersedia'}
+                  </Text>
+                  <Text style={styles.studentListEmptyBody}>
+                    {studentsError ?? 'Tambahkan siswa terlebih dahulu sebelum registrasi wajah.'}
+                  </Text>
+                </View>
+              }
+              renderItem={({ item: student }) => {
                 const selectedCropId = selectedCrop?.id;
-                const isSelected = selectedCropId ? assignedByCropId[selectedCropId] === name : false;
-                const assignedIndex = faceCrops.findIndex(crop => assignedByCropId[crop.id] === name);
+                const isSelected = selectedCropId ? assignedByCropId[selectedCropId] === student.id : false;
+                const assignedIndex = faceCrops.findIndex(crop => assignedByCropId[crop.id] === student.id);
                 const hasAssignedFace = assignedIndex >= 0;
                 const assignedCropId = hasAssignedFace ? faceCrops[assignedIndex].id : null;
                 const isRegistered = assignedCropId ? uploadedByCropId[assignedCropId] === true : false;
                 const isAssignedElsewhere = assignedIndex >= 0 && (!selectedCrop || faceCrops[assignedIndex].id !== selectedCrop.id);
-                const isUploadingAny = uploadingCropId !== null;
+                const isUploadingAny = uploadingCropId !== null || isUploadingAll;
                 const isUploadingThisCard = !!selectedCropId && isSelected && uploadingCropId === selectedCropId;
                 const canTapCard = !isDetectingFaces && !isUploadingAny && (hasAssignedFace || !!selectedCrop);
                 const isUploadEnabled = isSelected && !isDetectingFaces && !isUploadingAny && !isRegistered;
@@ -1019,29 +1157,30 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
                         return;
                       }
 
-                      const currentlyAssignedName =
+                      const currentlyAssignedStudentId =
                         selectedCropId ? assignedByCropId[selectedCropId] : null;
+                      const currentlyAssignedName = getStudentNameById(currentlyAssignedStudentId);
                       if (
                         selectedCropId &&
-                        currentlyAssignedName &&
-                        currentlyAssignedName !== name
+                        currentlyAssignedStudentId &&
+                        currentlyAssignedStudentId !== student.id
                       ) {
                         Alert.alert(
                           'Ganti Pairing Wajah',
-                          `Face ini sudah dipasangkan ke ${currentlyAssignedName}. Ganti ke ${name}?`,
+                          `Face ini sudah dipasangkan ke ${currentlyAssignedName}. Ganti ke ${student.name}?`,
                           [
                             { text: 'Batal', style: 'cancel' },
                             {
                               text: 'Ganti',
                               style: 'destructive',
-                              onPress: () => handleAssignName(name),
+                              onPress: () => handleAssignStudent(student.id),
                             },
                           ],
                         );
                         return;
                       }
 
-                      handleAssignName(name);
+                      handleAssignStudent(student.id);
                     }}
                     style={({ pressed }) => [
                       styles.studentChip,
@@ -1050,7 +1189,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
                     ]}>
                     <View style={styles.studentChipRow}>
                       <View style={styles.studentChipCopy}>
-                        <Text style={[styles.studentChipLabel, isSelected && styles.studentChipLabelSelected]}>{name}</Text>
+                        <Text style={[styles.studentChipLabel, isSelected && styles.studentChipLabelSelected]}>{student.name}</Text>
                         {isRegistered ? (
                           <Text style={styles.studentChipMetaPaired}>
                             Face Registered
@@ -1062,7 +1201,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
                       <View style={styles.studentChipActions}>
                         <Pressable
                           disabled={!isUploadEnabled}
-                          onPress={handleSimulateUpload}
+                          onPress={handleUploadSelectedFace}
                           style={({ pressed }) => [
                             styles.iconActionButton,
                             styles.iconUploadButton,
@@ -1103,7 +1242,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
                         </Pressable>
                         <Pressable
                           disabled={assignedIndex < 0 || isDetectingFaces || isUploadingAny}
-                          onPress={() => handleUnassignName(name)}
+                          onPress={() => handleUnassignStudent(student.id)}
                           style={({ pressed }) => [
                             styles.iconActionButton,
                             styles.iconTrashButton,
@@ -1144,8 +1283,9 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
                 <Text style={styles.secondaryActionLabel}>Kembali Tahap 1</Text>
               </Pressable>
               <PrimaryButton
-                label="Selesai"
-                onPress={onBack}
+                loading={isUploadingAll}
+                label={isUploadingAll ? 'Mengupload...' : 'Selesai'}
+                onPress={handleFinish}
                 style={styles.primaryAction}
               />
             </View>
@@ -1490,6 +1630,23 @@ const styles = StyleSheet.create({
   studentListContent: {
     gap: spacing[8],
     paddingBottom: spacing[8],
+  },
+  studentListEmpty: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    paddingHorizontal: spacing[16],
+    paddingVertical: spacing[20],
+    gap: spacing[8],
+  },
+  studentListEmptyTitle: {
+    ...typography.headingMd,
+    color: colors.text.primary,
+  },
+  studentListEmptyBody: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
   studentChip: {
     borderRadius: radius.lg,

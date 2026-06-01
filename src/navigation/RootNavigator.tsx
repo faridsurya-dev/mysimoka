@@ -41,6 +41,7 @@ import {
   deleteAcademicYear,
   AUTH_BASE_URL,
   getAuthSession,
+  getSchoolProfile,
   hydrateAuthSession,
   listAcademicYears,
   listMemberships,
@@ -82,6 +83,7 @@ const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
 const DEFAULT_SCHOOL_NAME = 'Sekolah';
 const BOOTSTRAP_FALLBACK_DELAY_MS = 8000;
 const HEALTHCHECK_TIMEOUT_MS = 5000;
+const BOOTSTRAP_NETWORK_TIMEOUT_MS = 6000;
 
 type UnknownObject = Record<string, unknown>;
 
@@ -190,6 +192,23 @@ function isAuthSessionInvalidError(error: unknown): boolean {
   );
 }
 
+async function withBootstrapTimeout<T>(task: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timeout.`));
+    }, BOOTSTRAP_NETWORK_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([task, timeout]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 function isActiveMembershipStatus(status: string): boolean {
   const normalized = status.trim().toLowerCase();
   return normalized === 'active' || normalized === 'approved' || normalized === 'accepted';
@@ -199,6 +218,9 @@ function isMembershipConnected(
   membership: Awaited<ReturnType<typeof listMemberships>>[number],
 ): boolean {
   if (membership.is_active) {
+    return true;
+  }
+  if (membership.school_id && normalizeRoleKey(membership.role) !== 'user') {
     return true;
   }
   return isActiveMembershipStatus(membership.status);
@@ -334,6 +356,8 @@ export function RootNavigator() {
     useState<ProfileRoute>('profile-overview');
   const [isRegeneratingJoinCode, setIsRegeneratingJoinCode] = useState(false);
   const [schoolActionError, setSchoolActionError] = useState<string | null>(null);
+  const [isLoadingSchoolProfile, setIsLoadingSchoolProfile] = useState(false);
+  const [schoolProfileLoadError, setSchoolProfileLoadError] = useState<string | null>(null);
   const [academicYears, setAcademicYears] = useState<
     Array<{ id: string; label: string; isActive: boolean }>
   >([]);
@@ -342,6 +366,50 @@ export function RootNavigator() {
   const [academicYearActionError, setAcademicYearActionError] = useState<string | null>(null);
   const sessionUser = asObject(getAuthSession().user);
   const profileData = buildProfileSettingsData(sessionUser, schoolMemberships);
+
+  const refreshSchoolMemberships = async (): Promise<Awaited<ReturnType<typeof listMemberships>>> => {
+    const memberships = await listMemberships();
+    setSchoolMemberships(memberships);
+    const activeMembership =
+      memberships.find(item => isMembershipConnected(item) && item.is_active) ??
+      memberships.find(item => isMembershipConnected(item)) ??
+      null;
+
+    if (activeMembership) {
+      setCurrentSchoolId(activeMembership.school_id);
+      setCurrentSchool(activeMembership.school_name);
+      await saveCurrentSchoolContext({
+        schoolId: activeMembership.school_id,
+        schoolName: activeMembership.school_name,
+      });
+    }
+
+    return memberships;
+  };
+
+  const refreshActiveSchoolProfile = async (schoolId: string): Promise<void> => {
+    const school = await getSchoolProfile(schoolId);
+    setSchoolMemberships(previous =>
+      previous.map(item =>
+        item.school_id === school.id
+          ? {
+              ...item,
+              name: school.name ?? item.name,
+              school_name: school.name ?? item.school_name,
+              school_number: school.number,
+              school_address: school.address,
+              school_join_code: school.joinCode ?? item.school_join_code,
+            }
+          : item,
+      ),
+    );
+    setCurrentSchoolId(school.id);
+    setCurrentSchool(school.name ?? DEFAULT_SCHOOL_NAME);
+    await saveCurrentSchoolContext({
+      schoolId: school.id,
+      schoolName: school.name ?? DEFAULT_SCHOOL_NAME,
+    });
+  };
 
   const checkStartupHealth = async (): Promise<void> => {
     const controller = new AbortController();
@@ -372,6 +440,46 @@ export function RootNavigator() {
       clearTimeout(timeoutId);
     }
   };
+
+  useEffect(() => {
+    if (activeTab !== 'profile' || !isAuthenticated) {
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingSchoolProfile(true);
+    setSchoolProfileLoadError(null);
+
+    if (!profileData.schoolId) {
+      setSchoolProfileLoadError('Sekolah aktif belum dipilih.');
+      setIsLoadingSchoolProfile(false);
+      return;
+    }
+
+    refreshActiveSchoolProfile(profileData.schoolId)
+      .then(() => {
+        if (isMounted) {
+          setSchoolProfileLoadError(null);
+        }
+      })
+      .catch(error => {
+        if (!isMounted) {
+          return;
+        }
+        const message =
+          error instanceof Error ? error.message : 'Gagal memuat informasi sekolah.';
+        setSchoolProfileLoadError(message);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingSchoolProfile(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, isAuthenticated, profileData.schoolId]);
 
   useEffect(() => {
     if (activeTab !== 'profile' || !profileData.schoolId) {
@@ -418,25 +526,17 @@ export function RootNavigator() {
     }, BOOTSTRAP_FALLBACK_DELAY_MS);
 
     const bootstrapAuth = async () => {
-      let canContinue = true;
       try {
         setIsBootstrapSlow(false);
         setBootstrapHealthError(null);
         try {
           await checkStartupHealth();
         } catch (error) {
-          canContinue = false;
-          if (isMounted) {
-            setIsBootstrapSlow(true);
+          if (__DEV__) {
             const message =
-              error instanceof Error
-                ? error.message
-                : 'Tidak bisa terhubung ke service auth.';
-            setBootstrapHealthError(
-              `${message} Endpoint: ${AUTH_BASE_URL}/health`,
-            );
+              error instanceof Error ? error.message : 'Tidak bisa terhubung ke service auth.';
+            console.log('[bootstrap][auth][health][warn]', `${message} Endpoint: ${AUTH_BASE_URL}/health`);
           }
-          return;
         }
 
         const restoredSession = await hydrateAuthSession();
@@ -449,7 +549,7 @@ export function RootNavigator() {
         let memberships: Awaited<ReturnType<typeof listMemberships>> = [];
         if (hasActiveSession) {
           try {
-            memberships = await listMemberships();
+            memberships = await withBootstrapTimeout(listMemberships(), 'List membership');
             setSchoolMemberships(memberships);
             hasSchoolMembership = memberships.some(item => isMembershipConnected(item));
           } catch (error) {
@@ -466,6 +566,12 @@ export function RootNavigator() {
                 );
               }
               return;
+            }
+            if (__DEV__) {
+              console.log(
+                '[bootstrap][memberships][warn]',
+                error instanceof Error ? error.message : 'unknown error',
+              );
             }
             hasSchoolMembership = false;
           }
@@ -507,7 +613,7 @@ export function RootNavigator() {
         }
       } finally {
         if (isMounted) {
-          setIsBootstrappingAuth(!canContinue ? true : false);
+          setIsBootstrappingAuth(false);
         }
       }
     };
@@ -588,18 +694,22 @@ export function RootNavigator() {
     if (authRoute === 'school-connection') {
       return (
         <SchoolConnectionScreen
-          onConnected={() => {
+          onConnected={schoolContext => {
             listMemberships()
               .then(async memberships => {
                 const activeMemberships = memberships.filter(item => isMembershipConnected(item));
                 setSchoolMemberships(memberships);
-                if (activeMemberships.length === 0) {
-                  setAuthRoute('school-connection');
-                  return;
-                }
 
                 const selectedMembership =
-                  activeMemberships.find(item => item.is_active) ?? activeMemberships[0];
+                  activeMemberships.find(item => item.school_id === schoolContext.schoolId) ??
+                  activeMemberships.find(item => item.is_active) ??
+                  activeMemberships[0] ??
+                  {
+                    school_id: schoolContext.schoolId,
+                    school_name: schoolContext.schoolName,
+                    role: 'school_admin',
+                    is_active: true,
+                  };
                 setCurrentSchoolId(selectedMembership.school_id);
                 setCurrentSchool(selectedMembership.school_name);
                 setSchoolMemberships(previous =>
@@ -617,7 +727,7 @@ export function RootNavigator() {
                 setActiveTab('dashboard');
                 setDashboardRoute('dashboard');
               })
-              .catch(error => {
+              .catch(async error => {
                 if (isAuthSessionInvalidError(error)) {
                   clearAuthSession();
                   clearCurrentSchoolContext().catch(() => undefined);
@@ -625,7 +735,13 @@ export function RootNavigator() {
                   return;
                 }
 
-                setAuthRoute('school-connection');
+                setCurrentSchoolId(schoolContext.schoolId);
+                setCurrentSchool(schoolContext.schoolName);
+                await saveCurrentSchoolContext(schoolContext);
+                setIsSchoolSelectionVisible(false);
+                setIsAuthenticated(true);
+                setActiveTab('dashboard');
+                setDashboardRoute('dashboard');
               });
           }}
           onLogout={() => {
@@ -647,11 +763,6 @@ export function RootNavigator() {
           });
           setCurrentSchool(extractSchoolNameFromLoginUser(result.user) ?? DEFAULT_SCHOOL_NAME);
 
-          if (result.requiresSchoolConnection) {
-            setAuthRoute('school-connection');
-            return;
-          }
-
           listMemberships()
             .then(memberships => {
               const activeMemberships = memberships.filter(item => isMembershipConnected(item));
@@ -662,10 +773,35 @@ export function RootNavigator() {
                 return;
               }
 
+              if (activeMemberships.length === 1) {
+                const selectedMembership = activeMemberships[0];
+                setCurrentSchoolId(selectedMembership.school_id);
+                setCurrentSchool(selectedMembership.school_name);
+                setSchoolMemberships(previous =>
+                  previous.map(item => ({
+                    ...item,
+                    is_active: item.school_id === selectedMembership.school_id,
+                  }))
+                );
+                saveCurrentSchoolContext({
+                  schoolId: selectedMembership.school_id,
+                  schoolName: selectedMembership.school_name,
+                }).catch(() => undefined);
+                setIsAuthenticated(true);
+                setIsSchoolSelectionVisible(false);
+                return;
+              }
+
               setIsAuthenticated(true);
               setIsSchoolSelectionVisible(true);
             })
-            .catch(() => {
+            .catch(error => {
+              if (__DEV__) {
+                console.log(
+                  '[login][memberships][error]',
+                  error instanceof Error ? error.message : 'unknown error',
+                );
+              }
               setAuthRoute('school-connection');
             });
         }}
@@ -866,9 +1002,8 @@ export function RootNavigator() {
 
               setIsRegeneratingJoinCode(true);
               regenerateSchoolJoinCode(profileData.schoolId)
-                .then(() => listMemberships())
-                .then(memberships => {
-                  setSchoolMemberships(memberships);
+                .then(() => refreshActiveSchoolProfile(profileData.schoolId as string))
+                .then(() => {
                   setSchoolActionError(null);
                 })
                 .catch(error => {
@@ -1009,10 +1144,10 @@ export function RootNavigator() {
                 });
             },
             onSchoolProfileSaved: () => {
-              listMemberships()
-                .then(memberships => {
-                  setSchoolMemberships(memberships);
-                })
+              if (!profileData.schoolId) {
+                return;
+              }
+              refreshActiveSchoolProfile(profileData.schoolId)
                 .catch(() => undefined);
             },
             onSwitchSchool: () => {
@@ -1068,6 +1203,8 @@ export function RootNavigator() {
             },
             isRegeneratingJoinCode,
             schoolActionError,
+            isLoadingSchoolProfile,
+            schoolProfileLoadError,
             academicYears,
             isLoadingAcademicYears,
             isSavingAcademicYear,
@@ -1236,12 +1373,7 @@ function renderDashboardStack({
       return (
         <FaceRegistrationScreen
           onBack={onBackFromFaceRegistration}
-          studentNames={[
-            'Alya Putri Maharani',
-            'Bima Saputra',
-            'Citra Maharani',
-            'Dimas Pratama',
-          ]}
+          schoolId={currentSchoolId}
         />
       );
     case 'student-profile':
@@ -1434,6 +1566,8 @@ type ProfileStackOptions = {
   onLogout: () => void;
   isRegeneratingJoinCode: boolean;
   schoolActionError: string | null;
+  isLoadingSchoolProfile: boolean;
+  schoolProfileLoadError: string | null;
   academicYears: Array<{ id: string; label: string; isActive: boolean }>;
   isLoadingAcademicYears: boolean;
   isSavingAcademicYear: boolean;
@@ -1458,6 +1592,8 @@ function renderProfileStack({
   onLogout,
   isRegeneratingJoinCode,
   schoolActionError,
+  isLoadingSchoolProfile,
+  schoolProfileLoadError,
   profileData,
   academicYears,
   isLoadingAcademicYears,
@@ -1516,7 +1652,9 @@ function renderProfileStack({
           roleLabel={profileData.roleLabels}
           schoolActionError={schoolActionError}
           schoolAddress={profileData.schoolAddress}
+          isLoadingSchoolProfile={isLoadingSchoolProfile}
           isRegeneratingJoinCode={isRegeneratingJoinCode}
+          schoolProfileLoadError={schoolProfileLoadError}
           schoolJoinCode={profileData.schoolJoinCode}
           schoolName={profileData.schoolName}
           schoolNumber={profileData.schoolNumber}

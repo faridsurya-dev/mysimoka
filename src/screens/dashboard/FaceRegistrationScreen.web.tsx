@@ -6,15 +6,22 @@ import { colors, radius, spacing, typography } from '../../theme';
 
 type FaceRegistrationScreenProps = {
   onBack: () => void;
-  studentNames: string[];
+  schoolId: string | null;
 };
+
+const STUDENT_OPTIONS = [
+  { id: 'demo-1', name: 'Alya Putri Maharani' },
+  { id: 'demo-2', name: 'Bima Saputra' },
+  { id: 'demo-3', name: 'Citra Maharani' },
+  { id: 'demo-4', name: 'Dimas Pratama' },
+];
 
 type FakeCrop = {
   id: string;
   color: string;
 };
 
-export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistrationScreenProps) {
+export function FaceRegistrationScreen({ onBack, schoolId: _schoolId }: FaceRegistrationScreenProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [imageSource, setImageSource] = useState<'camera' | 'device'>('camera');
   const [crops, setCrops] = useState<FakeCrop[]>([]);
@@ -33,7 +40,7 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
     setAssignedByCropId({});
   };
 
-  const handleAssign = (name: string) => {
+  const handleAssign = (studentId: string) => {
     if (!selectedCrop) {
       return;
     }
@@ -41,11 +48,11 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
     setAssignedByCropId(previous => {
       const next = { ...previous };
       Object.keys(next).forEach(cropId => {
-        if (next[cropId] === name) {
+        if (next[cropId] === studentId) {
           next[cropId] = null;
         }
       });
-      next[selectedCrop.id] = name;
+      next[selectedCrop.id] = studentId;
       return next;
     });
   };
@@ -153,16 +160,16 @@ export function FaceRegistrationScreen({ onBack, studentNames }: FaceRegistratio
           </View>
 
           <View style={styles.nameList}>
-            {studentNames.map(name => {
+            {STUDENT_OPTIONS.map(student => {
               const selectedId = selectedCrop?.id;
-              const isSelected = selectedId ? assignedByCropId[selectedId] === name : false;
+              const isSelected = selectedId ? assignedByCropId[selectedId] === student.id : false;
 
               return (
                 <Pressable
-                  key={name}
-                  onPress={() => handleAssign(name)}
+                  key={student.id}
+                  onPress={() => handleAssign(student.id)}
                   style={[styles.nameItem, isSelected && styles.nameItemSelected]}>
-                  <Text style={[styles.nameLabel, isSelected && styles.nameLabelSelected]}>{name}</Text>
+                  <Text style={[styles.nameLabel, isSelected && styles.nameLabelSelected]}>{student.name}</Text>
                 </Pressable>
               );
             })}

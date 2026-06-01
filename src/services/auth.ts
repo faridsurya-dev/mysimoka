@@ -94,7 +94,7 @@ function readNullableString(value: unknown): string | null {
 
 export function normalizeRoleKey(value: string): string {
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'admin_sekolah') {
+  if (normalized === 'admin' || normalized === 'admin_sekolah') {
     return 'school_admin';
   }
   if (normalized === 'school_member' || normalized === 'anggota_sekolah') {
@@ -607,6 +607,17 @@ export type CreateStudentPayload = {
   birthDate?: string | null;
 };
 
+export type FaceBulkImage = {
+  uri: string;
+  name?: string;
+  type?: string;
+};
+
+export type RegisterStudentFacesBulkPayload = {
+  images: FaceBulkImage[];
+  studentIds: string[];
+};
+
 type SchoolDetailsById = Record<
   string,
   {
@@ -631,6 +642,14 @@ export type UpdateSchoolProfilePayload = {
   name: string;
   number?: string | null;
   address: string;
+};
+
+export type SchoolProfile = {
+  id: string;
+  name: string | null;
+  number: string | null;
+  address: string | null;
+  joinCode: string | null;
 };
 
 export type AcademicYear = {
@@ -878,7 +897,7 @@ async function parseSchoolConnectionResponse(response: Response): Promise<{
   return tokenResult;
 }
 
-export async function createSchool(payload: CreateSchoolPayload): Promise<void> {
+export async function createSchool(payload: CreateSchoolPayload): Promise<CurrentSchoolContext> {
   const userId = getSessionUserIdOrThrow();
   const schoolName = payload.name.trim();
   if (!schoolName) {
@@ -971,9 +990,13 @@ export async function createSchool(payload: CreateSchoolPayload): Promise<void> 
   }
 
   await setActiveSchool(schoolId, 'school_admin');
+  return {
+    schoolId,
+    schoolName,
+  };
 }
 
-export async function joinSchool(payload: JoinSchoolPayload): Promise<void> {
+export async function joinSchool(payload: JoinSchoolPayload): Promise<CurrentSchoolContext> {
   const normalizedJoinCode = payload.joinCode.trim().toUpperCase();
   if (!normalizedJoinCode) {
     throw new Error('Kode join wajib diisi.');
@@ -983,6 +1006,7 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<void> {
     query FindSchoolByJoinCode($joinCode: String!) {
       schools(where: { join_code: { _eq: $joinCode } }, limit: 1) {
         id
+        name
       }
     }
   `;
@@ -999,7 +1023,7 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<void> {
     }),
   })) as
     | {
-        data?: { schools?: Array<{ id?: string | null }> };
+        data?: { schools?: Array<{ id?: string | null; name?: string | null }> };
         errors?: Array<{ message?: string }>;
       }
     | null;
@@ -1008,12 +1032,17 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<void> {
     throw new Error(responseBody.errors[0]?.message || 'Gagal validasi kode join.');
   }
 
-  const schoolId = responseBody?.data?.schools?.[0]?.id ?? null;
+  const foundSchool = responseBody?.data?.schools?.[0] ?? null;
+  const schoolId = foundSchool?.id ?? null;
   if (!schoolId) {
     throw new Error('Kode join sekolah tidak ditemukan.');
   }
 
   await setActiveSchool(schoolId, 'teacher');
+  return {
+    schoolId,
+    schoolName: foundSchool?.name ?? `Sekolah ${schoolId.slice(0, 8).toUpperCase()}`,
+  };
 }
 
 function normalizeMembership(item: unknown): SchoolMembership | null {
@@ -1133,25 +1162,79 @@ async function fetchSchoolDetailsByIds(schoolIds: string[], hasuraRole?: string)
   return detailsById;
 }
 
+export async function getSchoolProfile(schoolId: string): Promise<SchoolProfile> {
+  const normalizedSchoolId = schoolId.trim();
+  if (!normalizedSchoolId) {
+    throw new Error('Sekolah aktif tidak ditemukan.');
+  }
+
+  const query = `
+    query GetSchoolProfile($schoolId: uuid!) {
+      schools(where: { id: { _eq: $schoolId } }, limit: 1) {
+        id
+        name
+        number
+        address
+        join_code
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { schoolId: normalizedSchoolId },
+    }),
+  })) as
+    | {
+        data?: {
+          schools?: Array<Record<string, unknown>>;
+        };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    const firstMessage = responseBody.errors[0]?.message;
+    throw new Error(firstMessage || 'Gagal mengambil profil sekolah dari Hasura.');
+  }
+
+  const schoolObject = asObject(responseBody?.data?.schools?.[0]);
+  const id = readNullableString(schoolObject?.id);
+  if (!id) {
+    throw new Error('Profil sekolah tidak ditemukan.');
+  }
+
+  return {
+    id,
+    name: readNullableString(schoolObject?.name),
+    number: readNullableString(schoolObject?.number),
+    address: readNullableString(schoolObject?.address),
+    joinCode: readNullableString(schoolObject?.join_code),
+  };
+}
+
 export async function listMemberships(): Promise<SchoolMembership[]> {
   const userId = getSessionUserIdOrThrow();
   const query = `
     query ListMySchoolMemberships($userId: uuid!) {
-      school_memberships(
-        where: { user_id: { _eq: $userId } }
-        order_by: [{ is_active: desc }, { created_at: desc }]
-      ) {
+      auth_users_by_pk(id: $userId) {
         id
-        user_id
-        school_id
-        role
-        status
-        is_active
-        school {
-          name
-          number
-          address
-          join_code
+        school_memberships(order_by: [{ is_active: desc }, { created_at: desc }]) {
+          is_active
+          role
+          status
+          created_at
+          joined_at
+          updated_at
+          id
+          school_id
+          user_id
         }
       }
     }
@@ -1162,6 +1245,7 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
+      'x-hasura-role': 'user',
     },
     body: JSON.stringify({
       query,
@@ -1169,7 +1253,7 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
     }),
   })) as
     | {
-        data?: { school_memberships?: unknown[] };
+        data?: { auth_users_by_pk?: { school_memberships?: unknown[] } | null };
         errors?: Array<{ message?: string }>;
       }
     | null;
@@ -1185,8 +1269,9 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
     throw new Error(firstMessage || 'Gagal mengambil membership sekolah dari Hasura.');
   }
 
-  const memberships = Array.isArray(response?.data?.school_memberships)
-    ? response.data.school_memberships
+  const rawMemberships = response?.data?.auth_users_by_pk?.school_memberships;
+  const memberships = Array.isArray(rawMemberships)
+    ? rawMemberships
         .map(normalizeMembership)
         .filter((item): item is SchoolMembership => item !== null)
     : [];
@@ -1591,6 +1676,40 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
   return rows
     .map(normalizeStudentListItem)
     .filter((item): item is DashboardStudentListItem => item !== null);
+}
+
+export async function registerStudentFacesBulk(
+  payload: RegisterStudentFacesBulkPayload,
+): Promise<unknown> {
+  if (payload.images.length === 0) {
+    throw new Error('Minimal satu foto wajah wajib dipilih.');
+  }
+
+  if (payload.images.length !== payload.studentIds.length) {
+    throw new Error('Jumlah foto wajah dan siswa harus sama.');
+  }
+
+  const formData = new FormData();
+  payload.images.forEach((image, index) => {
+    const studentId = payload.studentIds[index]?.trim();
+    if (!image.uri || !studentId) {
+      throw new Error('Data foto wajah dan siswa tidak lengkap.');
+    }
+
+    const fallbackName = `face-${index + 1}.jpg`;
+    formData.append('images', {
+      uri: image.uri,
+      name: image.name ?? fallbackName,
+      type: image.type ?? 'image/jpeg',
+    } as unknown as Blob);
+    formData.append('student_ids', studentId);
+  });
+
+  return apiRequest('/face/bulk', {
+    method: 'POST',
+    requiresAuth: true,
+    body: formData,
+  });
 }
 
 export async function searchStudentsBySchool(
@@ -2750,6 +2869,10 @@ export async function apiRequest<TResponse = unknown>(
     }
 
     parsedResponseBody = await parseUnknownResponseBody(retryResponse);
+    if (hasGraphqlAuthError(parsedResponseBody)) {
+      clearAuthSession();
+      throw new Error('Sesi berakhir. Silakan login ulang.');
+    }
   }
 
   return parsedResponseBody as TResponse;
