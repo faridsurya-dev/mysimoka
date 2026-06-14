@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { TEACHER_NAME_OPTIONS } from '../../features/dashboard';
 import {
   createClassroom,
   listClassroomsBySchool,
+  listTeachersBySchool,
   type ClassroomListItem,
+  type TeacherDirectoryItem,
 } from '../../services';
 import { PrimaryButton, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
@@ -28,8 +29,12 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
   const [classCode, setClassCode] = useState('');
   const [classInitial, setClassInitial] = useState('');
   const [teacherName, setTeacherName] = useState('');
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
   const [isTeacherDropdownOpen, setIsTeacherDropdownOpen] = useState(false);
+  const [teachers, setTeachers] = useState<TeacherDirectoryItem[]>([]);
+  const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
+  const [loadTeachersError, setLoadTeachersError] = useState<string | null>(null);
   const [classes, setClasses] = useState<ClassroomListItem[]>([]);
   const [isLoadingClasses, setIsLoadingClasses] = useState(false);
   const [loadClassesError, setLoadClassesError] = useState<string | null>(null);
@@ -57,6 +62,26 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
     }
   }, [schoolId]);
 
+  const loadTeachers = useCallback(async () => {
+    if (!schoolId) {
+      setTeachers([]);
+      return;
+    }
+
+    setIsLoadingTeachers(true);
+    setLoadTeachersError(null);
+
+    try {
+      const rows = await listTeachersBySchool(schoolId);
+      setTeachers(rows);
+    } catch (error) {
+      setTeachers([]);
+      setLoadTeachersError(error instanceof Error ? error.message : 'Gagal memuat daftar guru.');
+    } finally {
+      setIsLoadingTeachers(false);
+    }
+  }, [schoolId]);
+
   useEffect(() => {
     loadClasses().catch(() => {
       setClasses([]);
@@ -64,6 +89,14 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
       setIsLoadingClasses(false);
     });
   }, [loadClasses]);
+
+  useEffect(() => {
+    loadTeachers().catch(() => {
+      setTeachers([]);
+      setLoadTeachersError('Gagal memuat daftar guru.');
+      setIsLoadingTeachers(false);
+    });
+  }, [loadTeachers]);
 
   const filteredClasses = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -77,23 +110,19 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
   }, [classes, query]);
 
   const isSaveDisabled = useMemo(() => {
-    return (
-      className.trim().length === 0 ||
-      classLevel.trim().length === 0 ||
-      classCode.trim().length !== 6 ||
-      classInitial.trim().length === 0 ||
-      teacherName.trim().length === 0
-    );
-  }, [classCode, classInitial, classLevel, className, teacherName]);
+    return className.trim().length === 0 || classLevel.trim().length === 0;
+  }, [classLevel, className]);
 
   const filteredTeachers = useMemo(() => {
     const keyword = teacherSearchQuery.trim().toLowerCase();
     if (!keyword) {
-      return [];
+      return teachers;
     }
 
-    return TEACHER_NAME_OPTIONS.filter(teacher => teacher.toLowerCase().includes(keyword));
-  }, [teacherSearchQuery]);
+    return teachers.filter(teacher =>
+      `${teacher.name} ${teacher.email} ${teacher.handledClasses}`.toLowerCase().includes(keyword),
+    );
+  }, [teacherSearchQuery, teachers]);
 
   function handleCloseDialog() {
     setIsAddClassDialogVisible(false);
@@ -105,6 +134,7 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
     setClassCode('');
     setClassInitial('');
     setTeacherName('');
+    setSelectedTeacherId(null);
     setTeacherSearchQuery('');
     setSaveClassError(null);
     setIsClassLevelDropdownOpen(false);
@@ -131,6 +161,7 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
         name: className.trim(),
         gradeLevel: Number(classLevel),
         description: classInitial.trim().toUpperCase(),
+        homeroomTeacherMembershipId: selectedTeacherId,
       });
       handleCloseDialog();
       await loadClasses();
@@ -146,11 +177,13 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
     setIsTeacherDropdownOpen(value.trim().length > 0);
     if (teacherName) {
       setTeacherName('');
+      setSelectedTeacherId(null);
     }
   }
 
-  function handleSelectTeacher(teacher: string) {
-    setTeacherName(teacher);
+  function handleSelectTeacher(teacher: TeacherDirectoryItem) {
+    setTeacherName(teacher.name);
+    setSelectedTeacherId(teacher.id);
     setTeacherSearchQuery('');
     setIsTeacherDropdownOpen(false);
   }
@@ -416,9 +449,8 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
               <View style={styles.autocompleteWrap}>
                 <Pressable
                   onPress={() => {
-                    setTeacherName('');
                     setTeacherSearchQuery('');
-                    setIsTeacherDropdownOpen(true);
+                    setIsTeacherDropdownOpen(previous => !previous);
                   }}
                   style={({ pressed }) => [
                     styles.dropdownField,
@@ -453,14 +485,24 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
                     value={teacherSearchQuery}
                   />
                 ) : null}
-                {isTeacherDropdownOpen && teacherSearchQuery.trim().length > 0 && filteredTeachers.length > 0 ? (
+                {isTeacherDropdownOpen && isLoadingTeachers ? (
+                  <View style={styles.teacherEmptyState}>
+                    <Text style={styles.teacherEmptyLabel}>Memuat guru...</Text>
+                  </View>
+                ) : null}
+                {isTeacherDropdownOpen && loadTeachersError ? (
+                  <View style={styles.teacherEmptyState}>
+                    <Text style={styles.teacherEmptyLabel}>{loadTeachersError}</Text>
+                  </View>
+                ) : null}
+                {isTeacherDropdownOpen && !isLoadingTeachers && !loadTeachersError && filteredTeachers.length > 0 ? (
                   <View style={styles.teacherDropdown}>
                     {filteredTeachers.map(teacher => {
-                      const isSelected = teacher === teacherName;
+                      const isSelected = teacher.id === selectedTeacherId;
 
                       return (
                         <Pressable
-                          key={teacher}
+                          key={teacher.id}
                           onPress={() => handleSelectTeacher(teacher)}
                           style={({ pressed }) => [
                             styles.teacherOption,
@@ -472,7 +514,7 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
                               styles.teacherOptionLabel,
                               isSelected && styles.teacherOptionLabelSelected,
                             ]}>
-                            {teacher}
+                            {teacher.name}
                           </Text>
                         </Pressable>
                       );
@@ -480,7 +522,8 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
                   </View>
                 ) : null}
                 {isTeacherDropdownOpen &&
-                teacherSearchQuery.trim().length > 0 &&
+                !isLoadingTeachers &&
+                !loadTeachersError &&
                 filteredTeachers.length === 0 ? (
                   <View style={styles.teacherEmptyState}>
                     <Text style={styles.teacherEmptyLabel}>Guru tidak ditemukan</Text>

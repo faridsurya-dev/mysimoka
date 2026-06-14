@@ -3,7 +3,7 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { PrimaryButton, Screen } from '../../shared/components';
-import { listTeachersBySchool } from '../../services';
+import { createTeacherForSchool, listTeachersBySchool } from '../../services';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { TeacherListItem } from '../../types';
 
@@ -32,6 +32,8 @@ export function TeacherListScreen({
   const [serverTeachers, setServerTeachers] = useState<TeacherListItem[]>([]);
   const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
   const [loadTeachersError, setLoadTeachersError] = useState<string | null>(null);
+  const [saveTeacherError, setSaveTeacherError] = useState<string | null>(null);
+  const [isSavingTeacher, setIsSavingTeacher] = useState(false);
   const displayedTeachers = serverTeachers.length > 0 ? serverTeachers : teachers;
 
   const loadTeachers = useCallback(async () => {
@@ -79,27 +81,6 @@ export function TeacherListScreen({
     return email.trim().length === 0 || fullName.trim().length === 0 || password.length === 0;
   }, [email, fullName, password]);
 
-  function createTeacherCode(name: string) {
-    const words = name
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-
-    if (words.length === 0) {
-      return 'GR';
-    }
-
-    if (words.length === 1) {
-      return words[0].slice(0, 2).toUpperCase();
-    }
-
-    return words
-      .slice(0, 2)
-      .map(word => word[0])
-      .join('')
-      .toUpperCase();
-  }
-
   function generatePassword() {
     const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const digits = '0123456789';
@@ -131,23 +112,39 @@ export function TeacherListScreen({
     setFullName('');
     setPassword('');
     setIsPasswordVisible(false);
+    setSaveTeacherError(null);
     setIsAddTeacherDialogVisible(true);
   }
 
-  function handleSaveTeacher() {
-    const newTeacher = {
-      id: `teacher-${Date.now()}`,
-      name: fullName.trim(),
-      email: email.trim().toLowerCase(),
-      password,
-      code: createTeacherCode(fullName),
-      homeroom: 'Belum ditentukan',
-      handledClasses: 'Belum ada kelas',
-      totalStudents: 0,
-    };
+  async function handleSaveTeacher() {
+    if (isSaveDisabled || isSavingTeacher) {
+      return;
+    }
 
-    onAddTeacher(newTeacher);
-    handleCloseDialog();
+    if (!schoolId) {
+      setSaveTeacherError('Sekolah aktif belum dipilih.');
+      return;
+    }
+
+    setIsSavingTeacher(true);
+    setSaveTeacherError(null);
+
+    try {
+      const newTeacher = await createTeacherForSchool({
+        schoolId,
+        email,
+        fullName,
+        password,
+      });
+      onAddTeacher(newTeacher);
+      setServerTeachers(previous => [newTeacher, ...previous.filter(item => item.id !== newTeacher.id)]);
+      handleCloseDialog();
+      await loadTeachers();
+    } catch (error) {
+      setSaveTeacherError(error instanceof Error ? error.message : 'Gagal menyimpan guru.');
+    } finally {
+      setIsSavingTeacher(false);
+    }
   }
 
   return (
@@ -336,6 +333,10 @@ export function TeacherListScreen({
               </Pressable>
             </View>
 
+            {saveTeacherError ? (
+              <Text style={styles.dialogErrorText}>{saveTeacherError}</Text>
+            ) : null}
+
             <View style={styles.dialogActions}>
               <Pressable
                 onPress={handleCloseDialog}
@@ -346,8 +347,8 @@ export function TeacherListScreen({
                 <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
               </Pressable>
               <PrimaryButton
-                disabled={isSaveDisabled}
-                label="Simpan"
+                disabled={isSaveDisabled || isSavingTeacher}
+                label={isSavingTeacher ? 'Menyimpan...' : 'Simpan'}
                 onPress={handleSaveTeacher}
                 style={styles.dialogPrimaryButton}
               />
@@ -515,6 +516,10 @@ const styles = StyleSheet.create({
   dialogDescription: {
     ...typography.bodySm,
     color: colors.text.secondary,
+  },
+  dialogErrorText: {
+    ...typography.bodySm,
+    color: colors.status.device.error,
   },
   dialogFieldGroup: {
     gap: spacing[8],

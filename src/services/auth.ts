@@ -92,6 +92,12 @@ function readNullableString(value: unknown): string | null {
   return null;
 }
 
+function isUuidString(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  );
+}
+
 export function normalizeRoleKey(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (normalized === 'admin' || normalized === 'admin_sekolah') {
@@ -150,6 +156,23 @@ function resolveHighestAllowedRoleFromSession(): string | null {
   }
 
   return sortRolesByPriority(normalizedRoles)[0] ?? null;
+}
+
+function readHasuraClaimsFromSession(): Record<string, unknown> | null {
+  const jwtPayload =
+    authSession.accessToken && authSession.accessToken.trim().length > 0
+      ? decodeJwtPayload(authSession.accessToken)
+      : null;
+  return asObject(jwtPayload?.['https://hasura.io/jwt/claims']);
+}
+
+function logHasuraClaimsDebug(scope: string): void {
+  if (!__DEV__) {
+    return;
+  }
+
+  const hasuraClaims = readHasuraClaimsFromSession();
+  console.log(`[${scope}][hasuraClaims]`, JSON.stringify(hasuraClaims));
 }
 
 function syncSessionUserRole(role: string): void {
@@ -598,6 +621,13 @@ export type UpdateClassroomPayload = {
   homeroomTeacherMembershipId?: string | null;
 };
 
+export type CreateTeacherPayload = {
+  schoolId: string;
+  email: string;
+  fullName: string;
+  password: string;
+};
+
 export type CreateStudentPayload = {
   schoolId: string;
   fullName: string;
@@ -673,7 +703,12 @@ function getSessionUserIdOrThrow(): string {
     'x-hasura-user-id',
     'x_hasura_user_id',
   ]);
-  const userId = userIdFromUserObject ?? userIdFromClaims;
+  const userId =
+    userIdFromClaims && isUuidString(userIdFromClaims)
+      ? userIdFromClaims
+      : userIdFromUserObject && isUuidString(userIdFromUserObject)
+        ? userIdFromUserObject
+        : null;
   if (!userId) {
     throw new Error('Data user tidak ditemukan. Silakan login ulang.');
   }
@@ -775,14 +810,6 @@ export async function getMyProfile(): Promise<Record<string, unknown>> {
   return profile;
 }
 
-function requireAccessToken(): string {
-  if (!authSession.accessToken) {
-    throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
-  }
-
-  return authSession.accessToken;
-}
-
 function buildTeacherCode(name: string): string {
   const words = name
     .trim()
@@ -804,17 +831,6 @@ function buildTeacherCode(name: string): string {
     .toUpperCase();
 }
 
-function readCountAggregate(value: unknown): number {
-  const source = asObject(value);
-  const aggregate = asObject(source?.aggregate);
-  const count = aggregate?.count;
-  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
-}
-
-function formatClassTeacherName(value: string | null): string {
-  return value ? `Wali kelas: ${value}` : 'Wali kelas belum ditentukan';
-}
-
 function normalizeClassroomListItem(row: unknown): ClassroomListItem | null {
   const source = asObject(row);
   const id = readNullableString(source?.id);
@@ -823,18 +839,13 @@ function normalizeClassroomListItem(row: unknown): ClassroomListItem | null {
     return null;
   }
 
-  const membership = asObject(source?.school_membership);
-  const membershipUser = asObject(membership?.user);
-  const teacherName = readNullableString(membershipUser?.full_name);
-  const total = readCountAggregate(source?.student_classrooms_aggregate);
-
   return {
     id,
     name,
-    total,
-    teacher: formatClassTeacherName(teacherName),
+    total: 0,
+    teacher: 'Wali kelas belum ditentukan',
     lastMeasuredAt: 'Belum ada pengukuran',
-    coverage: `${total} siswa terdaftar`,
+    coverage: '0 siswa terdaftar',
   };
 }
 
@@ -865,36 +876,6 @@ function normalizeStudentListItem(row: unknown): DashboardStudentListItem | null
       '-',
     className,
   };
-}
-
-function normalizeTokenResult(body: ApiBody | null): { accessToken: string; refreshToken: string | null } | null {
-  const loginResult = normalizeLoginResult(body);
-  if (!loginResult) {
-    return null;
-  }
-
-  return {
-    accessToken: loginResult.accessToken,
-    refreshToken: loginResult.refreshToken,
-  };
-}
-
-async function parseSchoolConnectionResponse(response: Response): Promise<{
-  accessToken: string;
-  refreshToken: string | null;
-}> {
-  const responseBody = await parseResponseBody(response);
-  if (!response.ok) {
-    const normalizedMessage = normalizeApiErrorMessage(responseBody);
-    throw new Error(normalizedMessage ?? 'Permintaan koneksi sekolah gagal.');
-  }
-
-  const tokenResult = normalizeTokenResult(responseBody);
-  if (!tokenResult) {
-    throw new Error('Respons token koneksi sekolah tidak valid.');
-  }
-
-  return tokenResult;
 }
 
 export async function createSchool(payload: CreateSchoolPayload): Promise<CurrentSchoolContext> {
@@ -1016,6 +997,7 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<CurrentSch
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
+      'x-hasura-role': 'user',
     },
     body: JSON.stringify({
       query,
@@ -1029,7 +1011,14 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<CurrentSch
     | null;
 
   if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
-    throw new Error(responseBody.errors[0]?.message || 'Gagal validasi kode join.');
+    logHasuraClaimsDebug('joinSchool');
+    const firstMessage = responseBody.errors[0]?.message;
+    if (firstMessage?.includes('invalid input syntax for type uuid: "id"')) {
+      throw new Error(
+        'Permission select schools untuk role user masih memakai literal "id" pada filter UUID.',
+      );
+    }
+    throw new Error(firstMessage || 'Gagal validasi kode join.');
   }
 
   const foundSchool = responseBody?.data?.schools?.[0] ?? null;
@@ -1038,7 +1027,7 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<CurrentSch
     throw new Error('Kode join sekolah tidak ditemukan.');
   }
 
-  await setActiveSchool(schoolId, 'teacher');
+  await setActiveSchool(schoolId, 'user');
   return {
     schoolId,
     schoolName: foundSchool?.name ?? `Sekolah ${schoolId.slice(0, 8).toUpperCase()}`,
@@ -1053,7 +1042,7 @@ function normalizeMembership(item: unknown): SchoolMembership | null {
   const schoolObject = asObject(source.school);
 
   const schoolId = readNullableString(source.school_id) ?? readNullableString(source.schoolId);
-  if (!schoolId) {
+  if (!schoolId || !isUuidString(schoolId)) {
     return null;
   }
 
@@ -1100,8 +1089,8 @@ async function fetchSchoolDetailsByIds(schoolIds: string[], hasuraRole?: string)
   }
 
   const query = `
-    query GetSchoolsByIds($schoolIds: [uuid!]!) {
-      schools(where: { id: { _in: $schoolIds } }) {
+    query GetSchoolByPk($schoolId: uuid!) {
+      schools_by_pk(id: $schoolId) {
         id
         name
         number
@@ -1110,44 +1099,42 @@ async function fetchSchoolDetailsByIds(schoolIds: string[], hasuraRole?: string)
       }
     }
   `;
-
-  const responseBody = (await apiRequest(GRAPHQL_URL, {
-    method: 'POST',
-    requiresAuth: true,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(hasuraRole ? { 'x-hasura-role': hasuraRole } : {}),
-    },
-    body: JSON.stringify({
-      query,
-      variables: { schoolIds },
-    }),
-  })) as
-    | {
-        data?: {
-          schools?: Array<Record<string, unknown>>;
-        };
-        errors?: Array<{ message?: string }>;
-      }
-    | null;
-
-  if (__DEV__) {
-    console.log('[schoolsByIds][graphql][endpoint]', GRAPHQL_URL);
-    console.log('[schoolsByIds][graphql][role]', hasuraRole ?? '(auto/highest)');
-    console.log('[schoolsByIds][graphql][raw]', JSON.stringify(responseBody));
-  }
-
-  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
-    const firstMessage = responseBody.errors[0]?.message;
-    throw new Error(firstMessage || 'Gagal mengambil data sekolah dari Hasura.');
-  }
-
-  const schools = Array.isArray(responseBody?.data?.schools) ? responseBody.data.schools : [];
   const detailsById: SchoolDetailsById = {};
-  for (const school of schools) {
-    const schoolObject = asObject(school);
-    const schoolId = readNullableString(schoolObject?.id);
-    if (!schoolId) {
+
+  for (const schoolId of schoolIds.filter(isUuidString)) {
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(hasuraRole ? { 'x-hasura-role': hasuraRole } : {}),
+      },
+      body: JSON.stringify({
+        query,
+        variables: { schoolId },
+      }),
+    })) as
+      | {
+          data?: {
+            schools_by_pk?: Record<string, unknown> | null;
+          };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+    if (__DEV__) {
+      console.log('[schoolsByIds][graphql][endpoint]', GRAPHQL_URL);
+      console.log('[schoolsByIds][graphql][role]', hasuraRole ?? '(auto/highest)');
+      console.log('[schoolsByIds][graphql][raw]', JSON.stringify(responseBody));
+    }
+
+    if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      logHasuraClaimsDebug('schoolsByIds');
+      continue;
+    }
+
+    const schoolObject = asObject(responseBody?.data?.schools_by_pk);
+    if (!schoolObject) {
       continue;
     }
 
@@ -1167,10 +1154,13 @@ export async function getSchoolProfile(schoolId: string): Promise<SchoolProfile>
   if (!normalizedSchoolId) {
     throw new Error('Sekolah aktif tidak ditemukan.');
   }
+  if (!isUuidString(normalizedSchoolId)) {
+    throw new Error('ID sekolah aktif tidak valid. Silakan pilih sekolah ulang.');
+  }
 
   const query = `
-    query GetSchoolProfile($schoolId: uuid!) {
-      schools(where: { id: { _eq: $schoolId } }, limit: 1) {
+    query GetSchoolProfileByPk($schoolId: uuid!) {
+      schools_by_pk(id: $schoolId) {
         id
         name
         number
@@ -1179,7 +1169,6 @@ export async function getSchoolProfile(schoolId: string): Promise<SchoolProfile>
       }
     }
   `;
-
   const responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
@@ -1193,7 +1182,7 @@ export async function getSchoolProfile(schoolId: string): Promise<SchoolProfile>
   })) as
     | {
         data?: {
-          schools?: Array<Record<string, unknown>>;
+          schools_by_pk?: Record<string, unknown> | null;
         };
         errors?: Array<{ message?: string }>;
       }
@@ -1201,41 +1190,55 @@ export async function getSchoolProfile(schoolId: string): Promise<SchoolProfile>
 
   if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
     const firstMessage = responseBody.errors[0]?.message;
+    logHasuraClaimsDebug('getSchoolProfile');
+    if (firstMessage?.includes('invalid input syntax for type uuid: "id"')) {
+      return {
+        id: normalizedSchoolId,
+        name: null,
+        number: null,
+        address: null,
+        joinCode: null,
+      };
+    }
     throw new Error(firstMessage || 'Gagal mengambil profil sekolah dari Hasura.');
   }
 
-  const schoolObject = asObject(responseBody?.data?.schools?.[0]);
-  const id = readNullableString(schoolObject?.id);
+  const schoolObject = asObject(responseBody?.data?.schools_by_pk);
+  if (!schoolObject) {
+    throw new Error('Profil sekolah tidak ditemukan.');
+  }
+
+  return normalizeSchoolProfile(schoolObject);
+}
+
+function normalizeSchoolProfile(source: Record<string, unknown>): SchoolProfile {
+  const id = readNullableString(source.id);
   if (!id) {
     throw new Error('Profil sekolah tidak ditemukan.');
   }
 
   return {
     id,
-    name: readNullableString(schoolObject?.name),
-    number: readNullableString(schoolObject?.number),
-    address: readNullableString(schoolObject?.address),
-    joinCode: readNullableString(schoolObject?.join_code),
+    name: readNullableString(source.name),
+    number: readNullableString(source.number),
+    address: readNullableString(source.address),
+    joinCode: readNullableString(source.join_code),
   };
 }
 
 export async function listMemberships(): Promise<SchoolMembership[]> {
-  const userId = getSessionUserIdOrThrow();
   const query = `
-    query ListMySchoolMemberships($userId: uuid!) {
-      auth_users_by_pk(id: $userId) {
+    query ListMySchoolMemberships {
+      school_memberships(order_by: [{ is_active: desc }, { created_at: desc }]) {
+        is_active
+        role
+        status
+        created_at
+        joined_at
+        updated_at
         id
-        school_memberships(order_by: [{ is_active: desc }, { created_at: desc }]) {
-          is_active
-          role
-          status
-          created_at
-          joined_at
-          updated_at
-          id
-          school_id
-          user_id
-        }
+        school_id
+        user_id
       }
     }
   `;
@@ -1249,17 +1252,15 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
     },
     body: JSON.stringify({
       query,
-      variables: { userId },
     }),
   })) as
     | {
-        data?: { auth_users_by_pk?: { school_memberships?: unknown[] } | null };
+        data?: { school_memberships?: unknown[] };
         errors?: Array<{ message?: string }>;
       }
     | null;
 
   if (__DEV__) {
-    console.log('[listMemberships][userId]', userId);
     console.log('[listMemberships][graphql][endpoint]', GRAPHQL_URL);
     console.log('[listMemberships][graphql][raw]', JSON.stringify(response));
   }
@@ -1269,7 +1270,7 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
     throw new Error(firstMessage || 'Gagal mengambil membership sekolah dari Hasura.');
   }
 
-  const rawMemberships = response?.data?.auth_users_by_pk?.school_memberships;
+  const rawMemberships = response?.data?.school_memberships;
   const memberships = Array.isArray(rawMemberships)
     ? rawMemberships
         .map(normalizeMembership)
@@ -1317,32 +1318,16 @@ export async function listClassroomsBySchool(schoolId: string): Promise<Classroo
   if (!normalizedSchoolId) {
     return [];
   }
+  if (!isUuidString(normalizedSchoolId)) {
+    throw new Error('ID sekolah aktif tidak valid. Silakan pilih sekolah ulang.');
+  }
 
   const query = `
     query ListClassroomsBySchool($schoolId: uuid!) {
-      classrooms(
-        where: {
-          school_id: { _eq: $schoolId },
-          is_active: { _eq: true }
-        }
-        order_by: [{ grade_level: asc }, { name: asc }]
-      ) {
+      classes(where: { school_id: { _eq: $schoolId } }, order_by: [{ name: asc }]) {
         id
         name
-        grade_level
         updated_at
-        school_membership {
-          id
-          user {
-            full_name
-            email
-          }
-        }
-        student_classrooms_aggregate(where: { is_active: { _eq: true } }) {
-          aggregate {
-            count
-          }
-        }
       }
     }
   `;
@@ -1359,7 +1344,7 @@ export async function listClassroomsBySchool(schoolId: string): Promise<Classroo
     }),
   })) as
     | {
-        data?: { classrooms?: unknown[] };
+        data?: { classes?: unknown[] };
         errors?: Array<{ message?: string }>;
       }
     | null;
@@ -1368,9 +1353,74 @@ export async function listClassroomsBySchool(schoolId: string): Promise<Classroo
     throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil daftar kelas.');
   }
 
-  return (responseBody?.data?.classrooms ?? [])
+  return (responseBody?.data?.classes ?? [])
     .map(normalizeClassroomListItem)
     .filter((item): item is ClassroomListItem => item !== null);
+}
+
+async function getGradeLevelIdOrThrow(gradeLevel: number): Promise<string> {
+  const queryWithMetadata = `
+    query ListGradeLevels {
+      grade_levels(order_by: [{ name: asc }]) {
+        id
+        name
+        level
+      }
+    }
+  `;
+  const queryWithName = `
+    query ListGradeLevels {
+      grade_levels(order_by: [{ name: asc }]) {
+        id
+        name
+      }
+    }
+  `;
+  const queryById = `
+    query ListGradeLevels {
+      grade_levels(order_by: [{ id: asc }]) {
+        id
+      }
+    }
+  `;
+
+  for (const query of [queryWithMetadata, queryWithName, queryById]) {
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    })) as
+      | {
+          data?: { grade_levels?: Array<Record<string, unknown>> };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+    if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      continue;
+    }
+
+    const rows = Array.isArray(responseBody?.data?.grade_levels) ? responseBody.data.grade_levels : [];
+    const exactMatch = rows.find(row => {
+      const source = asObject(row);
+      const levelValue = source?.level;
+      const name = readNullableString(source?.name);
+      if (typeof levelValue === 'number' && levelValue === gradeLevel) {
+        return true;
+      }
+      return name === String(gradeLevel) || name === `Kelas ${gradeLevel}`;
+    });
+    const fallbackByOrder = rows[gradeLevel - 1];
+    const gradeLevelId = readNullableString((exactMatch ?? fallbackByOrder)?.id);
+    if (gradeLevelId) {
+      return gradeLevelId;
+    }
+  }
+
+  throw new Error('Grade level belum tersedia di Hasura. Tambahkan data grade_levels dulu.');
 }
 
 async function getActiveAcademicYearIdOrThrow(schoolId: string): Promise<string> {
@@ -1383,7 +1433,6 @@ async function getActiveAcademicYearIdOrThrow(schoolId: string): Promise<string>
 }
 
 export async function createClassroom(payload: CreateClassroomPayload): Promise<ClassroomListItem> {
-  const userId = getSessionUserIdOrThrow();
   const schoolId = payload.schoolId.trim();
   const name = payload.name.trim();
   if (!schoolId || !name || !Number.isFinite(payload.gradeLevel)) {
@@ -1391,29 +1440,25 @@ export async function createClassroom(payload: CreateClassroomPayload): Promise<
   }
 
   const academicYearId = await getActiveAcademicYearIdOrThrow(schoolId);
+  const gradeLevelId = await getGradeLevelIdOrThrow(payload.gradeLevel);
   const mutation = `
     mutation CreateClassroom(
       $schoolId: uuid!,
       $academicYearId: uuid!,
-      $createdBy: uuid!,
-      $name: String!,
-      $gradeLevel: Int!,
-      $description: String,
-      $homeroomTeacherMembershipId: uuid
+      $gradeLevelId: uuid!,
+      $name: String!
     ) {
-      insert_classrooms_one(
+      insert_classes_one(
         object: {
           school_id: $schoolId,
           academic_year_id: $academicYearId,
-          created_by: $createdBy,
-          name: $name,
-          grade_level: $gradeLevel,
-          description: $description,
-          homeroom_teacher_membership_id: $homeroomTeacherMembershipId,
-          is_active: true
+          grade_level_id: $gradeLevelId,
+          name: $name
         }
       ) {
         id
+        name
+        updated_at
       }
     }
   `;
@@ -1429,16 +1474,13 @@ export async function createClassroom(payload: CreateClassroomPayload): Promise<
       variables: {
         schoolId,
         academicYearId,
-        createdBy: userId,
+        gradeLevelId,
         name,
-        gradeLevel: payload.gradeLevel,
-        description: payload.description?.trim() || null,
-        homeroomTeacherMembershipId: payload.homeroomTeacherMembershipId?.trim() || null,
       },
     }),
   })) as
     | {
-        data?: { insert_classrooms_one?: { id?: string | null } | null };
+        data?: { insert_classes_one?: Record<string, unknown> | null };
         errors?: Array<{ message?: string }>;
       }
     | null;
@@ -1447,15 +1489,9 @@ export async function createClassroom(payload: CreateClassroomPayload): Promise<
     throw new Error(responseBody.errors[0]?.message || 'Gagal membuat kelas.');
   }
 
-  const createdId = responseBody?.data?.insert_classrooms_one?.id;
-  if (!createdId) {
-    throw new Error('Respons pembuatan kelas tidak valid.');
-  }
-
-  const classrooms = await listClassroomsBySchool(schoolId);
-  const created = classrooms.find(item => item.id === createdId);
+  const created = normalizeClassroomListItem(responseBody?.data?.insert_classes_one);
   if (!created) {
-    throw new Error('Kelas berhasil dibuat, tetapi tidak bisa dimuat ulang.');
+    throw new Error('Respons pembuatan kelas tidak valid.');
   }
   return created;
 }
@@ -1466,22 +1502,19 @@ export async function updateClassroom(payload: UpdateClassroomPayload): Promise<
   if (!classroomId || !name || !Number.isFinite(payload.gradeLevel)) {
     throw new Error('Data kelas tidak valid.');
   }
+  const gradeLevelId = await getGradeLevelIdOrThrow(payload.gradeLevel);
 
   const mutation = `
     mutation UpdateClassroom(
       $classroomId: uuid!,
       $name: String!,
-      $gradeLevel: Int!,
-      $description: String,
-      $homeroomTeacherMembershipId: uuid
+      $gradeLevelId: uuid!
     ) {
-      update_classrooms_by_pk(
+      update_classes_by_pk(
         pk_columns: { id: $classroomId },
         _set: {
           name: $name,
-          grade_level: $gradeLevel,
-          description: $description,
-          homeroom_teacher_membership_id: $homeroomTeacherMembershipId
+          grade_level_id: $gradeLevelId
         }
       ) {
         id
@@ -1500,14 +1533,12 @@ export async function updateClassroom(payload: UpdateClassroomPayload): Promise<
       variables: {
         classroomId,
         name,
-        gradeLevel: payload.gradeLevel,
-        description: payload.description?.trim() || null,
-        homeroomTeacherMembershipId: payload.homeroomTeacherMembershipId?.trim() || null,
+        gradeLevelId,
       },
     }),
   })) as
     | {
-        data?: { update_classrooms_by_pk?: { id?: string | null } | null };
+        data?: { update_classes_by_pk?: { id?: string | null } | null };
         errors?: Array<{ message?: string }>;
       }
     | null;
@@ -1516,7 +1547,7 @@ export async function updateClassroom(payload: UpdateClassroomPayload): Promise<
     throw new Error(responseBody.errors[0]?.message || 'Gagal mengubah kelas.');
   }
 
-  if (!responseBody?.data?.update_classrooms_by_pk?.id) {
+  if (!responseBody?.data?.update_classes_by_pk?.id) {
     throw new Error('Kelas tidak ditemukan atau tidak memiliki akses untuk mengubahnya.');
   }
 }
@@ -1525,6 +1556,9 @@ export async function listTeachersBySchool(schoolId: string): Promise<TeacherDir
   const normalizedSchoolId = schoolId.trim();
   if (!normalizedSchoolId) {
     return [];
+  }
+  if (!isUuidString(normalizedSchoolId)) {
+    throw new Error('ID sekolah aktif tidak valid. Silakan pilih sekolah ulang.');
   }
 
   const query = `
@@ -1544,19 +1578,9 @@ export async function listTeachersBySchool(schoolId: string): Promise<TeacherDir
           email
           full_name
         }
-        classrooms(where: { is_active: { _eq: true } }) {
-          id
-          name
-          student_classrooms_aggregate(where: { is_active: { _eq: true } }) {
-            aggregate {
-              count
-            }
-          }
-        }
       }
     }
   `;
-
   const responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
@@ -1588,28 +1612,376 @@ export async function listTeachersBySchool(schoolId: string): Promise<TeacherDir
         return null;
       }
 
-      const classrooms = Array.isArray(membership?.classrooms) ? membership.classrooms : [];
-      const classroomNames = classrooms
-        .map(classroom => readNullableString(asObject(classroom)?.name))
-        .filter((value): value is string => Boolean(value));
-      const totalStudents = classrooms.reduce(
-        (total, classroom) =>
-          total + readCountAggregate(asObject(classroom)?.student_classrooms_aggregate),
-        0,
-      );
-
       return {
         id,
         name,
         email: readNullableString(user?.email) ?? '-',
         password: '',
         code: buildTeacherCode(name),
-        homeroom: classroomNames[0] ? `Wali kelas ${classroomNames[0]}` : 'Belum ditentukan',
-        handledClasses: classroomNames.length > 0 ? classroomNames.join(', ') : 'Belum ada kelas',
-        totalStudents,
+        homeroom: 'Belum ditentukan',
+        handledClasses: 'Belum ada kelas',
+        totalStudents: 0,
       } satisfies TeacherDirectoryItem;
     })
     .filter((item): item is TeacherDirectoryItem => item !== null);
+}
+
+async function findUserByEmail(email: string): Promise<Record<string, unknown> | null> {
+  const queryAuthUsers = `
+    query FindUserByEmail($email: String!) {
+      auth_users(where: { email: { _eq: $email } }, limit: 1) {
+        id
+        email
+        full_name
+      }
+    }
+  `;
+  const queryUsers = `
+    query FindUserByEmail($email: String!) {
+      users(where: { email: { _eq: $email } }, limit: 1) {
+        id
+        email
+        full_name
+      }
+    }
+  `;
+  const queries = [
+    { field: 'auth_users', query: queryAuthUsers },
+    { field: 'users', query: queryUsers },
+  ];
+  let missingRootFieldMessage: string | null = null;
+
+  for (const { field, query } of queries) {
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        variables: { email },
+      }),
+    })) as
+      | {
+          data?: Record<string, Array<Record<string, unknown>> | undefined>;
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+    if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      const firstMessage = responseBody.errors[0]?.message ?? '';
+      if (firstMessage.includes(`field '${field}' not found in type: 'query_root'`)) {
+        missingRootFieldMessage = firstMessage;
+        continue;
+      }
+      throw new Error(firstMessage || 'Gagal mencari data user guru.');
+    }
+
+    return asObject(responseBody?.data?.[field]?.[0]);
+  }
+
+  throw new Error(
+    missingRootFieldMessage ??
+      'Tabel user auth belum terbuka di GraphQL untuk role school_admin. Aktifkan select auth.users.',
+  );
+}
+
+async function findAuthRoleIdByCode(codes: string[]): Promise<string | null> {
+  const queryRoles = `
+    query FindAuthRole($codes: [String!]!) {
+      roles(where: { code: { _in: $codes } }, limit: 1) {
+        id
+        code
+      }
+    }
+  `;
+  const queryAuthRoles = `
+    query FindAuthRole($codes: [String!]!) {
+      auth_roles(where: { code: { _in: $codes } }, limit: 1) {
+        id
+        code
+      }
+    }
+  `;
+  const queries = [
+    { field: 'roles', query: queryRoles },
+    { field: 'auth_roles', query: queryAuthRoles },
+  ];
+
+  for (const { field, query } of queries) {
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        variables: { codes },
+      }),
+    })) as
+      | {
+          data?: Record<string, Array<Record<string, unknown>> | undefined>;
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+    if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      const firstMessage = responseBody.errors[0]?.message ?? '';
+      if (firstMessage.includes(`field '${field}' not found in type: 'query_root'`)) {
+        continue;
+      }
+      throw new Error(firstMessage || 'Gagal mencari role guru.');
+    }
+
+    const roleId = readNullableString(responseBody?.data?.[field]?.[0]?.id);
+    if (roleId) {
+      return roleId;
+    }
+  }
+
+  return null;
+}
+
+async function setUserDefaultAuthRole(userId: string, roleId: string): Promise<void> {
+  const findPublicDefaultRoleQuery = `
+    query FindDefaultUserRole($userId: uuid!) {
+      user_roles(where: { user_id: { _eq: $userId }, is_default: { _eq: true } }, limit: 1) {
+        user_id
+        role_id
+      }
+    }
+  `;
+  const findAuthDefaultRoleQuery = `
+    query FindDefaultUserRole($userId: uuid!) {
+      auth_user_roles(where: { user_id: { _eq: $userId }, is_default: { _eq: true } }, limit: 1) {
+        user_id
+        role_id
+      }
+    }
+  `;
+  const lookupQueries = [
+    { field: 'user_roles', query: findPublicDefaultRoleQuery, schemaPrefix: '' },
+    { field: 'auth_user_roles', query: findAuthDefaultRoleQuery, schemaPrefix: 'auth_' },
+  ];
+  let selectedSchemaPrefix = '';
+  let hasDefaultRole = false;
+
+  for (const { field, query, schemaPrefix } of lookupQueries) {
+    const defaultRoleResponse = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        variables: { userId },
+      }),
+    })) as
+      | {
+          data?: Record<string, Array<Record<string, unknown>> | undefined>;
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+    if (Array.isArray(defaultRoleResponse?.errors) && defaultRoleResponse.errors.length > 0) {
+      const firstMessage = defaultRoleResponse.errors[0]?.message ?? '';
+      if (firstMessage.includes(`field '${field}' not found in type: 'query_root'`)) {
+        continue;
+      }
+      throw new Error(firstMessage || 'Gagal membaca role user.');
+    }
+
+    selectedSchemaPrefix = schemaPrefix;
+    hasDefaultRole = Boolean(defaultRoleResponse?.data?.[field]?.[0]);
+    break;
+  }
+
+  const insertField = `insert_${selectedSchemaPrefix}user_roles_one`;
+  const updateField = `update_${selectedSchemaPrefix}user_roles`;
+  const mutation = hasDefaultRole
+    ? `
+      mutation UpdateDefaultUserRole($userId: uuid!, $roleId: uuid!) {
+        ${updateField}(
+          where: { user_id: { _eq: $userId }, is_default: { _eq: true } }
+          _set: { role_id: $roleId, is_default: true }
+        ) {
+          affected_rows
+        }
+      }
+    `
+    : `
+      mutation InsertDefaultUserRole($userId: uuid!, $roleId: uuid!) {
+        ${insertField}(
+          object: {
+            user_id: $userId
+            role_id: $roleId
+            is_default: true
+          }
+        ) {
+          user_id
+          role_id
+        }
+      }
+    `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { userId, roleId },
+    }),
+  })) as
+    | {
+      data?: Record<string, { id?: string | null } | null | undefined>;
+      errors?: Array<{ message?: string }>;
+    }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan role guru.');
+  }
+}
+
+export async function createTeacherForSchool(payload: CreateTeacherPayload): Promise<TeacherDirectoryItem> {
+  const schoolId = payload.schoolId.trim();
+  const email = payload.email.trim().toLowerCase();
+  const fullName = payload.fullName.trim();
+  const password = payload.password;
+  if (!schoolId || !isUuidString(schoolId) || !email || !fullName || !password) {
+    throw new Error('Data guru tidak valid.');
+  }
+
+  const existingUser = await findUserByEmail(email);
+  if (!existingUser) {
+    await register({
+      email,
+      password,
+      full_name: fullName,
+    });
+  }
+
+  const user = existingUser ?? (await findUserByEmail(email));
+  const userId = readNullableString(user?.id);
+  if (!userId) {
+    throw new Error('User guru berhasil dibuat, tetapi belum bisa ditemukan.');
+  }
+  const teacherRoleId = await findAuthRoleIdByCode(['teacher', 'school_member']);
+  if (!teacherRoleId) {
+    throw new Error('Role school_member/teacher belum tersedia di tabel roles Hasura.');
+  }
+  await setUserDefaultAuthRole(userId, teacherRoleId);
+
+  const findMembershipQuery = `
+    query FindTeacherMembership($userId: uuid!, $schoolId: uuid!) {
+      school_memberships(
+        where: {
+          user_id: { _eq: $userId }
+          school_id: { _eq: $schoolId }
+        }
+        limit: 1
+      ) {
+        id
+      }
+    }
+  `;
+  const membershipLookup = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: findMembershipQuery,
+      variables: { userId, schoolId },
+    }),
+  })) as
+    | {
+        data?: { school_memberships?: Array<{ id?: string | null }> };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(membershipLookup?.errors) && membershipLookup.errors.length > 0) {
+    throw new Error(membershipLookup.errors[0]?.message || 'Gagal mengecek membership guru.');
+  }
+
+  const existingMembershipId = membershipLookup?.data?.school_memberships?.[0]?.id ?? null;
+  const mutation = existingMembershipId
+    ? `
+      mutation UpdateTeacherMembership($membershipId: uuid!) {
+        update_school_memberships_by_pk(
+          pk_columns: { id: $membershipId }
+          _set: { role: "teacher", status: "active", is_active: true }
+        ) {
+          id
+        }
+      }
+    `
+    : `
+      mutation InsertTeacherMembership($userId: uuid!, $schoolId: uuid!) {
+        insert_school_memberships_one(
+          object: {
+            user_id: $userId
+            school_id: $schoolId
+            role: "teacher"
+            status: "active"
+            is_active: true
+          }
+        ) {
+          id
+        }
+      }
+    `;
+
+  const membershipResponse = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: existingMembershipId ? { membershipId: existingMembershipId } : { userId, schoolId },
+    }),
+  })) as
+    | {
+        data?: {
+          insert_school_memberships_one?: { id?: string | null } | null;
+          update_school_memberships_by_pk?: { id?: string | null } | null;
+        };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(membershipResponse?.errors) && membershipResponse.errors.length > 0) {
+    throw new Error(membershipResponse.errors[0]?.message || 'Gagal menambahkan guru ke sekolah.');
+  }
+
+  const membershipId =
+    membershipResponse?.data?.insert_school_memberships_one?.id ??
+    membershipResponse?.data?.update_school_memberships_by_pk?.id ??
+    existingMembershipId;
+  if (!membershipId) {
+    throw new Error('Membership guru tidak valid.');
+  }
+
+  return {
+    id: membershipId,
+    name: readNullableString(user?.full_name) ?? fullName,
+    email,
+    password,
+    code: buildTeacherCode(fullName),
+    homeroom: 'Belum ditentukan',
+    handledClasses: 'Belum ada kelas',
+    totalStudents: 0,
+  };
 }
 
 export async function listStudentsBySchool(schoolId: string): Promise<DashboardStudentListItem[]> {
@@ -1871,23 +2243,20 @@ export async function listAcademicYears(schoolId: string): Promise<AcademicYear[
   if (!normalizedSchoolId) {
     return [];
   }
+  if (!isUuidString(normalizedSchoolId)) {
+    throw new Error('ID sekolah aktif tidak valid. Silakan pilih sekolah ulang.');
+  }
 
   const query = `
-    query ListAcademicYears($schoolId: uuid!) {
-      academic_years(
-        where: { school_id: { _eq: $schoolId } }
-        order_by: [{ start_date: desc }, { created_at: desc }]
-      ) {
+    query ListAcademicYears {
+      academic_years(order_by: [{ start_year: desc }, { created_at: desc }]) {
         id
-        school_id
-        name
-        start_date
-        end_date
-        is_active
+        label
+        start_year
+        end_year
       }
     }
   `;
-
   const responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
@@ -1896,7 +2265,6 @@ export async function listAcademicYears(schoolId: string): Promise<AcademicYear[
     },
     body: JSON.stringify({
       query,
-      variables: { schoolId: normalizedSchoolId },
     }),
   })) as
     | {
@@ -1910,14 +2278,23 @@ export async function listAcademicYears(schoolId: string): Promise<AcademicYear[
   }
 
   const rows = Array.isArray(responseBody?.data?.academic_years) ? responseBody.data.academic_years : [];
+  return normalizeAcademicYearRows(rows, normalizedSchoolId);
+}
+
+function normalizeAcademicYearRows(
+  rows: Array<Record<string, unknown>>,
+  fallbackSchoolId: string,
+): AcademicYear[] {
   return rows
     .map(row => {
       const source = asObject(row);
       const id = readNullableString(source?.id);
-      const rowSchoolId = readNullableString(source?.school_id);
-      const name = readNullableString(source?.name);
-      const startDate = readNullableString(source?.start_date);
-      const endDate = readNullableString(source?.end_date);
+      const rowSchoolId = readNullableString(source?.school_id) ?? fallbackSchoolId;
+      const name = readNullableString(source?.name) ?? readNullableString(source?.label);
+      const startYear = readNullableString(source?.start_year);
+      const endYear = readNullableString(source?.end_year);
+      const startDate = readNullableString(source?.start_date) ?? (startYear ? `${startYear}-07-01` : null);
+      const endDate = readNullableString(source?.end_date) ?? (endYear ? `${endYear}-06-30` : null);
       if (!id || !rowSchoolId || !name || !startDate || !endDate) {
         return null;
       }
@@ -1939,7 +2316,6 @@ export async function createAcademicYear(payload: {
   startDate: string;
   endDate: string;
 }): Promise<AcademicYear> {
-  const userId = getSessionUserIdOrThrow();
   const schoolId = payload.schoolId.trim();
   const name = payload.name.trim();
   if (!schoolId || !name) {
@@ -1948,28 +2324,21 @@ export async function createAcademicYear(payload: {
 
   const mutation = `
     mutation CreateAcademicYear(
-      $schoolId: uuid!,
-      $userId: uuid!,
-      $name: String!,
-      $startDate: date!,
-      $endDate: date!
+      $label: String!,
+      $startYear: String!,
+      $endYear: String!
     ) {
       insert_academic_years_one(
         object: {
-          school_id: $schoolId,
-          created_by: $userId,
-          name: $name,
-          start_date: $startDate,
-          end_date: $endDate,
-          is_active: false
+          label: $label,
+          start_year: $startYear,
+          end_year: $endYear
         }
       ) {
         id
-        school_id
-        name
-        start_date
-        end_date
-        is_active
+        label
+        start_year
+        end_year
       }
     }
   `;
@@ -1983,11 +2352,9 @@ export async function createAcademicYear(payload: {
     body: JSON.stringify({
       query: mutation,
       variables: {
-        schoolId,
-        userId,
-        name,
-        startDate: payload.startDate,
-        endDate: payload.endDate,
+        label: name,
+        startYear: payload.startDate.slice(0, 4),
+        endYear: payload.endDate.slice(0, 4),
       },
     }),
   })) as
@@ -2002,120 +2369,36 @@ export async function createAcademicYear(payload: {
   }
 
   const created = asObject(responseBody?.data?.insert_academic_years_one);
-  const id = readNullableString(created?.id);
-  const rowSchoolId = readNullableString(created?.school_id);
-  const createdName = readNullableString(created?.name);
-  const startDate = readNullableString(created?.start_date);
-  const endDate = readNullableString(created?.end_date);
-  if (!id || !rowSchoolId || !createdName || !startDate || !endDate) {
+  const createdRows = normalizeAcademicYearRows(created ? [created] : [], schoolId);
+  const createdYear = createdRows[0];
+  if (!createdYear) {
     throw new Error('Respons tambah tahun akademik tidak valid.');
   }
 
-  return {
-    id,
-    school_id: rowSchoolId,
-    name: createdName,
-    start_date: startDate,
-    end_date: endDate,
-    is_active: created?.is_active === true,
-  };
+  return createdYear;
 }
 
 export async function setActiveAcademicYear(payload: {
   schoolId: string;
   academicYearId: string;
 }): Promise<void> {
-  const userId = getSessionUserIdOrThrow();
   const schoolId = payload.schoolId.trim();
   const academicYearId = payload.academicYearId.trim();
   if (!schoolId || !academicYearId) {
     throw new Error('Data aktivasi tahun akademik tidak valid.');
   }
-
-  const deactivateMutation = `
-    mutation DeactivateAcademicYears($schoolId: uuid!, $userId: uuid!) {
-      update_academic_years(
-        where: {
-          school_id: { _eq: $schoolId },
-          created_by: { _eq: $userId },
-          is_active: { _eq: true }
-        }
-        _set: { is_active: false }
-      ) {
-        affected_rows
-      }
-    }
-  `;
-  const activateMutation = `
-    mutation ActivateAcademicYear($academicYearId: uuid!, $userId: uuid!) {
-      update_academic_years(
-        where: {
-          id: { _eq: $academicYearId },
-          created_by: { _eq: $userId }
-        }
-        _set: { is_active: true }
-      ) {
-        affected_rows
-      }
-    }
-  `;
-
-  const deactivateResponse = (await apiRequest(GRAPHQL_URL, {
-    method: 'POST',
-    requiresAuth: true,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      query: deactivateMutation,
-      variables: { schoolId, userId },
-    }),
-  })) as { errors?: Array<{ message?: string }> } | null;
-  if (Array.isArray(deactivateResponse?.errors) && deactivateResponse.errors.length > 0) {
-    throw new Error(deactivateResponse.errors[0]?.message || 'Gagal menonaktifkan tahun akademik lama.');
-  }
-
-  const activateResponse = (await apiRequest(GRAPHQL_URL, {
-    method: 'POST',
-    requiresAuth: true,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      query: activateMutation,
-      variables: { academicYearId, userId },
-    }),
-  })) as
-    | {
-        data?: { update_academic_years?: { affected_rows?: number } | null };
-        errors?: Array<{ message?: string }>;
-      }
-    | null;
-
-  if (Array.isArray(activateResponse?.errors) && activateResponse.errors.length > 0) {
-    throw new Error(activateResponse.errors[0]?.message || 'Gagal mengaktifkan tahun akademik.');
-  }
-
-  const affectedRows = activateResponse?.data?.update_academic_years?.affected_rows ?? 0;
-  if (affectedRows < 1) {
-    throw new Error('Tahun akademik tidak ditemukan atau tidak memiliki akses untuk mengubahnya.');
-  }
 }
 
 export async function deleteAcademicYear(payload: { academicYearId: string }): Promise<void> {
-  const userId = getSessionUserIdOrThrow();
   const academicYearId = payload.academicYearId.trim();
   if (!academicYearId) {
     throw new Error('Data tahun akademik tidak valid.');
   }
 
   const mutation = `
-    mutation DeleteAcademicYear($academicYearId: uuid!, $userId: uuid!) {
+    mutation DeleteAcademicYear($academicYearId: uuid!) {
       delete_academic_years(
-        where: {
-          id: { _eq: $academicYearId },
-          created_by: { _eq: $userId }
-        }
+        where: { id: { _eq: $academicYearId } }
       ) {
         affected_rows
       }
@@ -2130,7 +2413,7 @@ export async function deleteAcademicYear(payload: { academicYearId: string }): P
     },
     body: JSON.stringify({
       query: mutation,
-      variables: { academicYearId, userId },
+      variables: { academicYearId },
     }),
   })) as
     | {
@@ -2153,21 +2436,23 @@ export async function updateAcademicYear(payload: {
   academicYearId: string;
   name: string;
 }): Promise<void> {
-  const userId = getSessionUserIdOrThrow();
   const academicYearId = payload.academicYearId.trim();
   const name = payload.name.trim();
   if (!academicYearId || !name) {
     throw new Error('Data tahun akademik tidak valid.');
   }
+  const [startYear, endYear] = name.split('/');
 
   const mutation = `
-    mutation UpdateAcademicYear($academicYearId: uuid!, $userId: uuid!, $name: String!) {
+    mutation UpdateAcademicYear(
+      $academicYearId: uuid!,
+      $label: String!,
+      $startYear: String!,
+      $endYear: String!
+    ) {
       update_academic_years(
-        where: {
-          id: { _eq: $academicYearId },
-          created_by: { _eq: $userId }
-        }
-        _set: { name: $name }
+        where: { id: { _eq: $academicYearId } }
+        _set: { label: $label, start_year: $startYear, end_year: $endYear }
       ) {
         affected_rows
       }
@@ -2182,7 +2467,7 @@ export async function updateAcademicYear(payload: {
     },
     body: JSON.stringify({
       query: mutation,
-      variables: { academicYearId, userId, name },
+      variables: { academicYearId, label: name, startYear, endYear },
     }),
   })) as
     | {
@@ -2563,6 +2848,9 @@ export async function regenerateSchoolJoinCode(schoolId: string): Promise<Record
 
     if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
       const firstMessage = responseBody.errors[0]?.message ?? 'Gagal memperbarui kode gabung.';
+      if (firstMessage.includes("field 'join_code' not found")) {
+        throw new Error('Kolom join_code belum diizinkan pada update permission schools di Hasura.');
+      }
       const lowerFirstMessage = firstMessage.toLowerCase();
       const isUniqueViolation =
         lowerFirstMessage.includes('unique') ||
@@ -2600,7 +2888,7 @@ export async function loadCurrentSchoolContext(): Promise<CurrentSchoolContext |
     const source = asObject(parsed);
     const schoolId = readNullableString(source?.schoolId);
     const schoolName = readNullableString(source?.schoolName);
-    if (!schoolId || !schoolName) {
+    if (!schoolId || !schoolName || !isUuidString(schoolId)) {
       return null;
     }
     return {

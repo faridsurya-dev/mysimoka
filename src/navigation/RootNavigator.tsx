@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
@@ -116,6 +116,15 @@ function toDisplayValue(value: string | null | undefined, fallback: string): str
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : fallback;
+}
+
+function isUuidString(value: string | null | undefined): value is string {
+  if (!value) {
+    return false;
+  }
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  );
 }
 
 function readStringOrNumberValue(source: UnknownObject | null, keys: string[]): string | null {
@@ -387,7 +396,7 @@ export function RootNavigator() {
     return memberships;
   };
 
-  const refreshActiveSchoolProfile = async (schoolId: string): Promise<void> => {
+  const refreshActiveSchoolProfile = useCallback(async (schoolId: string): Promise<void> => {
     const school = await getSchoolProfile(schoolId);
     setSchoolMemberships(previous =>
       previous.map(item =>
@@ -404,12 +413,12 @@ export function RootNavigator() {
       ),
     );
     setCurrentSchoolId(school.id);
-    setCurrentSchool(school.name ?? DEFAULT_SCHOOL_NAME);
+    setCurrentSchool(school.name ?? currentSchool);
     await saveCurrentSchoolContext({
       schoolId: school.id,
-      schoolName: school.name ?? DEFAULT_SCHOOL_NAME,
+      schoolName: school.name ?? currentSchool,
     });
-  };
+  }, [currentSchool]);
 
   const checkStartupHealth = async (): Promise<void> => {
     const controller = new AbortController();
@@ -455,6 +464,14 @@ export function RootNavigator() {
       setIsLoadingSchoolProfile(false);
       return;
     }
+    if (!isUuidString(profileData.schoolId)) {
+      clearCurrentSchoolContext().catch(() => undefined);
+      setCurrentSchoolId(null);
+      setSchoolProfileLoadError('ID sekolah aktif tidak valid. Silakan pilih sekolah ulang.');
+      refreshSchoolMemberships().catch(() => undefined);
+      setIsLoadingSchoolProfile(false);
+      return;
+    }
 
     refreshActiveSchoolProfile(profileData.schoolId)
       .then(() => {
@@ -479,10 +496,10 @@ export function RootNavigator() {
     return () => {
       isMounted = false;
     };
-  }, [activeTab, isAuthenticated, profileData.schoolId]);
+  }, [activeTab, isAuthenticated, profileData.schoolId, refreshActiveSchoolProfile]);
 
   useEffect(() => {
-    if (activeTab !== 'profile' || !profileData.schoolId) {
+    if (activeTab !== 'profile' || !profileData.schoolId || !isUuidString(profileData.schoolId)) {
       setAcademicYears([]);
       setAcademicYearActionError(null);
       return;
@@ -986,7 +1003,7 @@ export function RootNavigator() {
             onBackToProfile: () => setProfileRoute('profile-overview'),
             onOpenEditProfile: () => setProfileRoute('edit-profile'),
             onOpenEditSchoolProfile: () => {
-              if (!profileData.canEditSchoolProfile) {
+              if (!profileData.canEditSchoolProfile || !isUuidString(profileData.schoolId)) {
                 return;
               }
               setSchoolActionError(null);
@@ -996,7 +1013,11 @@ export function RootNavigator() {
             onOpenEditEmail: () => setProfileRoute('edit-email'),
             onOpenEditPassword: () => setProfileRoute('edit-password'),
             onRegenerateJoinCode: () => {
-              if (!profileData.canEditSchoolProfile || !profileData.schoolId || isRegeneratingJoinCode) {
+              if (
+                !profileData.canEditSchoolProfile ||
+                !isUuidString(profileData.schoolId) ||
+                isRegeneratingJoinCode
+              ) {
                 return;
               }
 
@@ -1018,7 +1039,7 @@ export function RootNavigator() {
                 });
             },
             onAddAcademicYear: (name: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -1059,7 +1080,7 @@ export function RootNavigator() {
                 });
             },
             onSetActiveAcademicYear: (academicYearId: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -1085,7 +1106,7 @@ export function RootNavigator() {
                 });
             },
             onUpdateAcademicYear: (academicYearId: string, name: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -1121,7 +1142,7 @@ export function RootNavigator() {
                 });
             },
             onDeleteAcademicYear: (academicYearId: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -1144,7 +1165,7 @@ export function RootNavigator() {
                 });
             },
             onSchoolProfileSaved: () => {
-              if (!profileData.schoolId) {
+              if (!isUuidString(profileData.schoolId)) {
                 return;
               }
               refreshActiveSchoolProfile(profileData.schoolId)

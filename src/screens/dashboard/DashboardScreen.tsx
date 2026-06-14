@@ -382,7 +382,7 @@ export function DashboardScreen({
           styles.stickySearchWrap,
           {
             paddingTop: insets.top + spacing[8],
-            marginTop: -(insets.top + spacing[8]),
+            marginTop: -spacing[32],
           },
         ]}>
         <View style={styles.studentSearchCard}>
@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing[12],
     paddingTop: spacing[4],
-    paddingBottom: spacing[8],
+    paddingBottom: spacing[12],
   },
   schoolHeroEyebrow: {
     ...typography.labelMd,
@@ -932,7 +932,7 @@ const styles = StyleSheet.create({
     marginHorizontal: -spacing[16],
     backgroundColor: colors.brand.primary500,
     paddingHorizontal: spacing[20],
-    paddingBottom: spacing[16],
+    paddingBottom: spacing[12],
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
     shadowColor: colors.brand.primary900,
@@ -1152,8 +1152,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border.subtle,
     backgroundColor: colors.surface.secondary,
     paddingHorizontal: spacing[16],
-    paddingTop: spacing[8],
-    paddingBottom: spacing[8],
+    paddingTop: spacing[4],
+    paddingBottom: spacing[4],
     gap: spacing[12],
     shadowColor: '#1F2D3D',
     shadowOpacity: 0.04,
@@ -1163,7 +1163,7 @@ const styles = StyleSheet.create({
   },
   studentSearchInput: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 36,
     paddingHorizontal: spacing[2],
     color: colors.text.primary,
     ...typography.bodyMd,
