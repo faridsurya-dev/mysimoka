@@ -4,9 +4,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import {
   createClassroom,
+  listGradeLevels,
   listClassroomsBySchool,
   listTeachersBySchool,
   type ClassroomListItem,
+  type GradeLevelItem,
   type TeacherDirectoryItem,
 } from '../../services';
 import { PrimaryButton, Screen } from '../../shared/components';
@@ -15,17 +17,19 @@ import { colors, radius, spacing, typography } from '../../theme';
 type ClassListScreenProps = {
   schoolId: string | null;
   onBack: () => void;
-  onOpenClassDetail: () => void;
+  onOpenClassDetail: (classroom: ClassroomListItem) => void;
 };
 
 export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassListScreenProps) {
-  const classLevelOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => `${index + 1}`), []);
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [isAddClassDialogVisible, setIsAddClassDialogVisible] = useState(false);
   const [className, setClassName] = useState('');
   const [classLevel, setClassLevel] = useState('');
   const [isClassLevelDropdownOpen, setIsClassLevelDropdownOpen] = useState(false);
+  const [gradeLevels, setGradeLevels] = useState<GradeLevelItem[]>([]);
+  const [isLoadingGradeLevels, setIsLoadingGradeLevels] = useState(false);
+  const [loadGradeLevelsError, setLoadGradeLevelsError] = useState<string | null>(null);
   const [classCode, setClassCode] = useState('');
   const [classInitial, setClassInitial] = useState('');
   const [teacherName, setTeacherName] = useState('');
@@ -82,6 +86,24 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
     }
   }, [schoolId]);
 
+  const loadGradeLevels = useCallback(async () => {
+    setIsLoadingGradeLevels(true);
+    setLoadGradeLevelsError(null);
+
+    try {
+      const rows = await listGradeLevels();
+      setGradeLevels(rows);
+      if (rows.length === 0) {
+        setLoadGradeLevelsError('Data tingkat belum tersedia di master grade level.');
+      }
+    } catch (error) {
+      setGradeLevels([]);
+      setLoadGradeLevelsError(error instanceof Error ? error.message : 'Gagal memuat master grade level.');
+    } finally {
+      setIsLoadingGradeLevels(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadClasses().catch(() => {
       setClasses([]);
@@ -97,6 +119,14 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
       setIsLoadingTeachers(false);
     });
   }, [loadTeachers]);
+
+  useEffect(() => {
+    loadGradeLevels().catch(() => {
+      setGradeLevels([]);
+      setLoadGradeLevelsError('Gagal memuat master grade level.');
+      setIsLoadingGradeLevels(false);
+    });
+  }, [loadGradeLevels]);
 
   const filteredClasses = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -123,6 +153,13 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
       `${teacher.name} ${teacher.email} ${teacher.handledClasses}`.toLowerCase().includes(keyword),
     );
   }, [teacherSearchQuery, teachers]);
+
+  const classLevelOptions = useMemo(() => {
+    return gradeLevels.map(level => ({
+      value: String(level.levelNumber),
+      label: level.label,
+    }));
+  }, [gradeLevels]);
 
   function handleCloseDialog() {
     setIsAddClassDialogVisible(false);
@@ -161,7 +198,6 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
         name: className.trim(),
         gradeLevel: Number(classLevel),
         description: classInitial.trim().toUpperCase(),
-        homeroomTeacherMembershipId: selectedTeacherId,
       });
       handleCloseDialog();
       await loadClasses();
@@ -283,7 +319,7 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
           {filteredClasses.map(item => (
             <Pressable
               key={item.id}
-              onPress={onOpenClassDetail}
+              onPress={() => onOpenClassDetail(item)}
               style={({ pressed }) => [styles.classCard, pressed && styles.classCardPressed]}>
               <View style={styles.classCardTopRow}>
                 <View style={styles.classBadge}>
@@ -306,7 +342,7 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
 
               <View style={styles.classMetaRow}>
                 <Text style={styles.classMeta}>{item.total} siswa</Text>
-                <Text style={styles.classMetaDot}>•</Text>
+                <Text style={styles.classMetaDot}>-</Text>
                 <Text style={styles.classMeta}>{item.coverage}</Text>
               </View>
               <Text style={styles.classMeasurementMeta}>{item.lastMeasuredAt}</Text>
@@ -363,7 +399,7 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
                       styles.dropdownFieldLabel,
                       !classLevel && styles.dropdownFieldPlaceholder,
                     ]}>
-                    {classLevel ? `Tingkat ${classLevel}` : 'Pilih tingkat (1-12)'}
+                    {classLevel ? `Tingkat ${classLevel}` : 'Pilih tingkat'}
                   </Text>
                   <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
                     <Path
@@ -378,28 +414,34 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
 
                 {isClassLevelDropdownOpen ? (
                   <View style={styles.teacherDropdown}>
-                    {classLevelOptions.map(level => {
-                      const isSelected = level === classLevel;
+                    {isLoadingGradeLevels ? (
+                      <Text style={styles.dropdownMessage}>Memuat master grade level...</Text>
+                    ) : loadGradeLevelsError ? (
+                      <Text style={styles.dropdownMessage}>{loadGradeLevelsError}</Text>
+                    ) : (
+                      classLevelOptions.map(level => {
+                        const isSelected = level.value === classLevel;
 
-                      return (
-                        <Pressable
-                          key={level}
-                          onPress={() => handleSelectClassLevel(level)}
-                          style={({ pressed }) => [
-                            styles.teacherOption,
-                            isSelected && styles.teacherOptionSelected,
-                            pressed && styles.teacherOptionPressed,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.teacherOptionLabel,
-                              isSelected && styles.teacherOptionLabelSelected,
+                        return (
+                          <Pressable
+                            key={level.value}
+                            onPress={() => handleSelectClassLevel(level.value)}
+                            style={({ pressed }) => [
+                              styles.teacherOption,
+                              isSelected && styles.teacherOptionSelected,
+                              pressed && styles.teacherOptionPressed,
                             ]}>
-                            Tingkat {level}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
+                            <Text
+                              style={[
+                                styles.teacherOptionLabel,
+                                isSelected && styles.teacherOptionLabelSelected,
+                              ]}>
+                              {level.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })
+                    )}
                   </View>
                 ) : null}
               </View>
@@ -811,6 +853,13 @@ const styles = StyleSheet.create({
   },
   teacherOptionLabelSelected: {
     color: colors.brand.primary700,
+  },
+  dropdownMessage: {
+    minHeight: 44,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[12],
+    ...typography.bodySm,
+    color: colors.text.muted,
   },
   teacherEmptyState: {
     minHeight: 44,

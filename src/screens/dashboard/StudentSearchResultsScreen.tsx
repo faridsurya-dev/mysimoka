@@ -13,7 +13,7 @@ type StudentSearchResultsScreenProps = {
   schoolId: string | null;
   keyword: string;
   onBack: () => void;
-  onOpenStudentProfile: () => void;
+  onOpenStudentProfile: (student: DashboardStudentSearchItem) => void;
 };
 
 export function StudentSearchResultsScreen({
@@ -107,7 +107,7 @@ export function StudentSearchResultsScreen({
             {results.map(student => (
               <Pressable
                 key={student.id}
-                onPress={onOpenStudentProfile}
+                onPress={() => onOpenStudentProfile(student)}
                 style={({ pressed }) => [
                   styles.studentRow,
                   pressed && styles.studentRowPressed,

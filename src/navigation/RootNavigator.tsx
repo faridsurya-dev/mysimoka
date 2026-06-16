@@ -55,6 +55,7 @@ import {
   sortRolesByPriority,
   updateAcademicYear,
 } from '../services';
+import type { ClassroomListItem, DashboardStudentListItem } from '../services';
 import { colors, radius, spacing, typography } from '../theme';
 import type { CreateSessionPayload } from '../types';
 import type { TeacherListItem } from '../types';
@@ -345,6 +346,8 @@ export function RootNavigator() {
     useState('');
   const [teachers, setTeachers] = useState<TeacherListItem[]>(TEACHER_LIST_ITEMS);
   const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<DashboardStudentListItem | null>(null);
+  const [selectedClassroom, setSelectedClassroom] = useState<ClassroomListItem | null>(null);
   const [studentProfileBackRoute, setStudentProfileBackRoute] = useState<
     'class-detail' | 'student-search-results' | 'student-list'
   >('class-detail');
@@ -902,16 +905,24 @@ export function RootNavigator() {
             teachers,
             selectedTeacher:
               teachers.find(item => item.id === selectedTeacherId) ?? null,
-            onOpenClassDetail: () => setDashboardRoute('class-detail'),
-            onOpenStudentFromClass: () => {
+            selectedStudent,
+            selectedClassroom,
+            onOpenClassDetail: classroom => {
+              setSelectedClassroom(classroom);
+              setDashboardRoute('class-detail');
+            },
+            onOpenStudentFromClass: student => {
+              setSelectedStudent(student);
               setStudentProfileBackRoute('class-detail');
               setDashboardRoute('student-profile');
             },
-            onOpenStudentFromSearchResults: () => {
+            onOpenStudentFromSearchResults: student => {
+              setSelectedStudent(student);
               setStudentProfileBackRoute('student-search-results');
               setDashboardRoute('student-profile');
             },
-            onOpenStudentFromList: () => {
+            onOpenStudentFromList: student => {
+              setSelectedStudent(student);
               setStudentProfileBackRoute('student-list');
               setDashboardRoute('student-profile');
             },
@@ -1294,10 +1305,12 @@ type DashboardStackOptions = {
   onSaveTeacher: (teacher: TeacherListItem) => void;
   teachers: TeacherListItem[];
   selectedTeacher: TeacherListItem | null;
-  onOpenClassDetail: () => void;
-  onOpenStudentFromClass: () => void;
-  onOpenStudentFromSearchResults: () => void;
-  onOpenStudentFromList: () => void;
+  selectedStudent: DashboardStudentListItem | null;
+  selectedClassroom: ClassroomListItem | null;
+  onOpenClassDetail: (classroom: ClassroomListItem) => void;
+  onOpenStudentFromClass: (student: DashboardStudentListItem) => void;
+  onOpenStudentFromSearchResults: (student: DashboardStudentListItem) => void;
+  onOpenStudentFromList: (student: DashboardStudentListItem) => void;
   onOpenStudentSearchResults: (keyword: string) => void;
   onOpenImmunizationRecording: () => void;
   onStartMeasurementFromClass: () => void;
@@ -1321,6 +1334,8 @@ function renderDashboardStack({
   onSaveTeacher,
   teachers,
   selectedTeacher,
+  selectedStudent,
+  selectedClassroom,
   onOpenClassDetail,
   onOpenStudentFromClass,
   onOpenStudentFromSearchResults,
@@ -1385,6 +1400,8 @@ function renderDashboardStack({
       return (
         <ClassDetailScreen
           onBack={onOpenClassList}
+          schoolId={currentSchoolId}
+          classroom={selectedClassroom}
           onOpenStudent={onOpenStudentFromClass}
           onStartMeasurement={onStartMeasurementFromClass}
           onOpenFaceRegistration={onOpenFaceRegistrationFromClass}
@@ -1401,6 +1418,7 @@ function renderDashboardStack({
       return (
         <StudentProfileScreen
           onBack={onBackFromStudentProfile}
+          student={selectedStudent}
           onOpenImmunizationRecord={onStartImmunizationFromStudentProfile}
         />
       );

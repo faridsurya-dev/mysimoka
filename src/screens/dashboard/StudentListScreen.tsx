@@ -5,7 +5,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import {
   createStudent,
+  listClassroomsBySchool,
   listStudentsBySchool,
+  type ClassroomListItem,
   type DashboardStudentListItem,
 } from '../../services';
 import { Screen } from '../../shared/components';
@@ -14,7 +16,7 @@ import { colors, radius, spacing, typography } from '../../theme';
 type StudentListScreenProps = {
   schoolId: string | null;
   onBack: () => void;
-  onOpenStudentProfile: () => void;
+  onOpenStudentProfile: (student: DashboardStudentListItem) => void;
 };
 
 const CLASS_LEVEL_PATTERN = /(\d+)/;
@@ -43,6 +45,11 @@ export function StudentListScreen({
   const [createFullName, setCreateFullName] = useState('');
   const [createNis, setCreateNis] = useState('');
   const [createNisn, setCreateNisn] = useState('');
+  const [createClassroomId, setCreateClassroomId] = useState('');
+  const [isCreateClassDropdownOpen, setIsCreateClassDropdownOpen] = useState(false);
+  const [classrooms, setClassrooms] = useState<ClassroomListItem[]>([]);
+  const [isLoadingClassrooms, setIsLoadingClassrooms] = useState(false);
+  const [loadClassroomsError, setLoadClassroomsError] = useState<string | null>(null);
   const [createGender, setCreateGender] = useState<'male' | 'female' | null>(null);
   const [createBirthDate, setCreateBirthDate] = useState<Date | null>(null);
   const [isBirthDatePickerVisible, setIsBirthDatePickerVisible] = useState(false);
@@ -71,6 +78,29 @@ export function StudentListScreen({
     }
   }, [schoolId]);
 
+  const loadClassrooms = useCallback(async () => {
+    if (!schoolId) {
+      setClassrooms([]);
+      return;
+    }
+
+    setIsLoadingClassrooms(true);
+    setLoadClassroomsError(null);
+
+    try {
+      const rows = await listClassroomsBySchool(schoolId);
+      setClassrooms(rows);
+      if (rows.length === 0) {
+        setLoadClassroomsError('Kelas belum tersedia.');
+      }
+    } catch (error) {
+      setClassrooms([]);
+      setLoadClassroomsError(error instanceof Error ? error.message : 'Gagal memuat daftar kelas.');
+    } finally {
+      setIsLoadingClassrooms(false);
+    }
+  }, [schoolId]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -86,6 +116,14 @@ export function StudentListScreen({
       isMounted = false;
     };
   }, [loadStudents]);
+
+  useEffect(() => {
+    loadClassrooms().catch(() => {
+      setClassrooms([]);
+      setLoadClassroomsError('Gagal memuat daftar kelas.');
+      setIsLoadingClassrooms(false);
+    });
+  }, [loadClassrooms]);
 
   const classOptions = useMemo(() => {
     return Array.from(new Set(students.map(student => student.className))).sort(
@@ -152,6 +190,8 @@ export function StudentListScreen({
     setCreateFullName('');
     setCreateNis('');
     setCreateNisn('');
+    setCreateClassroomId('');
+    setIsCreateClassDropdownOpen(false);
     setCreateGender(null);
     setCreateBirthDate(null);
     setIsCreateDialogVisible(true);
@@ -170,6 +210,10 @@ export function StudentListScreen({
       setCreateError('Nama siswa wajib diisi.');
       return;
     }
+    if (!createClassroomId) {
+      setCreateError('Kelas wajib dipilih.');
+      return;
+    }
 
     setCreateError(null);
     setIsSubmittingCreate(true);
@@ -179,16 +223,24 @@ export function StudentListScreen({
         throw new Error('Sekolah aktif belum dipilih.');
       }
 
-      await createStudent({
+      const createdStudent = await createStudent({
         schoolId,
         fullName: normalizedName,
+        classroomId: createClassroomId,
         nis: createNis.trim().length > 0 ? createNis.trim() : null,
         nisn: createNisn.trim().length > 0 ? createNisn.trim() : null,
         gender: createGender,
         birthDate: createBirthDate ? formatDateValue(createBirthDate) : null,
       });
+      const selectedClassroom = classrooms.find(item => item.id === createClassroomId);
+      setStudents(previous => [
+        {
+          ...createdStudent,
+          className: selectedClassroom?.name ?? createdStudent.className,
+        },
+        ...previous.filter(student => student.id !== createdStudent.id),
+      ]);
       setIsCreateDialogVisible(false);
-      await loadStudents();
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : 'Gagal menambahkan siswa.');
     } finally {
@@ -360,7 +412,7 @@ export function StudentListScreen({
             {filteredStudents.map(student => (
               <Pressable
                 key={student.id}
-                onPress={onOpenStudentProfile}
+                onPress={() => onOpenStudentProfile(student)}
                 style={({ pressed }) => [
                   styles.studentRow,
                   pressed && styles.studentRowPressed,
@@ -586,6 +638,62 @@ export function StudentListScreen({
                 placeholderTextColor={colors.text.muted}
                 style={styles.formInput}
               />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.dialogFieldLabel}>Kelas</Text>
+              <Pressable
+                onPress={() => setIsCreateClassDropdownOpen(previous => !previous)}
+                style={({ pressed }) => [
+                  styles.formInput,
+                  styles.formInputPressable,
+                  styles.dropdownField,
+                  pressed && styles.formInputPressablePressed,
+                ]}>
+                <Text style={createClassroomId ? styles.formInputValue : styles.formInputPlaceholder}>
+                  {classrooms.find(item => item.id === createClassroomId)?.name ?? 'Pilih kelas'}
+                </Text>
+                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d="M7 10l5 5 5-5"
+                    stroke={colors.text.secondary}
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+              </Pressable>
+              {isCreateClassDropdownOpen ? (
+                <View style={styles.dropdownMenu}>
+                  {isLoadingClassrooms ? (
+                    <Text style={styles.dropdownMessage}>Memuat daftar kelas...</Text>
+                  ) : loadClassroomsError ? (
+                    <Text style={styles.dropdownMessage}>{loadClassroomsError}</Text>
+                  ) : (
+                    classrooms.map(classroom => (
+                      <Pressable
+                        key={classroom.id}
+                        onPress={() => {
+                          setCreateClassroomId(classroom.id);
+                          setIsCreateClassDropdownOpen(false);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownOption,
+                          classroom.id === createClassroomId && styles.dropdownOptionSelected,
+                          pressed && styles.dropdownOptionPressed,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.dropdownOptionLabel,
+                            classroom.id === createClassroomId && styles.dropdownOptionLabelSelected,
+                          ]}>
+                          {classroom.name}
+                        </Text>
+                      </Pressable>
+                    ))
+                  )}
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.formGroup}>
@@ -906,12 +1014,50 @@ const styles = StyleSheet.create({
   formInputPressablePressed: {
     borderColor: colors.brand.primary500,
   },
+  dropdownField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[8],
+  },
   formInputValue: {
     ...typography.bodyMd,
     color: colors.text.primary,
   },
   formInputPlaceholder: {
     ...typography.bodyMd,
+    color: colors.text.muted,
+  },
+  dropdownMenu: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.primary,
+    overflow: 'hidden',
+  },
+  dropdownOption: {
+    minHeight: 42,
+    justifyContent: 'center',
+    paddingHorizontal: spacing[12],
+  },
+  dropdownOptionSelected: {
+    backgroundColor: colors.brand.primary100,
+  },
+  dropdownOptionPressed: {
+    backgroundColor: colors.surface.app,
+  },
+  dropdownOptionLabel: {
+    ...typography.labelMd,
+    color: colors.text.secondary,
+  },
+  dropdownOptionLabelSelected: {
+    color: colors.brand.primary700,
+  },
+  dropdownMessage: {
+    minHeight: 42,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[12],
+    ...typography.bodySm,
     color: colors.text.muted,
   },
   genderRow: {

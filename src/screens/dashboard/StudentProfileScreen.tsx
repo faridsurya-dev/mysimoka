@@ -3,11 +3,13 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LineChart } from 'react-native-gifted-charts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import type { DashboardStudentListItem } from '../../services';
 import { InfoCard, PrimaryButton, Screen, StatusPill } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type StudentProfileScreenProps = {
   onBack: () => void;
+  student?: DashboardStudentListItem | null;
   onOpenImmunizationRecord?: () => void;
 };
 
@@ -89,19 +91,82 @@ function resolveImmunizationStatus(series: ImmunizationSeries): {
 
   return {
     date: latestDoseDate
-      ? `${validDoses}/${series.requiredDoses} dosis valid • Terakhir ${latestDoseDate}`
-      : `${validDoses}/${series.requiredDoses} dosis valid • Belum ada catatan`,
+      ? `${validDoses}/${series.requiredDoses} dosis valid - Terakhir ${latestDoseDate}`
+      : `${validDoses}/${series.requiredDoses} dosis valid - Belum ada catatan`,
     statusLabel: isComplete ? 'Lengkap' : 'Belum',
     tone: isComplete ? 'success' : 'neutral',
   };
 }
 
+function formatGenderLabel(value?: string | null): string {
+  if (value === 'male') {
+    return 'Laki-laki';
+  }
+  if (value === 'female') {
+    return 'Perempuan';
+  }
+  return '-';
+}
+
+function formatDateLabel(value?: string | null): string {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
+}
+
+function formatAgeLabel(value?: string | null): string {
+  if (!value) {
+    return 'Usia belum tersedia';
+  }
+
+  const birthDate = new Date(value);
+  if (Number.isNaN(birthDate.getTime())) {
+    return 'Usia belum tersedia';
+  }
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const hasBirthdayPassed =
+    today.getMonth() > birthDate.getMonth() ||
+    (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
+  if (!hasBirthdayPassed) {
+    age -= 1;
+  }
+
+  return age >= 0 ? `Usia ${age} tahun` : 'Usia belum tersedia';
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
+    </View>
+  );
+}
+
 export function StudentProfileScreen({
   onBack,
+  student,
   onOpenImmunizationRecord,
 }: StudentProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<StudentDetailTab>('statistics');
+  const studentName = student?.name ?? 'Data siswa belum dipilih';
+  const studentInitial = studentName.trim().charAt(0).toUpperCase() || '?';
+  const genderLabel = formatGenderLabel(student?.gender);
+  const birthDateLabel = formatDateLabel(student?.dateOfBirth);
 
   return (
     <View style={styles.container}>
@@ -118,7 +183,7 @@ export function StudentProfileScreen({
               />
             </Svg>
             <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>Alya Putri</Text>
+              <Text style={styles.pageTitle}>{studentName}</Text>
             </View>
           </Pressable>
         </View>
@@ -128,14 +193,19 @@ export function StudentProfileScreen({
       <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[1]}>
         <InfoCard style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarLabel}>A</Text>
+            <Text style={styles.avatarLabel}>{studentInitial}</Text>
           </View>
-          <Text style={styles.studentName}>Alya Putri Maharani</Text>
-          <Text style={styles.studentAge}>Usia 8 tahun</Text>
-          <Text style={styles.studentMetrics}>TB 128 cm • BB 29 kg</Text>
-          <Text style={styles.studentBmi}>BMI 17.7</Text>
+          <Text style={styles.studentName}>{studentName}</Text>
+          <Text style={styles.studentAge}>{formatAgeLabel(student?.dateOfBirth)}</Text>
+          <Text style={styles.studentMetrics}>
+            {student?.className ?? 'Kelas belum tersedia'} - No. {student?.nisn ?? '-'}
+          </Text>
+          <Text style={styles.studentBmi}>{genderLabel}</Text>
           <View style={styles.profilePills}>
-            <StatusPill label="Kategori Normal" tone="success" />
+            <StatusPill
+              label={student?.isActive === false ? 'Tidak aktif' : 'Aktif'}
+              tone={student?.isActive === false ? 'neutral' : 'success'}
+            />
           </View>
         </InfoCard>
 
@@ -160,6 +230,20 @@ export function StudentProfileScreen({
 
         {activeTab === 'statistics' ? (
           <View style={styles.section}>
+            <InfoCard title="Biodata Siswa">
+              <View style={styles.infoList}>
+                <InfoRow label="Nama lengkap" value={studentName} />
+                <InfoRow label="Nomor siswa" value={student?.nisn ?? '-'} />
+                <InfoRow label="Kelas" value={student?.className ?? '-'} />
+                <InfoRow label="Jenis kelamin" value={genderLabel} />
+                <InfoRow label="Tanggal lahir" value={birthDateLabel} />
+                <InfoRow label="Orang tua/wali" value={student?.parentName ?? '-'} />
+                <InfoRow label="No. HP wali" value={student?.parentPhone ?? '-'} />
+                <InfoRow label="Alamat" value={student?.address ?? '-'} />
+                <InfoRow label="Catatan" value={student?.notes ?? '-'} />
+              </View>
+            </InfoCard>
+
             <InfoCard>
               <Text style={styles.chartCardTitle}>Tren Tinggi badan</Text>
               <View style={styles.chartWrapper}>
@@ -416,6 +500,23 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing[8],
   },
+  infoList: {
+    gap: spacing[10],
+  },
+  infoRow: {
+    gap: spacing[2],
+    paddingBottom: spacing[8],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  infoLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+  },
+  infoValue: {
+    ...typography.bodyMd,
+    color: colors.text.primary,
+  },
   chartCardTitle: {
     ...typography.labelLg,
     color: colors.text.primary,
@@ -464,3 +565,4 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
 });
+

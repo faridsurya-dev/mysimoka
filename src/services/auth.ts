@@ -581,6 +581,15 @@ export type DashboardStudentListItem = {
   name: string;
   nisn: string;
   className: string;
+  isActive?: boolean;
+  parentName?: string | null;
+  parentPhone?: string | null;
+  dateOfBirth?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  gender?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type DashboardStudentSearchItem = DashboardStudentListItem;
@@ -592,6 +601,13 @@ export type ClassroomListItem = {
   teacher: string;
   lastMeasuredAt: string;
   coverage: string;
+  students: DashboardStudentListItem[];
+};
+
+export type GradeLevelItem = {
+  id: string;
+  levelNumber: number;
+  label: string;
 };
 
 export type TeacherDirectoryItem = {
@@ -610,7 +626,6 @@ export type CreateClassroomPayload = {
   name: string;
   gradeLevel: number;
   description?: string | null;
-  homeroomTeacherMembershipId?: string | null;
 };
 
 export type UpdateClassroomPayload = {
@@ -618,7 +633,6 @@ export type UpdateClassroomPayload = {
   name: string;
   gradeLevel: number;
   description?: string | null;
-  homeroomTeacherMembershipId?: string | null;
 };
 
 export type CreateTeacherPayload = {
@@ -631,6 +645,7 @@ export type CreateTeacherPayload = {
 export type CreateStudentPayload = {
   schoolId: string;
   fullName: string;
+  classroomId: string;
   nis?: string | null;
   nisn?: string | null;
   gender?: 'male' | 'female' | null;
@@ -831,6 +846,19 @@ function buildTeacherCode(name: string): string {
     .toUpperCase();
 }
 
+function formatShortDateLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
 function normalizeClassroomListItem(row: unknown): ClassroomListItem | null {
   const source = asObject(row);
   const id = readNullableString(source?.id);
@@ -839,13 +867,29 @@ function normalizeClassroomListItem(row: unknown): ClassroomListItem | null {
     return null;
   }
 
+  const studentEnrollments = Array.isArray(source?.student_enrollments)
+    ? source.student_enrollments
+    : [];
+  const students = studentEnrollments
+    .filter(enrollment => {
+      const status = readNullableString(asObject(enrollment)?.status);
+      return !status || status === 'active';
+    })
+    .map(enrollment => normalizeStudentEnrollmentListItem({
+      ...(asObject(enrollment) ?? {}),
+      class: { name },
+    }))
+    .filter((item): item is DashboardStudentListItem => item !== null);
+  const updatedAt = readNullableString(source?.updated_at);
+
   return {
     id,
     name,
-    total: 0,
+    total: students.length,
     teacher: 'Wali kelas belum ditentukan',
-    lastMeasuredAt: 'Belum ada pengukuran',
-    coverage: '0 siswa terdaftar',
+    lastMeasuredAt: updatedAt ? `Diperbarui ${formatShortDateLabel(updatedAt)}` : 'Belum ada pengukuran',
+    coverage: `${students.length} siswa terdaftar`,
+    students,
   };
 }
 
@@ -875,6 +919,30 @@ function normalizeStudentListItem(row: unknown): DashboardStudentListItem | null
       readNullableString(source?.nis) ??
       '-',
     className,
+    isActive: source?.is_active === true,
+    parentName: readNullableString(source?.parent_name),
+    parentPhone: readNullableString(source?.parent_phone),
+    dateOfBirth: readNullableString(source?.date_of_birth),
+    address: readNullableString(source?.address),
+    notes: readNullableString(source?.notes),
+    gender: readNullableString(source?.gender),
+    createdAt: readNullableString(source?.created_at),
+    updatedAt: readNullableString(source?.updated_at),
+  };
+}
+
+function normalizeStudentEnrollmentListItem(row: unknown): DashboardStudentListItem | null {
+  const source = asObject(row);
+  const student = asObject(source?.student);
+  const normalizedStudent = normalizeStudentListItem(student ?? source);
+  if (!normalizedStudent) {
+    return null;
+  }
+
+  const classroom = asObject(source?.class);
+  return {
+    ...normalizedStudent,
+    className: readNullableString(classroom?.name) ?? normalizedStudent.className,
   };
 }
 
@@ -1083,6 +1151,53 @@ function normalizeMembership(item: unknown): SchoolMembership | null {
   };
 }
 
+function getMembershipRolePriority(role: string): number {
+  const normalizedRole = normalizeRoleKey(role);
+  if (normalizedRole === 'school_admin') {
+    return 3;
+  }
+  if (normalizedRole === 'teacher') {
+    return 2;
+  }
+  if (normalizedRole === 'user') {
+    return 1;
+  }
+  return 0;
+}
+
+function pickPreferredMembership(
+  current: SchoolMembership,
+  candidate: SchoolMembership,
+): SchoolMembership {
+  if (candidate.is_active !== current.is_active) {
+    return candidate.is_active ? candidate : current;
+  }
+
+  const currentRolePriority = getMembershipRolePriority(current.role);
+  const candidateRolePriority = getMembershipRolePriority(candidate.role);
+  if (candidateRolePriority !== currentRolePriority) {
+    return candidateRolePriority > currentRolePriority ? candidate : current;
+  }
+
+  return candidate.id.localeCompare(current.id) > 0 ? candidate : current;
+}
+
+function dedupeMembershipsBySchool(memberships: SchoolMembership[]): SchoolMembership[] {
+  const membershipsBySchool = new Map<string, SchoolMembership>();
+
+  memberships.forEach(membership => {
+    const existingMembership = membershipsBySchool.get(membership.school_id);
+    membershipsBySchool.set(
+      membership.school_id,
+      existingMembership
+        ? pickPreferredMembership(existingMembership, membership)
+        : membership,
+    );
+  });
+
+  return Array.from(membershipsBySchool.values());
+}
+
 async function fetchSchoolDetailsByIds(schoolIds: string[], hasuraRole?: string): Promise<SchoolDetailsById> {
   if (schoolIds.length === 0) {
     return {};
@@ -1276,7 +1391,8 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
         .map(normalizeMembership)
         .filter((item): item is SchoolMembership => item !== null)
     : [];
-  const uniqueSchoolIds = Array.from(new Set(memberships.map(item => item.school_id)));
+  const uniqueMemberships = dedupeMembershipsBySchool(memberships);
+  const uniqueSchoolIds = Array.from(new Set(uniqueMemberships.map(item => item.school_id)));
   const highestRole = resolveHighestAllowedRoleFromSession();
   let schoolDetailsById: SchoolDetailsById = {};
   try {
@@ -1291,7 +1407,7 @@ export async function listMemberships(): Promise<SchoolMembership[]> {
     schoolDetailsById = {};
   }
 
-  const hydratedMemberships = memberships.map(item => {
+  const hydratedMemberships = uniqueMemberships.map(item => {
     const schoolDetails = schoolDetailsById[item.school_id];
     if (!schoolDetails) {
       return item;
@@ -1322,12 +1438,126 @@ export async function listClassroomsBySchool(schoolId: string): Promise<Classroo
     throw new Error('ID sekolah aktif tidak valid. Silakan pilih sekolah ulang.');
   }
 
-  const query = `
+  const queryWithStudents = `
     query ListClassroomsBySchool($schoolId: uuid!) {
       classes(where: { school_id: { _eq: $schoolId } }, order_by: [{ name: asc }]) {
         id
         name
         updated_at
+        student_enrollments {
+          id
+          status
+          student_id
+          student {
+            id
+            is_active
+            full_name
+            parent_name
+            parent_phone
+            student_number
+            date_of_birth
+            address
+            notes
+            created_at
+            updated_at
+            gender
+          }
+        }
+      }
+    }
+  `;
+  const queryBasic = `
+    query ListClassroomsBySchool($schoolId: uuid!) {
+      classes(where: { school_id: { _eq: $schoolId } }, order_by: [{ name: asc }]) {
+        id
+        name
+        updated_at
+      }
+    }
+  `;
+
+  let responseBody: { data?: { classes?: unknown[] }; errors?: Array<{ message?: string }> } | null = null;
+  for (const query of [queryWithStudents, queryBasic]) {
+    responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        variables: { schoolId: normalizedSchoolId },
+      }),
+    })) as
+      | {
+          data?: { classes?: unknown[] };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+    if (!Array.isArray(responseBody?.errors) || responseBody.errors.length === 0) {
+      break;
+    }
+  }
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil daftar kelas.');
+  }
+
+  const classRows = responseBody?.data?.classes ?? [];
+  const classIds = classRows
+    .map(row => readNullableString(asObject(row)?.id))
+    .filter((item): item is string => item !== null);
+  const studentEnrollmentsByClassId = await getStudentEnrollmentsByClassIds(classIds);
+
+  return classRows
+    .map(row => {
+      const source = asObject(row);
+      const classId = readNullableString(source?.id);
+      const rowEnrollments = Array.isArray(source?.student_enrollments)
+        ? source.student_enrollments
+        : [];
+      return normalizeClassroomListItem(
+        {
+          ...(source ?? {}),
+          student_enrollments:
+            rowEnrollments.length > 0 || !classId
+              ? rowEnrollments
+              : studentEnrollmentsByClassId[classId] ?? [],
+        },
+      );
+    })
+    .filter((item): item is ClassroomListItem => item !== null);
+}
+
+async function getStudentEnrollmentsByClassIds(
+  classIds: string[],
+): Promise<Record<string, Array<Record<string, unknown>>>> {
+  if (classIds.length === 0) {
+    return {};
+  }
+
+  const query = `
+    query GetStudentEnrollmentsByClass($classIds: [uuid!]!) {
+      student_enrollments(where: { class_id: { _in: $classIds } }) {
+        id
+        status
+        class_id
+        student_id
+        student {
+          id
+          is_active
+          full_name
+          parent_name
+          parent_phone
+          student_number
+          date_of_birth
+          address
+          notes
+          created_at
+          updated_at
+          gender
+        }
       }
     }
   `;
@@ -1340,25 +1570,79 @@ export async function listClassroomsBySchool(schoolId: string): Promise<Classroo
     },
     body: JSON.stringify({
       query,
-      variables: { schoolId: normalizedSchoolId },
+      variables: { classIds },
     }),
   })) as
     | {
-        data?: { classes?: unknown[] };
+        data?: { student_enrollments?: Array<Record<string, unknown>> };
         errors?: Array<{ message?: string }>;
       }
     | null;
 
   if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
-    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil daftar kelas.');
+    return {};
   }
 
-  return (responseBody?.data?.classes ?? [])
-    .map(normalizeClassroomListItem)
-    .filter((item): item is ClassroomListItem => item !== null);
+  return (responseBody?.data?.student_enrollments ?? []).reduce<
+    Record<string, Array<Record<string, unknown>>>
+  >((accumulator, enrollment) => {
+    const classId = readNullableString(asObject(enrollment)?.class_id);
+    if (!classId) {
+      return accumulator;
+    }
+    accumulator[classId] = [...(accumulator[classId] ?? []), enrollment];
+    return accumulator;
+  }, {});
 }
 
-async function getGradeLevelIdOrThrow(gradeLevel: number): Promise<string> {
+function readNullableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsedValue = Number(value);
+    return Number.isFinite(parsedValue) ? parsedValue : null;
+  }
+
+  return null;
+}
+
+function normalizeGradeLevelRows(rows: Array<Record<string, unknown>>): GradeLevelItem[] {
+  return rows
+    .map((row, index) => {
+      const source = asObject(row);
+      const id = readNullableString(source?.id);
+      const levelNumber = readNullableNumber(source?.level_number ?? source?.level) ?? index + 1;
+      const label =
+        readNullableString(source?.label) ??
+        readNullableString(source?.name) ??
+        (levelNumber ? `Kelas ${levelNumber}` : null);
+
+      if (!id || !levelNumber || !label) {
+        return null;
+      }
+
+      return {
+        id,
+        levelNumber,
+        label,
+      } satisfies GradeLevelItem;
+    })
+    .filter((item): item is GradeLevelItem => item !== null)
+    .sort((first, second) => first.levelNumber - second.levelNumber);
+}
+
+async function queryGradeLevels(): Promise<GradeLevelItem[]> {
+  const queryWithCurrentSchema = `
+    query ListGradeLevels {
+      grade_levels(order_by: [{ level_number: asc }]) {
+        id
+        level_number
+        label
+      }
+    }
+  `;
   const queryWithMetadata = `
     query ListGradeLevels {
       grade_levels(order_by: [{ name: asc }]) {
@@ -1384,7 +1668,9 @@ async function getGradeLevelIdOrThrow(gradeLevel: number): Promise<string> {
     }
   `;
 
-  for (const query of [queryWithMetadata, queryWithName, queryById]) {
+  let lastErrorMessage: string | null = null;
+
+  for (const query of [queryWithCurrentSchema, queryWithMetadata, queryWithName, queryById]) {
     const responseBody = (await apiRequest(GRAPHQL_URL, {
       method: 'POST',
       requiresAuth: true,
@@ -1400,24 +1686,35 @@ async function getGradeLevelIdOrThrow(gradeLevel: number): Promise<string> {
       | null;
 
     if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      lastErrorMessage = responseBody.errors[0]?.message ?? 'Gagal memuat master grade level.';
       continue;
     }
 
     const rows = Array.isArray(responseBody?.data?.grade_levels) ? responseBody.data.grade_levels : [];
-    const exactMatch = rows.find(row => {
-      const source = asObject(row);
-      const levelValue = source?.level;
-      const name = readNullableString(source?.name);
-      if (typeof levelValue === 'number' && levelValue === gradeLevel) {
-        return true;
-      }
-      return name === String(gradeLevel) || name === `Kelas ${gradeLevel}`;
-    });
-    const fallbackByOrder = rows[gradeLevel - 1];
-    const gradeLevelId = readNullableString((exactMatch ?? fallbackByOrder)?.id);
-    if (gradeLevelId) {
-      return gradeLevelId;
+    const gradeLevels = normalizeGradeLevelRows(rows);
+    if (gradeLevels.length > 0) {
+      return gradeLevels;
     }
+  }
+
+  if (lastErrorMessage) {
+    throw new Error(lastErrorMessage);
+  }
+
+  return [];
+}
+
+export async function listGradeLevels(): Promise<GradeLevelItem[]> {
+  return queryGradeLevels();
+}
+
+async function getGradeLevelIdOrThrow(gradeLevel: number): Promise<string> {
+  const rows = await queryGradeLevels();
+  const exactMatch = rows.find(row => row.levelNumber === gradeLevel || row.label === String(gradeLevel) || row.label === `Kelas ${gradeLevel}`);
+  const fallbackByOrder = rows[gradeLevel - 1];
+  const gradeLevelId = exactMatch?.id ?? fallbackByOrder?.id;
+  if (gradeLevelId) {
+    return gradeLevelId;
   }
 
   throw new Error('Grade level belum tersedia di Hasura. Tambahkan data grade_levels dulu.');
@@ -1566,7 +1863,8 @@ export async function listTeachersBySchool(schoolId: string): Promise<TeacherDir
       school_memberships(
         where: {
           school_id: { _eq: $schoolId },
-          role: { _eq: "teacher" }
+          role: { _eq: "teacher" },
+          status: { _eq: "active" }
         }
         order_by: [{ created_at: desc }]
       ) {
@@ -1991,28 +2289,31 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
   }
 
   const query = `
-    query ListStudentsBySchool($schoolId: uuid!) {
-      students(
-        where: {
-          school_id: { _eq: $schoolId },
-          is_active: { _eq: true }
-        }
-        order_by: [{ full_name: asc }, { created_at: desc }]
-      ) {
+    query GetStudentEnrollments {
+      student_enrollments {
+        enrolled_at
+        created_at
+        updated_at
+        status
+        class_id
         id
-        full_name
-        nis
-        nisn
-        student_number
-        student_classrooms(
-          where: { is_active: { _eq: true } }
-          order_by: [{ created_at: desc }]
-          limit: 1
-        ) {
+        student_id
+        class {
+          name
+        }
+        student {
           is_active
-          classroom {
-            name
-          }
+          full_name
+          parent_name
+          parent_phone
+          student_number
+          date_of_birth
+          address
+          notes
+          created_at
+          updated_at
+          gender
+          id
         }
       }
     }
@@ -2026,11 +2327,10 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
     },
     body: JSON.stringify({
       query,
-      variables: { schoolId: normalizedSchoolId },
     }),
   })) as
     | {
-        data?: { students?: Array<Record<string, unknown>> };
+        data?: { student_enrollments?: Array<Record<string, unknown>> };
         errors?: Array<{ message?: string }>;
       }
     | null;
@@ -2044,10 +2344,13 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
     throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil data siswa dari Hasura.');
   }
 
-  const rows = Array.isArray(responseBody?.data?.students) ? responseBody.data.students : [];
+  const rows = Array.isArray(responseBody?.data?.student_enrollments)
+    ? responseBody.data.student_enrollments
+    : [];
   return rows
-    .map(normalizeStudentListItem)
-    .filter((item): item is DashboardStudentListItem => item !== null);
+    .map(normalizeStudentEnrollmentListItem)
+    .filter((item): item is DashboardStudentListItem => item !== null)
+    .sort((first, second) => first.name.localeCompare(second.name, 'id-ID'));
 }
 
 export async function registerStudentFacesBulk(
@@ -2090,41 +2393,36 @@ export async function searchStudentsBySchool(
 ): Promise<DashboardStudentSearchItem[]> {
   const normalizedSchoolId = schoolId.trim();
   const normalizedKeyword = `%${keyword.trim()}%`;
-  if (!normalizedSchoolId) {
+  if (!normalizedSchoolId || keyword.trim().length === 0) {
     return [];
   }
 
   const query = `
-    query SearchStudentsBySchool($schoolId: uuid!, $keyword: String!) {
+    query SearchStudents($keyword: String!) {
       students(
         where: {
-          school_id: { _eq: $schoolId },
-          is_active: { _eq: true },
           _or: [
             { full_name: { _ilike: $keyword } },
-            { nis: { _ilike: $keyword } },
-            { nisn: { _ilike: $keyword } },
-            { student_number: { _ilike: $keyword } }
+            { student_number: { _ilike: $keyword } },
+            { parent_name: { _ilike: $keyword } },
+            { parent_phone: { _ilike: $keyword } }
           ]
         }
         order_by: [{ full_name: asc }]
         limit: 50
       ) {
-        id
+        is_active
         full_name
-        nis
-        nisn
+        parent_name
+        parent_phone
         student_number
-        student_classrooms(
-          where: { is_active: { _eq: true } }
-          order_by: [{ created_at: desc }]
-          limit: 1
-        ) {
-          is_active
-          classroom {
-            name
-          }
-        }
+        date_of_birth
+        address
+        notes
+        created_at
+        updated_at
+        gender
+        id
       }
     }
   `;
@@ -2137,7 +2435,7 @@ export async function searchStudentsBySchool(
     },
     body: JSON.stringify({
       query,
-      variables: { schoolId: normalizedSchoolId, keyword: normalizedKeyword },
+      variables: { keyword: normalizedKeyword },
     }),
   })) as
     | {
@@ -2155,11 +2453,11 @@ export async function searchStudentsBySchool(
     .filter((item): item is DashboardStudentSearchItem => item !== null);
 }
 
-export async function createStudent(payload: CreateStudentPayload): Promise<void> {
-  const userId = getSessionUserIdOrThrow();
+export async function createStudent(payload: CreateStudentPayload): Promise<DashboardStudentListItem> {
   const normalizedSchoolId = payload.schoolId.trim();
+  const classroomId = payload.classroomId.trim();
   const normalizedName = payload.fullName.trim();
-  if (!normalizedSchoolId || !normalizedName) {
+  if (!normalizedSchoolId || !classroomId || !normalizedName) {
     throw new Error('Nama siswa wajib diisi.');
   }
 
@@ -2169,30 +2467,32 @@ export async function createStudent(payload: CreateStudentPayload): Promise<void
 
   const mutation = `
     mutation CreateStudent(
-      $schoolId: uuid!,
       $fullName: String!,
       $studentNumber: String,
-      $nis: String,
-      $nisn: String,
-      $gender: String,
-      $birthDate: date,
-      $createdBy: uuid!
+      $gender: gender,
+      $dateOfBirth: date
     ) {
       insert_students_one(
         object: {
-          school_id: $schoolId,
-          created_by: $createdBy,
           full_name: $fullName,
           student_number: $studentNumber,
-          nis: $nis,
-          nisn: $nisn,
           gender: $gender,
-          birth_date: $birthDate,
-          status: "active",
+          date_of_birth: $dateOfBirth,
           is_active: true
         }
       ) {
         id
+        is_active
+        full_name
+        parent_name
+        parent_phone
+        student_number
+        date_of_birth
+        address
+        notes
+        created_at
+        updated_at
+        gender
       }
     }
   `;
@@ -2206,19 +2506,15 @@ export async function createStudent(payload: CreateStudentPayload): Promise<void
     body: JSON.stringify({
       query: mutation,
       variables: {
-        schoolId: normalizedSchoolId,
         fullName: normalizedName,
         studentNumber: resolvedStudentNumber ?? null,
-        nis: normalizedNis || null,
-        nisn: normalizedNisn || null,
         gender: payload.gender ?? null,
-        birthDate: payload.birthDate?.trim() || null,
-        createdBy: userId,
+        dateOfBirth: payload.birthDate?.trim() || null,
       },
     }),
   })) as
     | {
-        data?: { insert_students_one?: { id?: string | null } | null };
+        data?: { insert_students_one?: Record<string, unknown> | null };
         errors?: Array<{ message?: string }>;
       }
     | null;
@@ -2232,10 +2528,54 @@ export async function createStudent(payload: CreateStudentPayload): Promise<void
     throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan data siswa.');
   }
 
-  const createdId = responseBody?.data?.insert_students_one?.id;
-  if (!createdId) {
+  const created = normalizeStudentListItem(responseBody?.data?.insert_students_one);
+  if (!created) {
     throw new Error('Respons simpan siswa tidak valid.');
   }
+
+  const enrollmentMutation = `
+    mutation CreateStudentEnrollment($studentId: uuid!, $classroomId: uuid!) {
+      insert_student_enrollments_one(
+        object: {
+          student_id: $studentId,
+          class_id: $classroomId,
+          status: "active"
+        }
+      ) {
+        id
+      }
+    }
+  `;
+
+  const enrollmentResponse = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: enrollmentMutation,
+      variables: {
+        studentId: created.id,
+        classroomId,
+      },
+    }),
+  })) as
+    | {
+        data?: { insert_student_enrollments_one?: { id?: string | null } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(enrollmentResponse?.errors) && enrollmentResponse.errors.length > 0) {
+    throw new Error(enrollmentResponse.errors[0]?.message || 'Gagal memasukkan siswa ke kelas.');
+  }
+
+  if (!enrollmentResponse?.data?.insert_student_enrollments_one?.id) {
+    throw new Error('Respons enrollment siswa tidak valid.');
+  }
+
+  return created;
 }
 
 export async function listAcademicYears(schoolId: string): Promise<AcademicYear[]> {
