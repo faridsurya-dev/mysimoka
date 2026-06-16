@@ -36,6 +36,8 @@ type FaceRegistrationScreenProps = {
 
 type CapturedPhoto = {
   imageUri: string;
+  fileName?: string;
+  mimeType?: string;
   imageWidth: number;
   imageHeight: number;
   previewWidth: number;
@@ -321,6 +323,8 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
 
       setCapturedPhoto({
         imageUri,
+        fileName: 'camera-face.jpg',
+        mimeType: 'image/jpeg',
         imageWidth,
         imageHeight,
         previewWidth: imageWidth,
@@ -348,7 +352,9 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
       const result = await launchImageLibrary({
         mediaType: 'photo',
         selectionLimit: 1,
-        quality: 1,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        quality: 0.82,
       });
 
       if (result.didCancel) {
@@ -360,9 +366,10 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
         setCameraErrorText('Gagal membaca gambar dari perangkat.');
         return;
       }
-
       setCapturedPhoto({
         imageUri: selectedAsset.uri,
+        fileName: selectedAsset.fileName ?? 'device-face.jpg',
+        mimeType: selectedAsset.type ?? 'image/jpeg',
         imageWidth: Math.max(selectedAsset.width, 1),
         imageHeight: Math.max(selectedAsset.height, 1),
         previewWidth: Math.max(selectedAsset.width, 1),
@@ -646,8 +653,8 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
         images: [
           {
             uri: capturedPhoto.imageUri,
-            name: `${selectedCrop.id}.jpg`,
-            type: 'image/jpeg',
+            name: capturedPhoto.fileName ?? `${selectedCrop.id}.jpg`,
+            type: capturedPhoto.mimeType ?? 'image/jpeg',
           },
         ],
         studentIds: [studentId],
@@ -692,8 +699,8 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
       await registerStudentFacesBulk({
         images: pendingPairs.map(({ crop }) => ({
           uri: capturedPhoto.imageUri,
-          name: `${crop.id}.jpg`,
-          type: 'image/jpeg',
+          name: capturedPhoto.fileName ?? `${crop.id}.jpg`,
+          type: capturedPhoto.mimeType ?? 'image/jpeg',
         })),
         studentIds: pendingPairs.map(({ studentId }) => studentId),
       });

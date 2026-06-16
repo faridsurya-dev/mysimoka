@@ -343,6 +343,7 @@ export function ClassDetailScreen({
               Agar data pertumbuhan tetap akurat, lakukan pengukuran berkala minimal tiap 2 minggu.
             </Text>
             <PrimaryButton
+              labelStyle={styles.reminderPrimaryActionLabel}
               label="Buat Sesi Pengukuran"
               onPress={onStartMeasurement}
               style={styles.reminderPrimaryAction}
@@ -856,7 +857,7 @@ const styles = StyleSheet.create({
     color: colors.brand.primary700,
   },
   reminderTitle: {
-    ...typography.headingMd,
+    ...typography.labelLg,
     color: colors.brand.primary900,
   },
   reminderDescription: {
@@ -865,6 +866,10 @@ const styles = StyleSheet.create({
   },
   reminderPrimaryAction: {
     marginTop: spacing[6],
+    minHeight: 48,
+  },
+  reminderPrimaryActionLabel: {
+    ...typography.labelMd,
   },
   list: {
     gap: spacing[12],

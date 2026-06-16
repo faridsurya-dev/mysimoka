@@ -663,6 +663,16 @@ export type RegisterStudentFacesBulkPayload = {
   studentIds: string[];
 };
 
+export type FaceEmbeddingItem = {
+  id: string;
+  studentId: string;
+  submittedBy: string;
+  filePath: string;
+  detectionScore: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 type SchoolDetailsById = Record<
   string,
   {
@@ -859,7 +869,10 @@ function formatShortDateLabel(value: string): string {
   }).format(date);
 }
 
-function normalizeClassroomListItem(row: unknown): ClassroomListItem | null {
+function normalizeClassroomListItem(
+  row: unknown,
+  responsibleTeacherName = 'Wali kelas belum ditentukan',
+): ClassroomListItem | null {
   const source = asObject(row);
   const id = readNullableString(source?.id);
   const name = readNullableString(source?.name);
@@ -886,7 +899,7 @@ function normalizeClassroomListItem(row: unknown): ClassroomListItem | null {
     id,
     name,
     total: students.length,
-    teacher: 'Wali kelas belum ditentukan',
+    teacher: responsibleTeacherName,
     lastMeasuredAt: updatedAt ? `Diperbarui ${formatShortDateLabel(updatedAt)}` : 'Belum ada pengukuran',
     coverage: `${students.length} siswa terdaftar`,
     students,
@@ -1509,6 +1522,8 @@ export async function listClassroomsBySchool(schoolId: string): Promise<Classroo
     .map(row => readNullableString(asObject(row)?.id))
     .filter((item): item is string => item !== null);
   const studentEnrollmentsByClassId = await getStudentEnrollmentsByClassIds(classIds);
+  const teachers = await listTeachersBySchool(normalizedSchoolId).catch(() => []);
+  const responsibleTeacherName = teachers[0]?.name ?? 'Wali kelas belum ditentukan';
 
   return classRows
     .map(row => {
@@ -1525,6 +1540,7 @@ export async function listClassroomsBySchool(schoolId: string): Promise<Classroo
               ? rowEnrollments
               : studentEnrollmentsByClassId[classId] ?? [],
         },
+        responsibleTeacherName,
       );
     })
     .filter((item): item is ClassroomListItem => item !== null);
@@ -1786,7 +1802,11 @@ export async function createClassroom(payload: CreateClassroomPayload): Promise<
     throw new Error(responseBody.errors[0]?.message || 'Gagal membuat kelas.');
   }
 
-  const created = normalizeClassroomListItem(responseBody?.data?.insert_classes_one);
+  const teachers = await listTeachersBySchool(schoolId).catch(() => []);
+  const created = normalizeClassroomListItem(
+    responseBody?.data?.insert_classes_one,
+    teachers[0]?.name ?? 'Wali kelas belum ditentukan',
+  );
   if (!created) {
     throw new Error('Respons pembuatan kelas tidak valid.');
   }
@@ -2364,13 +2384,105 @@ export async function registerStudentFacesBulk(
     throw new Error('Jumlah foto wajah dan siswa harus sama.');
   }
 
-  const formData = new FormData();
-  payload.images.forEach((image, index) => {
+  const submittedBy = getSessionUserIdOrThrow();
+  const normalizedPairs = payload.images.map((image, index) => {
     const studentId = payload.studentIds[index]?.trim();
     if (!image.uri || !studentId) {
       throw new Error('Data foto wajah dan siswa tidak lengkap.');
     }
 
+    if (!isUuidString(studentId)) {
+      throw new Error('ID siswa tidak valid.');
+    }
+
+    return { image, studentId };
+  });
+
+  const enrollResponse =
+    normalizedPairs.length === 1
+      ? await enrollSingleFace(normalizedPairs[0])
+      : await enrollFaceBulk(normalizedPairs);
+  const enrollmentResults = normalizeFaceEnrollmentResults(enrollResponse, normalizedPairs.length);
+  const failedEnrollment = enrollmentResults.find(result => {
+    const status = readNullableString(asObject(result)?.status)?.toLowerCase();
+    return status === 'error' || status === 'failed';
+  });
+  if (failedEnrollment) {
+    const errorMessage =
+      readNullableString(asObject(failedEnrollment)?.error) ??
+      'Face service gagal memproses salah satu foto wajah.';
+    throw new Error(errorMessage);
+  }
+
+  const successfulRows = normalizedPairs
+    .map(({ image, studentId }, index) => {
+      const enrollmentResult = enrollmentResults[index];
+      const status = readNullableString(asObject(enrollmentResult)?.status)?.toLowerCase();
+      if (status && status !== 'ok' && status !== 'success') {
+        return null;
+      }
+
+      return {
+        student_id: studentId,
+        submitted_by: submittedBy,
+        file_path: readFaceFilePath(enrollmentResult) ?? image.uri,
+        detection_score: readFaceDetectionScore(enrollmentResult),
+      };
+    })
+    .filter((item): item is {
+      student_id: string;
+      submitted_by: string;
+      file_path: string;
+      detection_score: number | null;
+    } => item !== null);
+
+  await insertFaceEmbeddingRows(successfulRows);
+
+  return enrollResponse;
+}
+
+async function enrollSingleFace(pair: { image: FaceBulkImage; studentId: string }): Promise<unknown> {
+  if (__DEV__) {
+    console.log('[faces][single][upload]', JSON.stringify({
+      endpoint: '/faces',
+      uri: pair.image.uri,
+      name: pair.image.name ?? 'face.jpg',
+      type: pair.image.type ?? 'image/jpeg',
+    }));
+  }
+
+  const formData = new FormData();
+  formData.append('image', {
+    uri: pair.image.uri,
+    name: pair.image.name ?? 'face.jpg',
+    type: pair.image.type ?? 'image/jpeg',
+  } as unknown as Blob);
+  formData.append('student_id', pair.studentId);
+
+  return apiRequest('/faces', {
+    method: 'POST',
+    requiresAuth: true,
+    body: formData,
+  });
+}
+
+async function enrollFaceBulk(
+  pairs: Array<{ image: FaceBulkImage; studentId: string }>,
+): Promise<unknown> {
+  if (__DEV__) {
+    console.log('[faces][bulk][upload]', JSON.stringify({
+      endpoint: '/faces/bulk',
+      count: pairs.length,
+      images: pairs.map(({ image }) => ({
+        uri: image.uri,
+        name: image.name,
+        type: image.type,
+      })),
+    }));
+  }
+
+  const formData = new FormData();
+  pairs.forEach(({ image, studentId }, index) => {
     const fallbackName = `face-${index + 1}.jpg`;
     formData.append('images', {
       uri: image.uri,
@@ -2380,11 +2492,212 @@ export async function registerStudentFacesBulk(
     formData.append('student_ids', studentId);
   });
 
-  return apiRequest('/face/bulk', {
+  return apiRequest('/faces/bulk', {
     method: 'POST',
     requiresAuth: true,
     body: formData,
   });
+}
+
+function normalizeFaceEnrollmentResults(response: unknown, expectedCount: number): unknown[] {
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  const source = asObject(response);
+  if (!source) {
+    return [];
+  }
+
+  const directArrayKeys = ['data', 'results', 'faces', 'embeddings', 'returning'];
+  for (const key of directArrayKeys) {
+    const value = source[key];
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+
+  for (const key of directArrayKeys) {
+    const nested = asObject(source[key]);
+    if (!nested) {
+      continue;
+    }
+    for (const nestedKey of directArrayKeys) {
+      const value = nested[nestedKey];
+      if (Array.isArray(value)) {
+        return value;
+      }
+    }
+  }
+
+  const dataObject = asObject(source.data);
+  const dataResults = Array.isArray(dataObject?.results) ? dataObject.results : null;
+  if (dataResults) {
+    return dataResults;
+  }
+
+  return expectedCount === 1 ? [dataObject ?? source] : [];
+}
+
+function readFaceFilePath(result: unknown): string | null {
+  const source = asObject(result);
+  const nestedData = asObject(source?.data);
+  const nestedFace = asObject(source?.face);
+  const nestedEmbedding = asObject(source?.embedding);
+
+  return (
+    readFirstNonEmptyString(source, ['file_path', 'filePath', 'path', 'url', 'image_url', 'imageUrl']) ??
+    readFirstNonEmptyString(nestedData, ['file_path', 'filePath', 'path', 'url', 'image_url', 'imageUrl']) ??
+    readFirstNonEmptyString(nestedFace, ['file_path', 'filePath', 'path', 'url', 'image_url', 'imageUrl']) ??
+    readFirstNonEmptyString(nestedEmbedding, ['file_path', 'filePath', 'path', 'url', 'image_url', 'imageUrl'])
+  );
+}
+
+function readFaceDetectionScore(result: unknown): number | null {
+  const source = asObject(result);
+  const nestedData = asObject(source?.data);
+  const nestedFace = asObject(source?.face);
+  const nestedEmbedding = asObject(source?.embedding);
+  const candidates = [source, nestedData, nestedFace, nestedEmbedding];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    const value = candidate.detection_score ?? candidate.detectionScore ?? candidate.score;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function insertFaceEmbeddingRows(
+  rows: Array<{
+    student_id: string;
+    submitted_by: string;
+    file_path: string;
+    detection_score: number | null;
+  }>,
+): Promise<FaceEmbeddingItem[]> {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const mutation = `
+    mutation InsertFaceEmbeddings($objects: [face_embeddings_insert_input!]!) {
+      insert_face_embeddings(objects: $objects) {
+        returning {
+          id
+          student_id
+          submitted_by
+          file_path
+          detection_score
+          created_at
+          updated_at
+        }
+      }
+    }
+  `;
+
+  const objects = rows.map(row => ({
+    student_id: row.student_id,
+    submitted_by: row.submitted_by,
+    file_path: row.file_path,
+    ...(row.detection_score === null ? {} : { detection_score: row.detection_score }),
+  }));
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { objects },
+    }),
+  })) as
+    | {
+        data?: { insert_face_embeddings?: { returning?: unknown[] } | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan data face embedding.');
+  }
+
+  return (responseBody?.data?.insert_face_embeddings?.returning ?? [])
+    .map(normalizeFaceEmbeddingItem)
+    .filter((item): item is FaceEmbeddingItem => item !== null);
+}
+
+function normalizeFaceEmbeddingItem(row: unknown): FaceEmbeddingItem | null {
+  const source = asObject(row);
+  const id = readNullableString(source?.id);
+  const studentId = readNullableString(source?.student_id);
+  const submittedBy = readNullableString(source?.submitted_by);
+  const filePath = readNullableString(source?.file_path);
+  if (!id || !studentId || !submittedBy || !filePath) {
+    return null;
+  }
+
+  return {
+    id,
+    studentId,
+    submittedBy,
+    filePath,
+    detectionScore: readNullableNumber(source?.detection_score),
+    createdAt: readNullableString(source?.created_at),
+    updatedAt: readNullableString(source?.updated_at),
+  };
+}
+
+export async function listFaceEmbeddings(): Promise<FaceEmbeddingItem[]> {
+  const query = `
+    query GetFaceEmbeddings {
+      face_embeddings {
+        id
+        student_id
+        submitted_by
+        file_path
+        detection_score
+        created_at
+        updated_at
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query }),
+  })) as
+    | {
+        data?: { face_embeddings?: unknown[] };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mengambil data face embedding.');
+  }
+
+  return (responseBody?.data?.face_embeddings ?? [])
+    .map(normalizeFaceEmbeddingItem)
+    .filter((item): item is FaceEmbeddingItem => item !== null);
 }
 
 export async function searchStudentsBySchool(

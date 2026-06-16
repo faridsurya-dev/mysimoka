@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import {
   Modal,
@@ -15,17 +15,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DASHBOARD_AVERAGE_METRICS,
   DASHBOARD_BMI_CATEGORY_DATA,
-  DASHBOARD_DEMOGRAPHY_CARDS,
   DASHBOARD_HEIGHT_TREND,
   DASHBOARD_QUICK_MENUS,
   DASHBOARD_WEIGHT_TREND,
 } from '../../features/dashboard';
-import { getAuthSession, getMyProfile, listMemberships } from '../../services';
+import {
+  getAuthSession,
+  getMyProfile,
+  listMemberships,
+  listStudentsBySchool,
+  type DashboardStudentListItem,
+} from '../../services';
 import { InfoCard, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type DashboardScreenProps = {
   currentSchool: string;
+  schoolId: string | null;
   onOpenClassList: () => void;
   onOpenStudentList: () => void;
   onOpenTeacherList: () => void;
@@ -246,6 +252,7 @@ function formatDateLabel(date: Date) {
 
 export function DashboardScreen({
   currentSchool,
+  schoolId,
   onOpenClassList,
   onOpenStudentList,
   onOpenTeacherList,
@@ -257,6 +264,8 @@ export function DashboardScreen({
   const [serverUserName, setServerUserName] = useState<string | null>(null);
   const [serverSchoolName, setServerSchoolName] = useState<string | null>(null);
   const [activeMembershipRole, setActiveMembershipRole] = useState<string | null>(null);
+  const [students, setStudents] = useState<DashboardStudentListItem[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [isPeriodDialogVisible, setIsPeriodDialogVisible] = useState(false);
   const [periodStartDate, setPeriodStartDate] = useState(() => new Date(2026, 0, 1));
   const [periodEndDate, setPeriodEndDate] = useState(() => new Date(2026, 11, 31));
@@ -266,6 +275,30 @@ export function DashboardScreen({
   const periodStartDateLabel = formatDateLabel(periodStartDate);
   const periodEndDateLabel = formatDateLabel(periodEndDate);
   const totalStudentsSubtitle = 'Periode aktif';
+  const demographicCards = useMemo(() => {
+    const activeStudents = students.filter(student => student.isActive !== false);
+    const total = activeStudents.length;
+    const maleTotal = activeStudents.filter(student => {
+      const gender = student.gender?.toLowerCase();
+      return gender === 'male' || gender === 'laki-laki' || gender === 'laki laki';
+    }).length;
+    const femaleTotal = activeStudents.filter(student => {
+      const gender = student.gender?.toLowerCase();
+      return gender === 'female' || gender === 'perempuan';
+    }).length;
+    const formatPercentage = (value: number) =>
+      total > 0 ? `${((value / total) * 100).toFixed(1)}% populasi aktif` : '0% populasi aktif';
+
+    return [
+      {
+        label: 'Total Siswa',
+        value: String(total),
+        note: isLoadingStudents ? 'Memuat data...' : totalStudentsSubtitle,
+      },
+      { label: 'Laki-laki', value: String(maleTotal), note: formatPercentage(maleTotal) },
+      { label: 'Perempuan', value: String(femaleTotal), note: formatPercentage(femaleTotal) },
+    ];
+  }, [isLoadingStudents, students, totalStudentsSubtitle]);
   const displayedUserName = serverUserName ?? extractUserDisplayName(authUser) ?? 'Pengguna';
   const displayedSchoolName = serverSchoolName ?? extractSchoolName(authUser) ?? currentSchool;
   const displayedRoleText = extractRoleText(authUser, displayedSchoolName, activeMembershipRole);
@@ -315,6 +348,39 @@ export function DashboardScreen({
       isMounted = false;
     };
   }, [currentSchool]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!schoolId) {
+      setStudents([]);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setIsLoadingStudents(true);
+    listStudentsBySchool(schoolId)
+      .then(rows => {
+        if (isMounted) {
+          setStudents(rows);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setStudents([]);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingStudents(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [schoolId]);
 
   const handlePeriodDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     if (!activePeriodPickerField) {
@@ -472,13 +538,11 @@ export function DashboardScreen({
           description="Komposisi siswa aktif berdasarkan populasi kelas saat ini."
         />
         <View style={styles.summaryGrid}>
-          {DASHBOARD_DEMOGRAPHY_CARDS.map(card => (
+          {demographicCards.map(card => (
             <View key={card.label} style={styles.dataTile}>
               <Text style={styles.dataTileLabel}>{card.label}</Text>
               <Text style={styles.dataTileValue}>{card.value}</Text>
-              <Text style={styles.dataTileNote}>
-                {card.label === 'Total Siswa' ? totalStudentsSubtitle : card.note}
-              </Text>
+              <Text style={styles.dataTileNote}>{card.note}</Text>
             </View>
           ))}
         </View>

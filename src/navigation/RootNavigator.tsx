@@ -1436,6 +1436,7 @@ function renderDashboardStack({
       return (
         <DashboardScreen
           currentSchool={currentSchool}
+          schoolId={currentSchoolId}
           onOpenClassList={onOpenClassList}
           onOpenStudentList={onOpenStudentList}
           onOpenTeacherList={onOpenTeacherList}
