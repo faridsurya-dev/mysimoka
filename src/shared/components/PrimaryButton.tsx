@@ -4,6 +4,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextStyle,
   ViewStyle,
 } from 'react-native';
 import { colors, radius, spacing, typography } from '../../theme';
@@ -14,6 +15,7 @@ type PrimaryButtonProps = {
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
+  labelStyle?: TextStyle;
 };
 
 export function PrimaryButton({
@@ -22,6 +24,7 @@ export function PrimaryButton({
   disabled = false,
   loading = false,
   style,
+  labelStyle,
 }: PrimaryButtonProps) {
   const isDisabled = disabled || loading;
 
@@ -39,7 +42,7 @@ export function PrimaryButton({
       {loading ? (
         <ActivityIndicator color={colors.text.inverse} />
       ) : (
-        <Text style={[styles.label, isDisabled && styles.labelDisabled]}>{label}</Text>
+        <Text style={[styles.label, labelStyle, isDisabled && styles.labelDisabled]}>{label}</Text>
       )}
     </Pressable>
   );

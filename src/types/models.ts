@@ -19,6 +19,8 @@ export interface SessionStudentAssignment {
 }
 
 export interface CreateSessionPayload {
+  sessionId?: string;
+  classId?: string;
   sessionName: string;
   className: string;
   note: string;
@@ -30,6 +32,8 @@ export interface CreateSessionPayload {
 }
 
 export interface StudentMeasurementItem {
+  recordId?: string;
+  studentEnrollmentId?: string;
   id: string;
   name: string;
   measurement: string;
@@ -39,6 +43,39 @@ export interface StudentMeasurementItem {
   photoUri: string | null;
   heightCm?: string;
   weightKg?: string;
+}
+
+export type MeasurementSessionStatus = 'draft' | 'active' | 'completed' | 'cancelled';
+
+export interface MeasurementSessionListItem {
+  id: string;
+  schoolId: string;
+  classId: string;
+  className: string;
+  name: string;
+  note: string | null;
+  sessionDate: string;
+  status: MeasurementSessionStatus;
+  totalStudents: number;
+  recordedCount: number;
+}
+
+export type ImmunizationSessionStatus = 'draft' | 'active' | 'completed' | 'cancelled';
+
+export interface ImmunizationSessionListItem {
+  id: string;
+  schoolId: string;
+  classId: string;
+  className: string;
+  name: string;
+  vaccineName: string;
+  doseLabel: string | null;
+  officerName: string | null;
+  note: string | null;
+  sessionDate: string;
+  status: ImmunizationSessionStatus;
+  totalStudents: number;
+  recordedCount: number;
 }
 
 export type MeasurementCaptureMethod =

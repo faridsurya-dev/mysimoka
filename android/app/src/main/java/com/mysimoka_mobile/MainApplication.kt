@@ -6,6 +6,8 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
+import com.facebook.react.modules.network.OkHttpClientProvider
+import okhttp3.Protocol
 
 class MainApplication : Application(), ReactApplication {
 
@@ -22,6 +24,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    OkHttpClientProvider.setOkHttpClientFactory {
+      OkHttpClientProvider.createClientBuilder(applicationContext)
+        .protocols(listOf(Protocol.HTTP_1_1))
+        .build()
+    }
     loadReactNative(this)
   }
 }

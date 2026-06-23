@@ -1,59 +1,165 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { CLASS_LIST_ITEMS, TEACHER_NAME_OPTIONS } from '../../features/dashboard';
+import {
+  createClassroom,
+  listGradeLevels,
+  listClassroomsBySchool,
+  listTeachersBySchool,
+  type ClassroomListItem,
+  type GradeLevelItem,
+  type TeacherDirectoryItem,
+} from '../../services';
 import { PrimaryButton, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type ClassListScreenProps = {
+  schoolId: string | null;
   onBack: () => void;
-  onOpenClassDetail: () => void;
+  onOpenClassDetail: (classroom: ClassroomListItem) => void;
 };
 
-export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenProps) {
-  const classLevelOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => `${index + 1}`), []);
+export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassListScreenProps) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [isAddClassDialogVisible, setIsAddClassDialogVisible] = useState(false);
   const [className, setClassName] = useState('');
   const [classLevel, setClassLevel] = useState('');
   const [isClassLevelDropdownOpen, setIsClassLevelDropdownOpen] = useState(false);
+  const [gradeLevels, setGradeLevels] = useState<GradeLevelItem[]>([]);
+  const [isLoadingGradeLevels, setIsLoadingGradeLevels] = useState(false);
+  const [loadGradeLevelsError, setLoadGradeLevelsError] = useState<string | null>(null);
   const [classCode, setClassCode] = useState('');
   const [classInitial, setClassInitial] = useState('');
   const [teacherName, setTeacherName] = useState('');
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
   const [isTeacherDropdownOpen, setIsTeacherDropdownOpen] = useState(false);
+  const [teachers, setTeachers] = useState<TeacherDirectoryItem[]>([]);
+  const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
+  const [loadTeachersError, setLoadTeachersError] = useState<string | null>(null);
+  const [classes, setClasses] = useState<ClassroomListItem[]>([]);
+  const [isLoadingClasses, setIsLoadingClasses] = useState(false);
+  const [loadClassesError, setLoadClassesError] = useState<string | null>(null);
+  const [saveClassError, setSaveClassError] = useState<string | null>(null);
+  const [isSavingClass, setIsSavingClass] = useState(false);
+
+  const loadClasses = useCallback(async () => {
+    if (!schoolId) {
+      setClasses([]);
+      setLoadClassesError('Sekolah aktif belum dipilih.');
+      return;
+    }
+
+    setIsLoadingClasses(true);
+    setLoadClassesError(null);
+
+    try {
+      const rows = await listClassroomsBySchool(schoolId);
+      setClasses(rows);
+    } catch (error) {
+      setClasses([]);
+      setLoadClassesError(error instanceof Error ? error.message : 'Gagal memuat daftar kelas.');
+    } finally {
+      setIsLoadingClasses(false);
+    }
+  }, [schoolId]);
+
+  const loadTeachers = useCallback(async () => {
+    if (!schoolId) {
+      setTeachers([]);
+      return;
+    }
+
+    setIsLoadingTeachers(true);
+    setLoadTeachersError(null);
+
+    try {
+      const rows = await listTeachersBySchool(schoolId);
+      setTeachers(rows);
+    } catch (error) {
+      setTeachers([]);
+      setLoadTeachersError(error instanceof Error ? error.message : 'Gagal memuat daftar guru.');
+    } finally {
+      setIsLoadingTeachers(false);
+    }
+  }, [schoolId]);
+
+  const loadGradeLevels = useCallback(async () => {
+    setIsLoadingGradeLevels(true);
+    setLoadGradeLevelsError(null);
+
+    try {
+      const rows = await listGradeLevels();
+      setGradeLevels(rows);
+      if (rows.length === 0) {
+        setLoadGradeLevelsError('Data tingkat belum tersedia di master grade level.');
+      }
+    } catch (error) {
+      setGradeLevels([]);
+      setLoadGradeLevelsError(error instanceof Error ? error.message : 'Gagal memuat master grade level.');
+    } finally {
+      setIsLoadingGradeLevels(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadClasses().catch(() => {
+      setClasses([]);
+      setLoadClassesError('Gagal memuat daftar kelas.');
+      setIsLoadingClasses(false);
+    });
+  }, [loadClasses]);
+
+  useEffect(() => {
+    loadTeachers().catch(() => {
+      setTeachers([]);
+      setLoadTeachersError('Gagal memuat daftar guru.');
+      setIsLoadingTeachers(false);
+    });
+  }, [loadTeachers]);
+
+  useEffect(() => {
+    loadGradeLevels().catch(() => {
+      setGradeLevels([]);
+      setLoadGradeLevelsError('Gagal memuat master grade level.');
+      setIsLoadingGradeLevels(false);
+    });
+  }, [loadGradeLevels]);
 
   const filteredClasses = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) {
-      return CLASS_LIST_ITEMS;
+      return classes;
     }
 
-    return CLASS_LIST_ITEMS.filter(item =>
+    return classes.filter(item =>
       `${item.name} ${item.teacher}`.toLowerCase().includes(keyword)
     );
-  }, [query]);
+  }, [classes, query]);
 
   const isSaveDisabled = useMemo(() => {
-    return (
-      className.trim().length === 0 ||
-      classLevel.trim().length === 0 ||
-      classCode.trim().length !== 6 ||
-      classInitial.trim().length === 0 ||
-      teacherName.trim().length === 0
-    );
-  }, [classCode, classInitial, classLevel, className, teacherName]);
+    return className.trim().length === 0 || classLevel.trim().length === 0;
+  }, [classLevel, className]);
 
   const filteredTeachers = useMemo(() => {
     const keyword = teacherSearchQuery.trim().toLowerCase();
     if (!keyword) {
-      return [];
+      return teachers;
     }
 
-    return TEACHER_NAME_OPTIONS.filter(teacher => teacher.toLowerCase().includes(keyword));
-  }, [teacherSearchQuery]);
+    return teachers.filter(teacher =>
+      `${teacher.name} ${teacher.email} ${teacher.handledClasses}`.toLowerCase().includes(keyword),
+    );
+  }, [teacherSearchQuery, teachers]);
+
+  const classLevelOptions = useMemo(() => {
+    return gradeLevels.map(level => ({
+      value: String(level.levelNumber),
+      label: level.label,
+    }));
+  }, [gradeLevels]);
 
   function handleCloseDialog() {
     setIsAddClassDialogVisible(false);
@@ -65,14 +171,41 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
     setClassCode('');
     setClassInitial('');
     setTeacherName('');
+    setSelectedTeacherId(null);
     setTeacherSearchQuery('');
+    setSaveClassError(null);
     setIsClassLevelDropdownOpen(false);
     setIsTeacherDropdownOpen(false);
     setIsAddClassDialogVisible(true);
   }
 
-  function handleSaveClass() {
-    handleCloseDialog();
+  async function handleSaveClass() {
+    if (isSaveDisabled || isSavingClass) {
+      return;
+    }
+
+    if (!schoolId) {
+      setSaveClassError('Sekolah aktif belum dipilih.');
+      return;
+    }
+
+    setIsSavingClass(true);
+    setSaveClassError(null);
+
+    try {
+      await createClassroom({
+        schoolId,
+        name: className.trim(),
+        gradeLevel: Number(classLevel),
+        description: classInitial.trim().toUpperCase(),
+      });
+      handleCloseDialog();
+      await loadClasses();
+    } catch (error) {
+      setSaveClassError(error instanceof Error ? error.message : 'Gagal menyimpan kelas.');
+    } finally {
+      setIsSavingClass(false);
+    }
   }
 
   function handleTeacherSearchChange(value: string) {
@@ -80,11 +213,13 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
     setIsTeacherDropdownOpen(value.trim().length > 0);
     if (teacherName) {
       setTeacherName('');
+      setSelectedTeacherId(null);
     }
   }
 
-  function handleSelectTeacher(teacher: string) {
-    setTeacherName(teacher);
+  function handleSelectTeacher(teacher: TeacherDirectoryItem) {
+    setTeacherName(teacher.name);
+    setSelectedTeacherId(teacher.id);
     setTeacherSearchQuery('');
     setIsTeacherDropdownOpen(false);
   }
@@ -168,10 +303,23 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
         </View>
 
         <View style={styles.list}>
+          {isLoadingClasses ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Memuat kelas...</Text>
+            </View>
+          ) : null}
+
+          {loadClassesError ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Daftar kelas belum bisa dimuat</Text>
+              <Text style={styles.emptyDescription}>{loadClassesError}</Text>
+            </View>
+          ) : null}
+
           {filteredClasses.map(item => (
             <Pressable
               key={item.id}
-              onPress={onOpenClassDetail}
+              onPress={() => onOpenClassDetail(item)}
               style={({ pressed }) => [styles.classCard, pressed && styles.classCardPressed]}>
               <View style={styles.classCardTopRow}>
                 <View style={styles.classBadge}>
@@ -194,7 +342,7 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
 
               <View style={styles.classMetaRow}>
                 <Text style={styles.classMeta}>{item.total} siswa</Text>
-                <Text style={styles.classMetaDot}>•</Text>
+                <Text style={styles.classMetaDot}>-</Text>
                 <Text style={styles.classMeta}>{item.coverage}</Text>
               </View>
               <Text style={styles.classMeasurementMeta}>{item.lastMeasuredAt}</Text>
@@ -251,7 +399,7 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                       styles.dropdownFieldLabel,
                       !classLevel && styles.dropdownFieldPlaceholder,
                     ]}>
-                    {classLevel ? `Tingkat ${classLevel}` : 'Pilih tingkat (1-12)'}
+                    {classLevel ? `Tingkat ${classLevel}` : 'Pilih tingkat'}
                   </Text>
                   <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
                     <Path
@@ -266,28 +414,34 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
 
                 {isClassLevelDropdownOpen ? (
                   <View style={styles.teacherDropdown}>
-                    {classLevelOptions.map(level => {
-                      const isSelected = level === classLevel;
+                    {isLoadingGradeLevels ? (
+                      <Text style={styles.dropdownMessage}>Memuat master grade level...</Text>
+                    ) : loadGradeLevelsError ? (
+                      <Text style={styles.dropdownMessage}>{loadGradeLevelsError}</Text>
+                    ) : (
+                      classLevelOptions.map(level => {
+                        const isSelected = level.value === classLevel;
 
-                      return (
-                        <Pressable
-                          key={level}
-                          onPress={() => handleSelectClassLevel(level)}
-                          style={({ pressed }) => [
-                            styles.teacherOption,
-                            isSelected && styles.teacherOptionSelected,
-                            pressed && styles.teacherOptionPressed,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.teacherOptionLabel,
-                              isSelected && styles.teacherOptionLabelSelected,
+                        return (
+                          <Pressable
+                            key={level.value}
+                            onPress={() => handleSelectClassLevel(level.value)}
+                            style={({ pressed }) => [
+                              styles.teacherOption,
+                              isSelected && styles.teacherOptionSelected,
+                              pressed && styles.teacherOptionPressed,
                             ]}>
-                            Tingkat {level}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
+                            <Text
+                              style={[
+                                styles.teacherOptionLabel,
+                                isSelected && styles.teacherOptionLabelSelected,
+                              ]}>
+                              {level.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })
+                    )}
                   </View>
                 ) : null}
               </View>
@@ -337,9 +491,8 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
               <View style={styles.autocompleteWrap}>
                 <Pressable
                   onPress={() => {
-                    setTeacherName('');
                     setTeacherSearchQuery('');
-                    setIsTeacherDropdownOpen(true);
+                    setIsTeacherDropdownOpen(previous => !previous);
                   }}
                   style={({ pressed }) => [
                     styles.dropdownField,
@@ -374,14 +527,24 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                     value={teacherSearchQuery}
                   />
                 ) : null}
-                {isTeacherDropdownOpen && teacherSearchQuery.trim().length > 0 && filteredTeachers.length > 0 ? (
+                {isTeacherDropdownOpen && isLoadingTeachers ? (
+                  <View style={styles.teacherEmptyState}>
+                    <Text style={styles.teacherEmptyLabel}>Memuat guru...</Text>
+                  </View>
+                ) : null}
+                {isTeacherDropdownOpen && loadTeachersError ? (
+                  <View style={styles.teacherEmptyState}>
+                    <Text style={styles.teacherEmptyLabel}>{loadTeachersError}</Text>
+                  </View>
+                ) : null}
+                {isTeacherDropdownOpen && !isLoadingTeachers && !loadTeachersError && filteredTeachers.length > 0 ? (
                   <View style={styles.teacherDropdown}>
                     {filteredTeachers.map(teacher => {
-                      const isSelected = teacher === teacherName;
+                      const isSelected = teacher.id === selectedTeacherId;
 
                       return (
                         <Pressable
-                          key={teacher}
+                          key={teacher.id}
                           onPress={() => handleSelectTeacher(teacher)}
                           style={({ pressed }) => [
                             styles.teacherOption,
@@ -393,7 +556,7 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                               styles.teacherOptionLabel,
                               isSelected && styles.teacherOptionLabelSelected,
                             ]}>
-                            {teacher}
+                            {teacher.name}
                           </Text>
                         </Pressable>
                       );
@@ -401,7 +564,8 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                   </View>
                 ) : null}
                 {isTeacherDropdownOpen &&
-                teacherSearchQuery.trim().length > 0 &&
+                !isLoadingTeachers &&
+                !loadTeachersError &&
                 filteredTeachers.length === 0 ? (
                   <View style={styles.teacherEmptyState}>
                     <Text style={styles.teacherEmptyLabel}>Guru tidak ditemukan</Text>
@@ -409,6 +573,8 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                 ) : null}
               </View>
             </View>
+
+            {saveClassError ? <Text style={styles.dialogErrorText}>{saveClassError}</Text> : null}
 
             <View style={styles.dialogActions}>
               <Pressable
@@ -420,8 +586,8 @@ export function ClassListScreen({ onBack, onOpenClassDetail }: ClassListScreenPr
                 <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
               </Pressable>
               <PrimaryButton
-                disabled={isSaveDisabled}
-                label="Simpan"
+                disabled={isSaveDisabled || isSavingClass}
+                label={isSavingClass ? 'Menyimpan...' : 'Simpan'}
                 onPress={handleSaveClass}
                 style={styles.dialogPrimaryButton}
               />
@@ -688,6 +854,13 @@ const styles = StyleSheet.create({
   teacherOptionLabelSelected: {
     color: colors.brand.primary700,
   },
+  dropdownMessage: {
+    minHeight: 44,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[12],
+    ...typography.bodySm,
+    color: colors.text.muted,
+  },
   teacherEmptyState: {
     minHeight: 44,
     borderRadius: radius.lg,
@@ -752,5 +925,9 @@ const styles = StyleSheet.create({
   },
   dialogPrimaryButton: {
     minWidth: 120,
+  },
+  dialogErrorText: {
+    ...typography.bodySm,
+    color: colors.accent.red,
   },
 });

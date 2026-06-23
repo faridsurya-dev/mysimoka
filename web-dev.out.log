@@ -1,0 +1,471 @@
+
+> mysimoka_mobile@0.0.1 web
+> webpack serve --config webpack.web.config.js --mode development
+
+asset [1m[33mbundle.cb647de272e321ce7e3a.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+asset [1m[33massets/mysimoka_logo.71564fbec95cda7f6b58.png[39m[22m [1m[33m473 KiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [from: assets/mysimoka_logo.png] [1m[33m[big][39m[22m (auxiliary name: main)
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+runtime modules 27.1 KiB 13 modules
+modules by path [1m./node_modules/[39m[22m 2.9 MiB 411 modules
+modules by path [1m./src/[39m[22m 521 KiB
+  modules by path [1m./src/screens/[39m[22m 387 KiB 32 modules
+  modules by path [1m./src/features/[39m[22m 27 KiB 12 modules
+  modules by path [1m./src/shared/components/[39m[22m 8.01 KiB 6 modules
+  modules by path [1m./src/theme/*.ts[39m[22m 3.14 KiB 5 modules
+  modules by path [1m./src/services/*.ts[39m[22m 50.3 KiB 3 modules
+  modules by path [1m./src/app/[39m[22m 1.29 KiB 2 modules
+  [1m./src/navigation/RootNavigator.tsx[39m[22m 43.6 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m./src/web/shims/expoLinearGradient.tsx[39m[22m 576 bytes [1m[33m[optional][39m[22m [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+[1m./index.web.js[39m[22m 457 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+[1m./App.tsx[39m[22m 263 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+[1m./app.json[39m[22m 61 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+[1m./assets/mysimoka_logo.png[39m[22m 473 KiB (asset) 42 bytes (javascript) [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 25193 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 3.97 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.02a0386a1682cab1e55d.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.bccfb542066532956101.hot-update.js[39m[22m 858 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.bccfb542066532956101.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 3.97 MiB (473 KiB) = [1m[32mbundle.02a0386a1682cab1e55d.js[39m[22m 3.97 MiB [1m[32mmain.bccfb542066532956101.hot-update.js[39m[22m 858 bytes 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/screens/dashboard/StudentSearchResultsScreen.tsx[39m[22m 5.28 KiB [1m[33m[built][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 1735 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 3.97 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.99d79ff8e49f0352aea9.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.ee3c4a49ac7052424d20.hot-update.js[39m[22m 2.76 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.ee3c4a49ac7052424d20.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 3.97 MiB (473 KiB) = [1m[32mbundle.99d79ff8e49f0352aea9.js[39m[22m 3.97 MiB [1m[32mmain.ee3c4a49ac7052424d20.hot-update.js[39m[22m 2.76 KiB 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/environment.ts[39m[22m 1.63 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 1507 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 3.97 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.dfd6ac1431b196dc066a.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.eecb59cc5f66b0b67fd9.hot-update.js[39m[22m 2.73 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.eecb59cc5f66b0b67fd9.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 3.97 MiB (473 KiB) = [1m[32mbundle.dfd6ac1431b196dc066a.js[39m[22m 3.97 MiB [1m[32mmain.eecb59cc5f66b0b67fd9.hot-update.js[39m[22m 2.73 KiB 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/environment.ts[39m[22m 1.59 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 375 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 3.97 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.76c6975f6208c420ec88.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.b8ce7f6eea68b298a2d8.hot-update.js[39m[22m 3.02 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.b8ce7f6eea68b298a2d8.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 3.97 MiB (473 KiB) = [1m[32mbundle.76c6975f6208c420ec88.js[39m[22m 3.97 MiB [1m[32mmain.b8ce7f6eea68b298a2d8.hot-update.js[39m[22m 3.02 KiB 1 auxiliary asset
+cached modules 3.36 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 474 modules
+runtime modules 27.1 KiB 13 modules
+javascript modules 50.5 KiB
+  [1m./src/services/index.ts[39m[22m 608 bytes [1m[33m[code generated][39m[22m
+  [1m./src/services/environment.ts[39m[22m 1.89 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m./src/services/auth.ts[39m[22m 48 KiB [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 1132 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.02 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.f2b5d7c74e1f4acfdcd6.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.97518e4eb78552fc8cd5.hot-update.js[39m[22m 50 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.97518e4eb78552fc8cd5.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.02 MiB (473 KiB) = [1m[32mbundle.f2b5d7c74e1f4acfdcd6.js[39m[22m 3.97 MiB [1m[32mmain.97518e4eb78552fc8cd5.hot-update.js[39m[22m 50 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 48.2 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 524 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.02 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.c6075b9b371a060d56cc.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.19d66f22f42c0e50e495.hot-update.js[39m[22m 47.7 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.19d66f22f42c0e50e495.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.02 MiB (473 KiB) = [1m[32mbundle.c6075b9b371a060d56cc.js[39m[22m 3.97 MiB [1m[32mmain.19d66f22f42c0e50e495.hot-update.js[39m[22m 47.7 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/navigation/RootNavigator.tsx[39m[22m 43.6 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 1141 ms
+assets by status 4.43 MiB [1m[32m[cached][39m[22m 3 assets
+cached modules 3.37 MiB (javascript) 473 KiB (asset) 27.1 KiB (runtime) [1m[32m[cached][39m[22m 489 modules
+[1m./src/navigation/RootNavigator.tsx[39m[22m 43.6 KiB [1m[33m[built][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 889 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 3.97 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.d356ccd4b81386940c3c.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.748f13dbef29678cbc16.hot-update.js[39m[22m 3.05 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.748f13dbef29678cbc16.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 3.97 MiB (473 KiB) = [1m[32mbundle.d356ccd4b81386940c3c.js[39m[22m 3.97 MiB [1m[32mmain.748f13dbef29678cbc16.hot-update.js[39m[22m 3.05 KiB 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/environment.ts[39m[22m 1.92 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 223 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 3.97 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.5a855d4b13212086ee17.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.963dff77a7376ea85f65.hot-update.js[39m[22m 2.74 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.963dff77a7376ea85f65.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 3.97 MiB (473 KiB) = [1m[32mbundle.5a855d4b13212086ee17.js[39m[22m 3.97 MiB [1m[32mmain.963dff77a7376ea85f65.hot-update.js[39m[22m 2.74 KiB 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/environment.ts[39m[22m 1.61 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 205 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.02 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.38989e208c7e66b572e8.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.10f03456b0c3315deeec.hot-update.js[39m[22m 49.9 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.10f03456b0c3315deeec.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.02 MiB (473 KiB) = [1m[32mbundle.38989e208c7e66b572e8.js[39m[22m 3.97 MiB [1m[32mmain.10f03456b0c3315deeec.hot-update.js[39m[22m 49.9 KiB 1 auxiliary asset
+cached modules 3.36 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 48.1 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 505 ms
+assets by status 4.43 MiB [1m[32m[cached][39m[22m 3 assets
+cached modules 3.36 MiB (javascript) 473 KiB (asset) 27.1 KiB (runtime) [1m[32m[cached][39m[22m 489 modules
+[1m./src/services/auth.ts[39m[22m 48.1 KiB [1m[33m[built][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 726 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.02 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.5368c586802904751e91.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.65ba77f844761acbc21b.hot-update.js[39m[22m 51.6 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.65ba77f844761acbc21b.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.02 MiB (473 KiB) = [1m[32mbundle.5368c586802904751e91.js[39m[22m 3.97 MiB [1m[32mmain.65ba77f844761acbc21b.hot-update.js[39m[22m 51.6 KiB 1 auxiliary asset
+cached modules 3.36 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 49.8 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 636 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.02 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.cf0f1960c7279aa8ef15.js[39m[22m [1m[33m3.97 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.069eb8a892bf00042941.hot-update.js[39m[22m 52.7 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.069eb8a892bf00042941.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.02 MiB (473 KiB) = [1m[32mbundle.cf0f1960c7279aa8ef15.js[39m[22m 3.97 MiB [1m[32mmain.069eb8a892bf00042941.hot-update.js[39m[22m 52.7 KiB 1 auxiliary asset
+cached modules 3.36 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 475 modules
+runtime modules 27.1 KiB 13 modules
+javascript modules 51.5 KiB
+  [1m./src/services/index.ts[39m[22m 608 bytes [1m[33m[code generated][39m[22m
+  [1m./src/services/auth.ts[39m[22m 50.9 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 463 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.04 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.b4b830b53c94fba1ffbf.js[39m[22m [1m[33m3.98 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.e288cdead222b662b8a5.hot-update.js[39m[22m 62.3 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.e288cdead222b662b8a5.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.04 MiB (473 KiB) = [1m[32mbundle.b4b830b53c94fba1ffbf.js[39m[22m 3.98 MiB [1m[32mmain.e288cdead222b662b8a5.hot-update.js[39m[22m 62.3 KiB 1 auxiliary asset
+cached modules 3.36 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 475 modules
+runtime modules 27.1 KiB 13 modules
+javascript modules 60.9 KiB
+  [1m./src/services/index.ts[39m[22m 608 bytes [1m[33m[code generated][39m[22m
+  [1m./src/services/auth.ts[39m[22m 60.3 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 982 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.04 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.738f21999aaf17846d0c.js[39m[22m [1m[33m3.98 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.c995a0b69962e3599875.hot-update.js[39m[22m 62.4 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.c995a0b69962e3599875.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.04 MiB (473 KiB) = [1m[32mbundle.738f21999aaf17846d0c.js[39m[22m 3.98 MiB [1m[32mmain.c995a0b69962e3599875.hot-update.js[39m[22m 62.4 KiB 1 auxiliary asset
+cached modules 3.36 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 60.5 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 760 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.01 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.364c347da035338fcfcc.js[39m[22m [1m[33m3.98 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.c7f33a7de714a99650b5.hot-update.js[39m[22m 34.9 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.c7f33a7de714a99650b5.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.01 MiB (473 KiB) = [1m[32mbundle.364c347da035338fcfcc.js[39m[22m 3.98 MiB [1m[32mmain.c7f33a7de714a99650b5.hot-update.js[39m[22m 34.9 KiB 1 auxiliary asset
+cached modules 3.39 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/screens/dashboard/DashboardScreen.tsx[39m[22m 32.6 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 811 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.01 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.2dac82b2ae1e7ac7dc96.js[39m[22m [1m[33m3.98 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.64a30d0467489c988d74.hot-update.js[39m[22m 26.3 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.64a30d0467489c988d74.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.01 MiB (473 KiB) = [1m[32mbundle.2dac82b2ae1e7ac7dc96.js[39m[22m 3.98 MiB [1m[32mmain.64a30d0467489c988d74.hot-update.js[39m[22m 26.3 KiB 1 auxiliary asset
+cached modules 3.4 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/screens/dashboard/ClassListScreen.tsx[39m[22m 24.2 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 491 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.03 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.875186633fb4a10df12c.js[39m[22m [1m[33m3.98 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.9139d0396e5728b214e9.hot-update.js[39m[22m 47.7 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.9139d0396e5728b214e9.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.03 MiB (473 KiB) = [1m[32mbundle.875186633fb4a10df12c.js[39m[22m 3.98 MiB [1m[32mmain.9139d0396e5728b214e9.hot-update.js[39m[22m 47.7 KiB 1 auxiliary asset
+cached modules 3.38 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/navigation/RootNavigator.tsx[39m[22m 43.6 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 804 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.555d4f994f67ee5242e3.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.3cc96c427688fb7a038d.hot-update.js[39m[22m 19.7 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.3cc96c427688fb7a038d.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4 MiB (473 KiB) = [1m[32mbundle.555d4f994f67ee5242e3.js[39m[22m 3.99 MiB [1m[32mmain.3cc96c427688fb7a038d.hot-update.js[39m[22m 19.7 KiB 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/screens/dashboard/TeacherListScreen.tsx[39m[22m 17.6 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 503 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.5f832fff17239668d08e.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.fbcd83ce5413b93e2bd8.hot-update.js[39m[22m 19.7 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.fbcd83ce5413b93e2bd8.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4 MiB (473 KiB) = [1m[32mbundle.5f832fff17239668d08e.js[39m[22m 3.99 MiB [1m[32mmain.fbcd83ce5413b93e2bd8.hot-update.js[39m[22m 19.7 KiB 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/screens/dashboard/TeacherListScreen.tsx[39m[22m 17.6 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 407 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.03 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.25e4914b3a76c4226140.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.b3353ea0ad31c049dd9e.hot-update.js[39m[22m 47.8 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.b3353ea0ad31c049dd9e.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.03 MiB (473 KiB) = [1m[32mbundle.25e4914b3a76c4226140.js[39m[22m 3.99 MiB [1m[32mmain.b3353ea0ad31c049dd9e.hot-update.js[39m[22m 47.8 KiB 1 auxiliary asset
+cached modules 3.39 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/navigation/RootNavigator.tsx[39m[22m 43.7 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 755 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.be8c639e3f63c5121e22.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.53714a59cd59b85da8af.hot-update.js[39m[22m 8.93 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.53714a59cd59b85da8af.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4 MiB (473 KiB) = [1m[32mbundle.be8c639e3f63c5121e22.js[39m[22m 3.99 MiB [1m[32mmain.53714a59cd59b85da8af.hot-update.js[39m[22m 8.93 KiB 1 auxiliary asset
+cached modules 3.42 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/screens/dashboard/StudentSearchResultsScreen.tsx[39m[22m 6.91 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 224 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.03 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.85ea636d85ecb1ad7616.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.95e89650b7f12b9302cd.hot-update.js[39m[22m 47.8 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.95e89650b7f12b9302cd.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.03 MiB (473 KiB) = [1m[32mbundle.85ea636d85ecb1ad7616.js[39m[22m 3.99 MiB [1m[32mmain.95e89650b7f12b9302cd.hot-update.js[39m[22m 47.8 KiB 1 auxiliary asset
+cached modules 3.39 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/navigation/RootNavigator.tsx[39m[22m 43.7 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 762 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.01 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.0b9be7d248dc42f8aea4.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.2f1c089225bb6de8ffbc.hot-update.js[39m[22m 19.9 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.2f1c089225bb6de8ffbc.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.01 MiB (473 KiB) = [1m[32mbundle.0b9be7d248dc42f8aea4.js[39m[22m 3.99 MiB [1m[32mmain.2f1c089225bb6de8ffbc.hot-update.js[39m[22m 19.9 KiB 1 auxiliary asset
+cached modules 3.41 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/screens/measurement/CreateSessionScreen.tsx[39m[22m 17.9 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 503 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.04 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.06f6c63dd8479f6acbe7.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.b5b0ea1e7aa3cffaf17c.hot-update.js[39m[22m 47.8 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.b5b0ea1e7aa3cffaf17c.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.04 MiB (473 KiB) = [1m[32mbundle.06f6c63dd8479f6acbe7.js[39m[22m 3.99 MiB [1m[32mmain.b5b0ea1e7aa3cffaf17c.hot-update.js[39m[22m 47.8 KiB 1 auxiliary asset
+cached modules 3.36 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 475 modules
+runtime modules 27.1 KiB 13 modules
+javascript modules 67.9 KiB
+  [1m./src/navigation/RootNavigator.tsx[39m[22m 43.7 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m./src/screens/dashboard/ClassListScreen.tsx[39m[22m 24.2 KiB [1m[33m[built][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 1423 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.616958193a38b6fe2f21.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.4a8c6a0158817ba5d1d0.hot-update.js[39m[22m 62.4 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.4a8c6a0158817ba5d1d0.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.616958193a38b6fe2f21.js[39m[22m 3.99 MiB [1m[32mmain.4a8c6a0158817ba5d1d0.hot-update.js[39m[22m 62.4 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 60.5 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 797 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.a63fca9325fccb3384bc.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.c7ba733a4ae54f89fb90.hot-update.js[39m[22m 62.5 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.c7ba733a4ae54f89fb90.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.a63fca9325fccb3384bc.js[39m[22m 3.99 MiB [1m[32mmain.c7ba733a4ae54f89fb90.hot-update.js[39m[22m 62.5 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 60.5 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 711 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.436e215e03658a5bffc8.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.c9a3d7c4057f3fc44c74.hot-update.js[39m[22m 62.4 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.c9a3d7c4057f3fc44c74.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.436e215e03658a5bffc8.js[39m[22m 3.99 MiB [1m[32mmain.c9a3d7c4057f3fc44c74.hot-update.js[39m[22m 62.4 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 60.5 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 655 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.b8652f263dd7f997bf8b.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.7539c589fa815de0664f.hot-update.js[39m[22m 63.2 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.7539c589fa815de0664f.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.b8652f263dd7f997bf8b.js[39m[22m 3.99 MiB [1m[32mmain.7539c589fa815de0664f.hot-update.js[39m[22m 63.2 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 61.3 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 921 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 3.94 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.243dfdcbefa52bc1207d.js[39m[22m [1m[33m3.93 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.70f64d3cb0f5eebc9a7b.hot-update.js[39m[22m 5.7 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.70f64d3cb0f5eebc9a7b.hot-update.json[39m[22m 106 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 3.94 MiB (473 KiB) = [1m[32mbundle.243dfdcbefa52bc1207d.js[39m[22m 3.93 MiB [1m[32mmain.70f64d3cb0f5eebc9a7b.hot-update.js[39m[22m 5.7 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 474 modules
+runtime modules 27.1 KiB 13 modules
+javascript modules 647 bytes
+  [1m./src/services/index.ts[39m[22m 608 bytes [1m[33m[code generated][39m[22m
+  [1m./src/services/auth.ts[39m[22m 39 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m [1m[31m[1 error][39m[22m
+
+[1m[31mERROR[39m[22m in [1m./src/services/auth.ts[39m[22m
+Module build failed (from ./node_modules/babel-loader/lib/index.js):
+SyntaxError: D:\mysimoka\src\services\auth.ts: Identifier 'LoginPayload' has already been declared. (15:12)
+
+[0m [90m 13 |[39m   password[33m:[39m string[33m;[39m
+ [90m 14 |[39m }[33m;[39m
+[31m[1m>[22m[39m[90m 15 |[39m [36mexport[39m type [33mLoginPayload[39m [33m=[39m {
+ [90m    |[39m             [31m[1m^[22m[39m
+ [90m 16 |[39m   email[33m:[39m string[33m;[39m
+ [90m 17 |[39m   password[33m:[39m string[33m;[39m
+ [90m 18 |[39m }[33m;[39m[0m
+    at constructor (D:\mysimoka\node_modules\@babel\parser\lib\index.js:365:19)
+    at TypeScriptParserMixin.raise (D:\mysimoka\node_modules\@babel\parser\lib\index.js:6599:19)
+    at TypeScriptScopeHandler.checkRedeclarationInScope (D:\mysimoka\node_modules\@babel\parser\lib\index.js:1619:19)
+    at TypeScriptScopeHandler.declareName (D:\mysimoka\node_modules\@babel\parser\lib\index.js:4883:14)
+    at TypeScriptParserMixin.declareNameFromIdentifier (D:\mysimoka\node_modules\@babel\parser\lib\index.js:7567:16)
+    at TypeScriptParserMixin.checkIdentifier (D:\mysimoka\node_modules\@babel\parser\lib\index.js:7563:12)
+    at TypeScriptParserMixin.tsParseTypeAliasDeclaration (D:\mysimoka\node_modules\@babel\parser\lib\index.js:8766:10)
+    at TypeScriptParserMixin.tsParseDeclaration (D:\mysimoka\node_modules\@babel\parser\lib\index.js:9053:23)
+    at TypeScriptParserMixin.tsTryParseExportDeclaration (D:\mysimoka\node_modules\@babel\parser\lib\index.js:9026:17)
+    at TypeScriptParserMixin.parseExportDeclaration (D:\mysimoka\node_modules\@babel\parser\lib\index.js:9629:46)
+    at TypeScriptParserMixin.maybeParseExportDeclaration (D:\mysimoka\node_modules\@babel\parser\lib\index.js:13893:31)
+    at TypeScriptParserMixin.parseExport (D:\mysimoka\node_modules\@babel\parser\lib\index.js:13812:29)
+    at TypeScriptParserMixin.parseExport (D:\mysimoka\node_modules\@babel\parser\lib\index.js:9385:20)
+    at TypeScriptParserMixin.parseStatementContent (D:\mysimoka\node_modules\@babel\parser\lib\index.js:12878:27)
+    at TypeScriptParserMixin.parseStatementContent (D:\mysimoka\node_modules\@babel\parser\lib\index.js:9508:18)
+    at TypeScriptParserMixin.parseStatementLike (D:\mysimoka\node_modules\@babel\parser\lib\index.js:12767:17)
+    at TypeScriptParserMixin.parseModuleItem (D:\mysimoka\node_modules\@babel\parser\lib\index.js:12744:17)
+    at TypeScriptParserMixin.parseBlockOrModuleBlockBody (D:\mysimoka\node_modules\@babel\parser\lib\index.js:13316:36)
+    at TypeScriptParserMixin.parseBlockBody (D:\mysimoka\node_modules\@babel\parser\lib\index.js:13309:10)
+    at TypeScriptParserMixin.parseProgram (D:\mysimoka\node_modules\@babel\parser\lib\index.js:12622:10)
+    at TypeScriptParserMixin.parseTopLevel (D:\mysimoka\node_modules\@babel\parser\lib\index.js:12612:25)
+    at TypeScriptParserMixin.parse (D:\mysimoka\node_modules\@babel\parser\lib\index.js:14488:25)
+    at TypeScriptParserMixin.parse (D:\mysimoka\node_modules\@babel\parser\lib\index.js:10126:18)
+    at parse (D:\mysimoka\node_modules\@babel\parser\lib\index.js:14522:38)
+    at parser (D:\mysimoka\node_modules\@babel\core\lib\parser\index.js:41:34)
+    at parser.next (<anonymous>)
+    at normalizeFile (D:\mysimoka\node_modules\@babel\core\lib\transformation\normalize-file.js:64:37)
+    at normalizeFile.next (<anonymous>)
+    at run (D:\mysimoka\node_modules\@babel\core\lib\transformation\index.js:22:50)
+    at run.next (<anonymous>)
+    at transform (D:\mysimoka\node_modules\@babel\core\lib\transform.js:22:33)
+    at transform.next (<anonymous>)
+    at step (D:\mysimoka\node_modules\gensync\index.js:261:32)
+    at D:\mysimoka\node_modules\gensync\index.js:273:13
+    at async.call.result.err.err (D:\mysimoka\node_modules\gensync\index.js:223:11)
+ @ ./src/services/index.ts 1:360-377
+ @ ./src/navigation/RootNavigator.tsx 1:3124-3146
+ @ ./src/app/App.tsx 1:329-367
+ @ ./App.tsx 1:195-219
+ @ ./index.web.js 1:156-172
+
+webpack 5.106.2 compiled with [1m[31m1 error[39m[22m in 207 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.c7dcbd37df92f40373aa.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.06396d42aec6a40d7f6a.hot-update.js[39m[22m 64.3 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.06396d42aec6a40d7f6a.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.c7dcbd37df92f40373aa.js[39m[22m 3.99 MiB [1m[32mmain.06396d42aec6a40d7f6a.hot-update.js[39m[22m 64.3 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 475 modules
+runtime modules 27.1 KiB 13 modules
+javascript modules 61.8 KiB
+  [1m./src/services/index.ts[39m[22m 608 bytes [1m[33m[code generated][39m[22m
+  [1m./src/services/auth.ts[39m[22m 61.3 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 468 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.70fabf2075e614dc96e1.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.63d459fcb1944c41e9e2.hot-update.js[39m[22m 64 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.63d459fcb1944c41e9e2.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.70fabf2075e614dc96e1.js[39m[22m 3.99 MiB [1m[32mmain.63d459fcb1944c41e9e2.hot-update.js[39m[22m 64 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 62 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 1004 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.1cea626cb50117041e6d.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.8317c73338b84bf6be14.hot-update.js[39m[22m 64.1 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.8317c73338b84bf6be14.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.1cea626cb50117041e6d.js[39m[22m 3.99 MiB [1m[32mmain.8317c73338b84bf6be14.hot-update.js[39m[22m 64.1 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 62.1 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 850 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.04 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.7ec43346670e80653931.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.011cac6a844d5f893144.hot-update.js[39m[22m 48 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.011cac6a844d5f893144.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.04 MiB (473 KiB) = [1m[32mbundle.7ec43346670e80653931.js[39m[22m 3.99 MiB [1m[32mmain.011cac6a844d5f893144.hot-update.js[39m[22m 48 KiB 1 auxiliary asset
+cached modules 3.39 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/navigation/RootNavigator.tsx[39m[22m 43.9 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 823 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.05 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.c134bbb823d17e44d115.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.9bdb063e7fa8edc92860.hot-update.js[39m[22m 64.7 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.9bdb063e7fa8edc92860.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.05 MiB (473 KiB) = [1m[32mbundle.c134bbb823d17e44d115.js[39m[22m 3.99 MiB [1m[32mmain.9bdb063e7fa8edc92860.hot-update.js[39m[22m 64.7 KiB 1 auxiliary asset
+cached modules 3.37 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/services/auth.ts[39m[22m 62.7 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 1327 ms
+assets by status 473 KiB [1m[32m[cached][39m[22m 1 asset
+assets by info 4.04 MiB [1m[32m[immutable][39m[22m
+  asset [1m[33mbundle.ecc0ed13d5f76cb2fd7e.js[39m[22m [1m[33m3.99 MiB[39m[22m [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[33m[big][39m[22m (name: main)
+  asset [1m[32mmain.ee010669b9edf0ff049f.hot-update.js[39m[22m 48.6 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main)
+  asset [1m[32mmain.ee010669b9edf0ff049f.hot-update.json[39m[22m 28 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+asset [1m[32mindex.html[39m[22m 545 bytes [1m[32m[emitted][39m[22m
+Entrypoint [1mmain[39m[22m [1m[33m[big][39m[22m 4.04 MiB (473 KiB) = [1m[32mbundle.ecc0ed13d5f76cb2fd7e.js[39m[22m 3.99 MiB [1m[32mmain.ee010669b9edf0ff049f.hot-update.js[39m[22m 48.6 KiB 1 auxiliary asset
+cached modules 3.39 MiB (javascript) 473 KiB (asset) [1m[32m[cached][39m[22m 476 modules
+runtime modules 27.1 KiB 13 modules
+[1m./src/navigation/RootNavigator.tsx[39m[22m 44.5 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.106.2 compiled [1m[32msuccessfully[39m[22m in 991 ms

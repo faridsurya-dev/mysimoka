@@ -1,16 +1,26 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BarChart } from 'react-native-gifted-charts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { TEACHER_NAME_OPTIONS } from '../../features/dashboard';
+import {
+  listGradeLevels,
+  listTeachersBySchool,
+  updateClassroom,
+  type ClassroomListItem,
+  type DashboardStudentListItem,
+  type GradeLevelItem,
+  type TeacherDirectoryItem,
+} from '../../services';
 import { InfoCard, PrimaryButton, Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 
 type ClassDetailScreenProps = {
+  schoolId: string | null;
   onBack: () => void;
   onStartMeasurement: () => void;
-  onOpenStudent: () => void;
+  classroom?: ClassroomListItem | null;
+  onOpenStudent: (student: DashboardStudentListItem) => void;
   onOpenFaceRegistration: () => void;
 };
 
@@ -25,41 +35,6 @@ const CLASS_RESPONSIBLE = {
   name: 'Ibu Rina Kartika',
 };
 
-const STUDENTS = [
-  {
-    name: 'Alya Putri Maharani',
-    measuredAt: '10 Apr 2026',
-    weight: '29 kg',
-    height: '128 cm',
-    bmiCategory: 'Normal',
-    isFaceRegistered: true,
-  },
-  {
-    name: 'Bima Saputra',
-    measuredAt: '08 Apr 2026',
-    weight: '27 kg',
-    height: '125 cm',
-    bmiCategory: 'Kurus',
-    isFaceRegistered: false,
-  },
-  {
-    name: 'Citra Maharani',
-    measuredAt: '09 Apr 2026',
-    weight: '30 kg',
-    height: '129 cm',
-    bmiCategory: 'Normal',
-    isFaceRegistered: true,
-  },
-  {
-    name: 'Dimas Pratama',
-    measuredAt: '07 Apr 2026',
-    weight: '31 kg',
-    height: '130 cm',
-    bmiCategory: 'Overweight',
-    isFaceRegistered: false,
-  },
-];
-
 const CLASS_DISTRIBUTION = [
   { value: 2, label: 'Kurus', frontColor: '#E2A93B' },
   { value: 21, label: 'Normal', frontColor: '#27AE60' },
@@ -68,36 +43,124 @@ const CLASS_DISTRIBUTION = [
 ];
 
 export function ClassDetailScreen({
+  schoolId,
   onBack,
   onStartMeasurement,
+  classroom,
   onOpenStudent,
   onOpenFaceRegistration,
 }: ClassDetailScreenProps) {
-  const classLevelOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => `${index + 1}`), []);
   const [activeTab, setActiveTab] = useState<DetailTab>('statistics');
-  const [className, setClassName] = useState('Kelas 3A');
+  const [className, setClassName] = useState(classroom?.name ?? 'Kelas belum dipilih');
   const [classLevel, setClassLevel] = useState('3');
   const [classCode, setClassCode] = useState('300301');
   const [classInitial, setClassInitial] = useState('3A');
-  const [responsibleName, setResponsibleName] = useState(CLASS_RESPONSIBLE.name);
+  const [responsibleName, setResponsibleName] = useState(classroom?.teacher ?? CLASS_RESPONSIBLE.name);
   const [draftClassName, setDraftClassName] = useState(className);
   const [draftClassLevel, setDraftClassLevel] = useState(classLevel);
   const [isClassLevelDropdownOpen, setIsClassLevelDropdownOpen] = useState(false);
+  const [gradeLevels, setGradeLevels] = useState<GradeLevelItem[]>([]);
+  const [isLoadingGradeLevels, setIsLoadingGradeLevels] = useState(false);
+  const [loadGradeLevelsError, setLoadGradeLevelsError] = useState<string | null>(null);
   const [draftClassCode, setDraftClassCode] = useState(classCode);
   const [draftClassInitial, setDraftClassInitial] = useState(classInitial);
   const [draftResponsibleName, setDraftResponsibleName] = useState(responsibleName);
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
   const [isTeacherDropdownOpen, setIsTeacherDropdownOpen] = useState(false);
+  const [teachers, setTeachers] = useState<TeacherDirectoryItem[]>([]);
+  const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
+  const [loadTeachersError, setLoadTeachersError] = useState<string | null>(null);
   const [isEditDialogVisible, setIsEditDialogVisible] = useState(false);
+  const [saveClassError, setSaveClassError] = useState<string | null>(null);
+  const [isSavingClass, setIsSavingClass] = useState(false);
   const insets = useSafeAreaInsets();
+  const classStudents = classroom?.students ?? [];
+  const totalStudents = classroom?.total ?? classStudents.length;
   const filteredTeachers = useMemo(() => {
     const keyword = teacherSearchQuery.trim().toLowerCase();
     if (!keyword) {
-      return [];
+      return teachers;
     }
 
-    return TEACHER_NAME_OPTIONS.filter(teacher => teacher.toLowerCase().includes(keyword));
-  }, [teacherSearchQuery]);
+    return teachers.filter(teacher =>
+      `${teacher.name} ${teacher.email} ${teacher.handledClasses}`.toLowerCase().includes(keyword),
+    );
+  }, [teacherSearchQuery, teachers]);
+
+  const classLevelOptions = useMemo(() => {
+    return gradeLevels.map(level => ({
+      value: String(level.levelNumber),
+      label: level.label,
+    }));
+  }, [gradeLevels]);
+
+  const loadGradeLevels = useCallback(async () => {
+    setIsLoadingGradeLevels(true);
+    setLoadGradeLevelsError(null);
+
+    try {
+      const rows = await listGradeLevels();
+      setGradeLevels(rows);
+      if (rows.length === 0) {
+        setLoadGradeLevelsError('Data tingkat belum tersedia di master grade level.');
+      }
+    } catch (error) {
+      setGradeLevels([]);
+      setLoadGradeLevelsError(error instanceof Error ? error.message : 'Gagal memuat master grade level.');
+    } finally {
+      setIsLoadingGradeLevels(false);
+    }
+  }, []);
+
+  const loadTeachers = useCallback(async () => {
+    if (!schoolId) {
+      setTeachers([]);
+      return;
+    }
+
+    setIsLoadingTeachers(true);
+    setLoadTeachersError(null);
+
+    try {
+      const rows = await listTeachersBySchool(schoolId);
+      setTeachers(rows);
+    } catch (error) {
+      setTeachers([]);
+      setLoadTeachersError(error instanceof Error ? error.message : 'Gagal memuat daftar guru.');
+    } finally {
+      setIsLoadingTeachers(false);
+    }
+  }, [schoolId]);
+
+  useEffect(() => {
+    loadGradeLevels().catch(() => {
+      setGradeLevels([]);
+      setLoadGradeLevelsError('Gagal memuat master grade level.');
+      setIsLoadingGradeLevels(false);
+    });
+  }, [loadGradeLevels]);
+
+  useEffect(() => {
+    loadTeachers().catch(() => {
+      setTeachers([]);
+      setLoadTeachersError('Gagal memuat daftar guru.');
+      setIsLoadingTeachers(false);
+    });
+  }, [loadTeachers]);
+
+  useEffect(() => {
+    if (classroom?.name) {
+      setClassName(classroom.name);
+      setDraftClassName(classroom.name);
+    }
+  }, [classroom?.name]);
+
+  useEffect(() => {
+    if (classroom?.teacher) {
+      setResponsibleName(classroom.teacher);
+      setDraftResponsibleName(classroom.teacher);
+    }
+  }, [classroom?.teacher]);
 
   const isSaveDisabled =
     draftClassName.trim().length === 0 ||
@@ -122,17 +185,38 @@ export function ClassDetailScreen({
     setIsEditDialogVisible(false);
   };
 
-  const handleSaveClassEdit = () => {
-    if (isSaveDisabled) {
+  const handleSaveClassEdit = async () => {
+    if (isSaveDisabled || isSavingClass) {
       return;
     }
 
-    setClassName(draftClassName.trim());
-    setClassLevel(draftClassLevel.trim());
-    setClassCode(draftClassCode.trim());
-    setClassInitial(draftClassInitial.trim().toUpperCase());
-    setResponsibleName(draftResponsibleName.trim());
-    setIsEditDialogVisible(false);
+    if (!classroom?.id) {
+      setSaveClassError('Kelas aktif belum dipilih.');
+      return;
+    }
+
+    setIsSavingClass(true);
+    setSaveClassError(null);
+
+    try {
+      await updateClassroom({
+        classroomId: classroom.id,
+        name: draftClassName.trim(),
+        gradeLevel: Number(draftClassLevel),
+        description: draftClassInitial.trim().toUpperCase(),
+      });
+
+      setClassName(draftClassName.trim());
+      setClassLevel(draftClassLevel.trim());
+      setClassCode(draftClassCode.trim());
+      setClassInitial(draftClassInitial.trim().toUpperCase());
+      setResponsibleName(draftResponsibleName.trim());
+      setIsEditDialogVisible(false);
+    } catch (error) {
+      setSaveClassError(error instanceof Error ? error.message : 'Gagal menyimpan kelas.');
+    } finally {
+      setIsSavingClass(false);
+    }
   };
 
   const handleSelectClassLevel = (level: string) => {
@@ -152,14 +236,14 @@ export function ClassDetailScreen({
 
   const handleTeacherSearchChange = (value: string) => {
     setTeacherSearchQuery(value);
-    setIsTeacherDropdownOpen(value.trim().length > 0);
+    setIsTeacherDropdownOpen(true);
     if (draftResponsibleName) {
       setDraftResponsibleName('');
     }
   };
 
-  const handleSelectTeacher = (teacher: string) => {
-    setDraftResponsibleName(teacher);
+  const handleSelectTeacher = (teacher: TeacherDirectoryItem) => {
+    setDraftResponsibleName(teacher.name);
     setTeacherSearchQuery('');
     setIsTeacherDropdownOpen(false);
   };
@@ -234,6 +318,19 @@ export function ClassDetailScreen({
       <Screen contentContainerStyle={styles.content}>
       {activeTab === 'statistics' ? (
         <View style={styles.section}>
+          <View style={styles.summaryGrid}>
+            <InfoCard style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Total siswa</Text>
+              <Text style={styles.summaryValue}>{totalStudents}</Text>
+              <Text style={styles.summaryDescription}>Siswa terdaftar di kelas ini</Text>
+            </InfoCard>
+            <InfoCard style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Wali kelas</Text>
+              <Text style={styles.summaryValueSmall}>{responsibleName}</Text>
+              <Text style={styles.summaryDescription}>Penanggungjawab kelas</Text>
+            </InfoCard>
+          </View>
+
           <InfoCard style={styles.reminderCard}>
             <View style={styles.reminderHeaderRow}>
               <Text style={styles.reminderEyebrow}>Pengingat Pengukuran</Text>
@@ -246,6 +343,7 @@ export function ClassDetailScreen({
               Agar data pertumbuhan tetap akurat, lakukan pengukuran berkala minimal tiap 2 minggu.
             </Text>
             <PrimaryButton
+              labelStyle={styles.reminderPrimaryActionLabel}
               label="Buat Sesi Pengukuran"
               onPress={onStartMeasurement}
               style={styles.reminderPrimaryAction}
@@ -259,8 +357,8 @@ export function ClassDetailScreen({
               <BarChart
                 barBorderTopLeftRadius={10}
                 barBorderTopRightRadius={10}
-                barWidth={34}
-                data={CLASS_DISTRIBUTION}
+                  barWidth={34}
+                data={totalStudents > 0 ? [{ value: totalStudents, label: 'Terdaftar', frontColor: colors.brand.primary500 }] : CLASS_DISTRIBUTION}
                 disablePress
                 frontColor={colors.brand.primary500}
                 hideRules={false}
@@ -327,10 +425,19 @@ export function ClassDetailScreen({
           </InfoCard>
 
           <View style={styles.list}>
-            {STUDENTS.map(student => (
+            {classStudents.length === 0 ? (
+              <InfoCard>
+                <Text style={styles.emptyMembersTitle}>Belum ada siswa terdaftar</Text>
+                <Text style={styles.emptyMembersDescription}>
+                  Tambahkan siswa dari halaman Daftar Siswa dan pilih kelas ini.
+                </Text>
+              </InfoCard>
+            ) : null}
+
+            {classStudents.map(student => (
               <Pressable
-                key={student.name}
-                onPress={onOpenStudent}
+                key={student.id}
+                onPress={() => onOpenStudent(student)}
                 style={({ pressed }) => [
                   styles.studentCard,
                   pressed && styles.studentCardPressed,
@@ -343,11 +450,7 @@ export function ClassDetailScreen({
 
                 <View style={styles.studentCardMain}>
                   <Text style={styles.studentCardName}>{student.name}</Text>
-                  {student.isFaceRegistered ? (
-                    <View style={styles.faceRegisteredPill}>
-                      <Text style={styles.faceRegisteredPillLabel}>Wajah Terdaftar</Text>
-                    </View>
-                  ) : null}
+                  <Text style={styles.studentCardMeta}>No. {student.nisn}</Text>
                 </View>
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                   <Path
@@ -404,7 +507,7 @@ export function ClassDetailScreen({
                       styles.dropdownFieldLabel,
                       !draftClassLevel && styles.dropdownFieldPlaceholder,
                     ]}>
-                    {draftClassLevel ? `Tingkat ${draftClassLevel}` : 'Pilih tingkat (1-12)'}
+                    {draftClassLevel ? `Tingkat ${draftClassLevel}` : 'Pilih tingkat'}
                   </Text>
                   <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
                     <Path
@@ -419,28 +522,34 @@ export function ClassDetailScreen({
 
                 {isClassLevelDropdownOpen ? (
                   <View style={styles.teacherDropdown}>
-                    {classLevelOptions.map(level => {
-                      const isSelected = level === draftClassLevel;
+                    {isLoadingGradeLevels ? (
+                      <Text style={styles.dropdownMessage}>Memuat master grade level...</Text>
+                    ) : loadGradeLevelsError ? (
+                      <Text style={styles.dropdownMessage}>{loadGradeLevelsError}</Text>
+                    ) : (
+                      classLevelOptions.map(level => {
+                        const isSelected = level.value === draftClassLevel;
 
-                      return (
-                        <Pressable
-                          key={level}
-                          onPress={() => handleSelectClassLevel(level)}
-                          style={({ pressed }) => [
-                            styles.teacherOption,
-                            isSelected && styles.teacherOptionSelected,
-                            pressed && styles.teacherOptionPressed,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.teacherOptionLabel,
-                              isSelected && styles.teacherOptionLabelSelected,
+                        return (
+                          <Pressable
+                            key={level.value}
+                            onPress={() => handleSelectClassLevel(level.value)}
+                            style={({ pressed }) => [
+                              styles.teacherOption,
+                              isSelected && styles.teacherOptionSelected,
+                              pressed && styles.teacherOptionPressed,
                             ]}>
-                            Tingkat {level}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
+                            <Text
+                              style={[
+                                styles.teacherOptionLabel,
+                                isSelected && styles.teacherOptionLabelSelected,
+                              ]}>
+                              {level.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })
+                    )}
                   </View>
                 ) : null}
               </View>
@@ -529,15 +638,14 @@ export function ClassDetailScreen({
                 ) : null}
 
                 {isTeacherDropdownOpen &&
-                teacherSearchQuery.trim().length > 0 &&
                 filteredTeachers.length > 0 ? (
                   <View style={styles.teacherDropdown}>
                     {filteredTeachers.map(teacher => {
-                      const isSelected = teacher === draftResponsibleName;
+                      const isSelected = teacher.name === draftResponsibleName;
 
                       return (
                         <Pressable
-                          key={teacher}
+                          key={teacher.id}
                           onPress={() => handleSelectTeacher(teacher)}
                           style={({ pressed }) => [
                             styles.teacherOption,
@@ -549,7 +657,7 @@ export function ClassDetailScreen({
                               styles.teacherOptionLabel,
                               isSelected && styles.teacherOptionLabelSelected,
                             ]}>
-                            {teacher}
+                            {teacher.name}
                           </Text>
                         </Pressable>
                       );
@@ -557,8 +665,21 @@ export function ClassDetailScreen({
                   </View>
                 ) : null}
 
+                {isTeacherDropdownOpen && isLoadingTeachers ? (
+                  <View style={styles.teacherEmptyState}>
+                    <Text style={styles.teacherEmptyLabel}>Memuat daftar guru...</Text>
+                  </View>
+                ) : null}
+
+                {isTeacherDropdownOpen && loadTeachersError ? (
+                  <View style={styles.teacherEmptyState}>
+                    <Text style={styles.teacherEmptyLabel}>{loadTeachersError}</Text>
+                  </View>
+                ) : null}
+
                 {isTeacherDropdownOpen &&
-                teacherSearchQuery.trim().length > 0 &&
+                !isLoadingTeachers &&
+                !loadTeachersError &&
                 filteredTeachers.length === 0 ? (
                   <View style={styles.teacherEmptyState}>
                     <Text style={styles.teacherEmptyLabel}>Guru tidak ditemukan</Text>
@@ -566,6 +687,8 @@ export function ClassDetailScreen({
                 ) : null}
               </View>
             </View>
+
+            {saveClassError ? <Text style={styles.dialogErrorText}>{saveClassError}</Text> : null}
 
             <View style={styles.dialogActions}>
               <Pressable
@@ -578,8 +701,8 @@ export function ClassDetailScreen({
               </Pressable>
 
               <PrimaryButton
-                disabled={isSaveDisabled}
-                label="Simpan"
+                disabled={isSaveDisabled || isSavingClass}
+                label={isSavingClass ? 'Menyimpan...' : 'Simpan'}
                 onPress={handleSaveClassEdit}
                 style={styles.dialogPrimaryButton}
               />
@@ -672,6 +795,30 @@ const styles = StyleSheet.create({
   section: {
     gap: spacing[16],
   },
+  summaryGrid: {
+    flexDirection: 'row',
+    gap: spacing[12],
+  },
+  summaryCard: {
+    flex: 1,
+    gap: spacing[6],
+  },
+  summaryLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+  },
+  summaryValue: {
+    ...typography.headingXL,
+    color: colors.text.primary,
+  },
+  summaryValueSmall: {
+    ...typography.labelLg,
+    color: colors.text.primary,
+  },
+  summaryDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
   barChartWrapper: {
     marginTop: spacing[8],
     paddingTop: spacing[4],
@@ -710,7 +857,7 @@ const styles = StyleSheet.create({
     color: colors.brand.primary700,
   },
   reminderTitle: {
-    ...typography.headingMd,
+    ...typography.labelLg,
     color: colors.brand.primary900,
   },
   reminderDescription: {
@@ -719,6 +866,10 @@ const styles = StyleSheet.create({
   },
   reminderPrimaryAction: {
     marginTop: spacing[6],
+    minHeight: 48,
+  },
+  reminderPrimaryActionLabel: {
+    ...typography.labelMd,
   },
   list: {
     gap: spacing[12],
@@ -786,6 +937,18 @@ const styles = StyleSheet.create({
   studentCardName: {
     ...typography.headingMd,
     color: colors.text.primary,
+  },
+  studentCardMeta: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  emptyMembersTitle: {
+    ...typography.headingMd,
+    color: colors.text.primary,
+  },
+  emptyMembersDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
   faceRegisteredPill: {
     alignSelf: 'flex-start',
@@ -933,6 +1096,13 @@ const styles = StyleSheet.create({
   teacherOptionLabelSelected: {
     color: colors.brand.primary700,
   },
+  dropdownMessage: {
+    minHeight: 44,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[12],
+    ...typography.bodySm,
+    color: colors.text.muted,
+  },
   teacherEmptyState: {
     minHeight: 44,
     borderRadius: radius.lg,
@@ -945,6 +1115,10 @@ const styles = StyleSheet.create({
   teacherEmptyLabel: {
     ...typography.bodySm,
     color: colors.text.muted,
+  },
+  dialogErrorText: {
+    ...typography.bodySm,
+    color: colors.accent.red,
   },
   codeInputRow: {
     flexDirection: 'row',

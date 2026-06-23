@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  GestureResponderEvent,
   Image,
+  LayoutChangeEvent,
   Modal,
   Pressable,
   StyleSheet,
@@ -11,13 +13,19 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { INITIAL_MEASUREMENT_STUDENTS } from '../../features/measurement';
+import { useDeviceSession } from '../../features/device';
+import { listMeasurementStudents, saveStudentMeasurementRecord } from '../../services';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { StudentMeasurementItem } from '../../types';
 
 type StudentMeasurementScreenProps = {
+  sessionId?: string | null;
+  sessionName?: string;
+  sessionDate?: string;
+  className?: string;
   onBack: () => void;
+  onOpenDeviceManager: () => void;
   onOpenFaceIdentification: () => void;
   onOpenStudentSearch: () => void;
 };
@@ -41,22 +49,33 @@ const formatSavedTimestamp = (date: Date) =>
   });
 
 export function StudentMeasurementScreen({
+  sessionId = null,
+  sessionName = 'Sesi Pengukuran',
+  sessionDate,
+  className = 'Kelas',
   onBack,
+  onOpenDeviceManager,
   onOpenFaceIdentification,
   onOpenStudentSearch,
 }: StudentMeasurementScreenProps) {
   const insets = useSafeAreaInsets();
-  const [students, setStudents] = useState(INITIAL_MEASUREMENT_STUDENTS);
-  const [selectedStudentName, setSelectedStudentName] = useState<string | null>(null);
+  const deviceSession = useDeviceSession();
+  const [students, setStudents] = useState<StudentMeasurementItem[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [measurementMode, setMeasurementMode] = useState<'manual' | 'auto'>('manual');
   const [heightValue, setHeightValue] = useState('');
   const [weightValue, setWeightValue] = useState('');
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [studentLoadError, setStudentLoadError] = useState<string | null>(null);
+  const [isSavingMeasurement, setIsSavingMeasurement] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [modalProgressWidth, setModalProgressWidth] = useState(0);
   const [isUploadingSync, setIsUploadingSync] = useState(false);
   const [lastUploadedCount, setLastUploadedCount] = useState(0);
   const [showSyncSuccess, setShowSyncSuccess] = useState(false);
 
-  const selectedStudentIndex = selectedStudentName
-    ? students.findIndex(student => student.name === selectedStudentName)
+  const selectedStudentIndex = selectedStudentId
+    ? students.findIndex(student => student.id === selectedStudentId)
     : -1;
   const selectedStudent = selectedStudentIndex >= 0 ? students[selectedStudentIndex] : null;
   const nextStudent =
@@ -64,12 +83,12 @@ export function StudentMeasurementScreen({
       ? students[(selectedStudentIndex + 1) % students.length]
       : null;
   const deviceConnection = {
-    heightConnected: true,
-    weightConnected: false,
+    heightConnected: false,
+    weightConnected: deviceSession.connectedDeviceId !== null,
   };
   const connectedDevicesCount =
     Number(deviceConnection.heightConnected) + Number(deviceConnection.weightConnected);
-  const allDevicesConnected = connectedDevicesCount === 2;
+  const hasAnyDeviceConnected = connectedDevicesCount > 0;
   const measuredStudentsCount = students.filter(student => student.checked).length;
   const pendingSyncCount = students.filter(
     student => student.syncStatus === 'pending',
@@ -80,12 +99,57 @@ export function StudentMeasurementScreen({
       ? measuredStudentsCount / students.length
       : 0;
   const sessionProgressWidth = `${progressValue * 100}%` as `${number}%`;
+  const sessionDateLabel = sessionDate
+    ? formatSavedTimestamp(new Date(sessionDate))
+    : formatSavedTimestamp(new Date());
+  const latestWeightDisplay =
+    deviceSession.latestWeightKg === null
+      ? null
+      : deviceSession.latestWeightKg.toFixed(1).replace(/\.0$/, '');
 
   useEffect(() => {
-    if (!allDevicesConnected && measurementMode === 'auto') {
-      setMeasurementMode('manual');
+    if (!sessionId) {
+      setStudents([]);
+      setStudentLoadError('Sesi pengukuran belum dipilih.');
+      return;
     }
-  }, [allDevicesConnected, measurementMode]);
+
+    let isMounted = true;
+    setIsLoadingStudents(true);
+    setStudentLoadError(null);
+
+    listMeasurementStudents(sessionId)
+      .then(rows => {
+        if (isMounted) {
+          setStudents(rows);
+        }
+      })
+      .catch(error => {
+        if (isMounted) {
+          setStudents([]);
+          setStudentLoadError(
+            error instanceof Error ? error.message : 'Gagal memuat siswa sesi.',
+          );
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingStudents(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (measurementMode !== 'auto' || latestWeightDisplay === null) {
+      return;
+    }
+
+    setWeightValue(latestWeightDisplay);
+  }, [latestWeightDisplay, measurementMode]);
 
   const fillFormFromStudent = (student: StudentMeasurementItem) => {
     setHeightValue(student.heightCm ?? '');
@@ -104,12 +168,13 @@ export function StudentMeasurementScreen({
       return;
     }
 
-    openMeasurementForm(targetStudent.name);
+    openMeasurementForm(targetStudent.id);
   };
 
-  const openMeasurementForm = (studentName: string) => {
-    const student = students.find(item => item.name === studentName);
-    setSelectedStudentName(studentName);
+  const openMeasurementForm = (studentId: string) => {
+    const student = students.find(item => item.id === studentId);
+    setSelectedStudentId(studentId);
+    setSaveError(null);
     if (student) {
       fillFormFromStudent(student);
       return;
@@ -127,44 +192,104 @@ export function StudentMeasurementScreen({
     const nextIndex = (selectedStudentIndex + direction + totalStudents) % totalStudents;
     const targetStudent = students[nextIndex];
 
-    setSelectedStudentName(targetStudent.name);
+    setSelectedStudentId(targetStudent.id);
     fillFormFromStudent(targetStudent);
   };
 
-  const saveAndContinueToNextStudent = () => {
-    if (selectedStudentIndex < 0) {
+  const selectStudentByIndex = (targetIndex: number) => {
+    const targetStudent = students[targetIndex];
+    if (!targetStudent) {
+      return;
+    }
+
+    setSelectedStudentId(targetStudent.id);
+    fillFormFromStudent(targetStudent);
+    setSaveError(null);
+  };
+
+  const handleProgressLayout = (event: LayoutChangeEvent) => {
+    setModalProgressWidth(event.nativeEvent.layout.width);
+  };
+
+  const handleProgressPress = (event: GestureResponderEvent) => {
+    if (students.length === 0 || modalProgressWidth <= 0) {
+      return;
+    }
+
+    const ratio = Math.min(Math.max(event.nativeEvent.locationX / modalProgressWidth, 0), 1);
+    const targetIndex = Math.min(Math.floor(ratio * students.length), students.length - 1);
+    selectStudentByIndex(targetIndex);
+  };
+
+  const saveAndContinueToNextStudent = async () => {
+    if (selectedStudentIndex < 0 || !selectedStudent || !sessionId || isSavingMeasurement) {
       return;
     }
 
     const cleanHeight = keepDigitsOnly(heightValue);
     const cleanWeight = keepDigitsOnly(weightValue);
+    const heightNumber = cleanHeight.length > 0 ? Number(cleanHeight) : null;
+    const weightNumber = cleanWeight.length > 0 ? Number(cleanWeight) : null;
+    if (heightNumber === null && weightNumber === null) {
+      setSaveError('Isi tinggi atau berat badan terlebih dahulu.');
+      return;
+    }
+
     const heightDisplay = cleanHeight || '-';
     const weightDisplay = cleanWeight || '-';
-    const measuredAt = `Diukur ${formatSavedTimestamp(new Date())}`;
+    setIsSavingMeasurement(true);
+    setSaveError(null);
 
-    setStudents(previousStudents =>
-      previousStudents.map((student, index) =>
+    try {
+      const savedRecord = await saveStudentMeasurementRecord({
+        sessionId,
+        studentId: selectedStudent.id,
+        studentEnrollmentId: selectedStudent.studentEnrollmentId,
+        captureMethod: measurementMode === 'manual' ? 'manual' : 'automatic',
+        captureSource: measurementMode === 'manual' ? 'manual_form' : 'device_ble',
+        heightCm: heightNumber,
+        weightKg: weightNumber,
+        deviceId: measurementMode === 'auto' ? deviceSession.connectedDeviceId : null,
+        deviceName: measurementMode === 'auto' ? deviceSession.connectedDeviceName : null,
+        devicePayload:
+          measurementMode === 'auto'
+            ? {
+                latestWeightKg: deviceSession.latestWeightKg,
+                latestWeightAt: deviceSession.latestWeightAt,
+              }
+            : null,
+      });
+
+      setStudents(previousStudents =>
+        previousStudents.map((student, index) =>
         index === selectedStudentIndex
           ? {
               ...student,
+              recordId: savedRecord.recordId,
               measurement: `TB ${heightDisplay} cm • BB ${weightDisplay} kg`,
-              timestamp: measuredAt,
+              timestamp: savedRecord.timestamp,
               checked: cleanHeight.length > 0 && cleanWeight.length > 0,
-              syncStatus: 'pending',
+              syncStatus: 'synced',
               heightCm: cleanHeight,
               weightKg: cleanWeight,
             }
           : student,
-      ),
-    );
+        ),
+      );
 
-    moveStudentSelection(1);
+      moveStudentSelection(1);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Gagal menyimpan hasil pengukuran.');
+    } finally {
+      setIsSavingMeasurement(false);
+    }
   };
 
   const closeMeasurementForm = () => {
-    setSelectedStudentName(null);
+    setSelectedStudentId(null);
     setHeightValue('');
     setWeightValue('');
+    setSaveError(null);
   };
 
   const simulateUploadToServer = () => {
@@ -209,7 +334,7 @@ export function StudentMeasurementScreen({
               />
             </Svg>
             <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>Session 10 April 2026</Text>
+              <Text style={styles.pageTitle}>{sessionName}</Text>
             </View>
           </Pressable>
 
@@ -271,7 +396,16 @@ export function StudentMeasurementScreen({
       </View>
 
       <Screen contentContainerStyle={styles.content}>
-        {isUploadingSync ? (
+        {isLoadingStudents ? (
+          <View style={styles.pendingInfoCard}>
+            <ActivityIndicator color={colors.brand.primary600} size="small" />
+            <Text style={styles.pendingInfoTitle}>Memuat siswa sesi...</Text>
+          </View>
+        ) : studentLoadError ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>{studentLoadError}</Text>
+          </View>
+        ) : isUploadingSync ? (
           <View style={styles.pendingInfoCard}>
             <Text style={styles.pendingInfoTitle}>Mengunggah data ke server...</Text>
             <Text style={styles.pendingInfoDescription}>
@@ -282,8 +416,7 @@ export function StudentMeasurementScreen({
           <View style={styles.pendingInfoCard}>
             <Text style={styles.pendingInfoTitle}>Data belum tersimpan ke server</Text>
             <Text style={styles.pendingInfoDescription}>
-              {pendingSyncCount} data pengukuran masih tersimpan lokal. Tekan ikon upload
-              di kanan atas untuk simulasi kirim ke server.
+              {pendingSyncCount} data pengukuran masih tersimpan lokal.
             </Text>
           </View>
         ) : showSyncSuccess ? (
@@ -298,9 +431,9 @@ export function StudentMeasurementScreen({
         <View style={styles.sessionDetailCard}>
           <View style={styles.sessionDetailTopRow}>
             <Text style={styles.sessionDetailEyebrow}>Detail Session</Text>
-            <Text style={styles.sessionDetailDate}>10 April 2026</Text>
+            <Text style={styles.sessionDetailDate}>{sessionDateLabel}</Text>
           </View>
-          <Text style={styles.sessionDetailTitle}>SDN Sukamaju 01 • Kelas 3A</Text>
+          <Text style={styles.sessionDetailTitle}>{className}</Text>
           <Text style={styles.sessionDetailMeta}>
             {measuredStudentsCount}/{students.length} siswa sudah dicatat
           </Text>
@@ -339,8 +472,8 @@ export function StudentMeasurementScreen({
         <View style={styles.list}>
           {students.map(student => (
             <Pressable
-              key={student.name}
-              onPress={() => openMeasurementForm(student.name)}
+              key={student.id}
+              onPress={() => openMeasurementForm(student.id)}
               style={({ pressed }) => [
                 styles.studentCard,
                 pressed && styles.studentCardPressed,
@@ -409,14 +542,27 @@ export function StudentMeasurementScreen({
                 { paddingTop: Math.max(insets.top + 2, 30) },
               ]}>
               <View style={styles.modalHeaderTopRow}>
-                <View style={styles.progressTrack}>
+                <Pressable
+                  accessibilityRole="adjustable"
+                  accessibilityLabel="Pilih posisi siswa pada progres sesi"
+                  onLayout={handleProgressLayout}
+                  onPress={handleProgressPress}
+                  style={styles.progressTrack}>
                   <View
                     style={[
                       styles.progressFill,
                       { width: `${progressValue * 100}%` },
                     ]}
                   />
-                </View>
+                  {selectedStudentIndex >= 0 && students.length > 0 ? (
+                    <View
+                      style={[
+                        styles.progressThumb,
+                        { left: `${((selectedStudentIndex + 0.5) / students.length) * 100}%` },
+                      ]}
+                    />
+                  ) : null}
+                </Pressable>
                 <Pressable
                   accessibilityLabel="Tutup input data manual"
                   onPress={closeMeasurementForm}
@@ -483,7 +629,7 @@ export function StudentMeasurementScreen({
                       <View
                         style={[
                           styles.connectionStatusDot,
-                          allDevicesConnected
+                          hasAnyDeviceConnected
                             ? styles.connectionStatusDotConnected
                             : styles.connectionStatusDotWarning,
                         ]}
@@ -511,22 +657,20 @@ export function StudentMeasurementScreen({
                       </Text>
                     </Pressable>
                   <Pressable
-                    disabled={!allDevicesConnected}
                     onPress={() => {
-                      if (allDevicesConnected) {
-                        setMeasurementMode('auto');
+                      setMeasurementMode('auto');
+                      if (latestWeightDisplay !== null) {
+                        setWeightValue(latestWeightDisplay);
                       }
                     }}
                     style={({ pressed }) => [
                       styles.modeToggleButton,
-                      !allDevicesConnected && styles.modeToggleButtonDisabled,
                       measurementMode === 'auto' && styles.modeToggleButtonActive,
                       pressed && styles.modeToggleButtonPressed,
                     ]}>
                     <Text
                       style={[
                         styles.modeToggleLabel,
-                        !allDevicesConnected && styles.modeToggleLabelDisabled,
                         measurementMode === 'auto' && styles.modeToggleLabelActive,
                       ]}>
                       Auto
@@ -534,6 +678,31 @@ export function StudentMeasurementScreen({
                     </Pressable>
                   </View>
                 </View>
+
+                {measurementMode === 'auto' ? (
+                  <View style={styles.autoDevicePanel}>
+                    <View style={styles.autoDeviceTextBlock}>
+                      <Text style={styles.autoDeviceTitle}>
+                        {deviceConnection.weightConnected
+                          ? 'Timbangan terhubung'
+                          : 'Timbangan belum terhubung'}
+                      </Text>
+                      <Text style={styles.autoDeviceDescription}>
+                        {latestWeightDisplay
+                          ? `Berat terakhir ${latestWeightDisplay} kg`
+                          : 'Hubungkan perangkat atau isi berat secara manual sementara.'}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={onOpenDeviceManager}
+                      style={({ pressed }) => [
+                        styles.autoDeviceButton,
+                        pressed && styles.autoDeviceButtonPressed,
+                      ]}>
+                      <Text style={styles.autoDeviceButtonLabel}>Perangkat</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </View>
             </View>
 
@@ -573,14 +742,24 @@ export function StudentMeasurementScreen({
                   </View>
                 </View>
 
+                {saveError ? (
+                  <View style={styles.modalErrorCard}>
+                    <Text style={styles.modalErrorText}>{saveError}</Text>
+                  </View>
+                ) : null}
+
                 <View style={styles.modalActions}>
                   <Pressable
+                    disabled={isSavingMeasurement}
                     onPress={saveAndContinueToNextStudent}
                     style={({ pressed }) => [
                       styles.primaryButton,
+                      isSavingMeasurement && styles.primaryButtonDisabled,
                       pressed && styles.primaryButtonPressed,
                     ]}>
-                    <Text style={styles.primaryButtonLabel}>Simpan dan Lanjutkan</Text>
+                    <Text style={styles.primaryButtonLabel}>
+                      {isSavingMeasurement ? 'Menyimpan...' : 'Simpan dan Lanjutkan'}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -782,6 +961,17 @@ const styles = StyleSheet.create({
     ...typography.bodySm,
     color: colors.text.secondary,
   },
+  errorCard: {
+    borderWidth: 1,
+    borderColor: colors.feedback.errorBorder,
+    borderRadius: radius.md,
+    backgroundColor: colors.feedback.errorBackground,
+    padding: spacing[12],
+  },
+  errorText: {
+    ...typography.bodySm,
+    color: colors.feedback.errorText,
+  },
   sessionDetailCard: {
     backgroundColor: colors.surface.primary,
     borderRadius: radius.lg,
@@ -894,11 +1084,22 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: radius.pill,
     backgroundColor: 'rgba(255,255,255,0.2)',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   progressFill: {
     height: '100%',
     borderRadius: radius.pill,
+    backgroundColor: colors.text.inverse,
+  },
+  progressThumb: {
+    position: 'absolute',
+    top: -5,
+    width: 18,
+    height: 18,
+    marginLeft: -9,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: colors.brand.primary700,
     backgroundColor: colors.text.inverse,
   },
   closeButton: {
@@ -1032,6 +1233,44 @@ const styles = StyleSheet.create({
   modeToggleLabelDisabled: {
     color: colors.brand.primary100,
   },
+  autoDevicePanel: {
+    width: '100%',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    padding: spacing[12],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+  },
+  autoDeviceTextBlock: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  autoDeviceTitle: {
+    ...typography.labelMd,
+    color: colors.text.inverse,
+  },
+  autoDeviceDescription: {
+    ...typography.caption,
+    color: colors.brand.primary100,
+  },
+  autoDeviceButton: {
+    minHeight: 36,
+    borderRadius: radius.pill,
+    backgroundColor: colors.text.inverse,
+    paddingHorizontal: spacing[12],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  autoDeviceButtonPressed: {
+    opacity: 0.9,
+  },
+  autoDeviceButtonLabel: {
+    ...typography.labelMd,
+    color: colors.brand.primary700,
+  },
   modalContent: {
     paddingTop: spacing[24],
     paddingHorizontal: spacing[16],
@@ -1148,6 +1387,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing[12],
   },
+  modalErrorCard: {
+    borderWidth: 1,
+    borderColor: colors.feedback.errorBorder,
+    borderRadius: radius.md,
+    backgroundColor: colors.feedback.errorBackground,
+    padding: spacing[12],
+  },
+  modalErrorText: {
+    ...typography.bodySm,
+    color: colors.feedback.errorText,
+  },
   primaryButton: {
     flex: 1,
     minHeight: 52,
@@ -1159,6 +1409,9 @@ const styles = StyleSheet.create({
   },
   primaryButtonPressed: {
     backgroundColor: colors.brand.primary700,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.7,
   },
   primaryButtonLabel: {
     ...typography.labelLg,

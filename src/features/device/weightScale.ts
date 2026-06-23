@@ -191,6 +191,14 @@ function parseMeasurementKg(base64Value: string, characteristicUuid: string): nu
   }
 }
 
+export function parseWeightMeasurementKg(base64Value: string): number | null {
+  try {
+    return parseWeightScaleMeasurementKg(base64ToBytes(base64Value));
+  } catch {
+    return null;
+  }
+}
+
 function normalizeUuid(input: string) {
   const lower = input.toLowerCase();
   if (lower.length === 4) {
@@ -356,7 +364,11 @@ export async function startMonitoringWeightScale(device: Device) {
     const readyDevice = await device.discoverAllServicesAndCharacteristics();
     const subscriptions: Subscription[] = [];
 
-    const monitorTargets = [
+    const monitorTargets: Array<{
+      serviceUuid: string;
+      characteristicUuid: string;
+      label: WeightScaleDebugLog['source'];
+    }> = [
       {
         serviceUuid: WEIGHT_SCALE_SERVICE_UUID,
         characteristicUuid: WEIGHT_MEASUREMENT_CHAR_UUID,

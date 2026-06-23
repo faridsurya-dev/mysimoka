@@ -3,11 +3,11 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton, TextField } from '../../../shared/components';
-import { createSchool, joinSchool } from '../../../services';
+import { createSchool, joinSchool, type CurrentSchoolContext } from '../../../services';
 import { colors, radius, spacing, typography } from '../../../theme';
 
 type SchoolConnectionScreenProps = {
-  onConnected: () => void;
+  onConnected: (schoolContext: CurrentSchoolContext) => void;
   onLogout: () => void;
 };
 
@@ -37,18 +37,19 @@ export function SchoolConnectionScreen({ onConnected, onLogout }: SchoolConnecti
     setIsSubmitting(true);
 
     try {
+      let schoolContext: CurrentSchoolContext;
       if (mode === 'create') {
-        await createSchool({
+        schoolContext = await createSchool({
           name: schoolName.trim(),
           number: schoolNumber.trim().length > 0 ? schoolNumber.trim() : undefined,
         });
       } else {
-        await joinSchool({
+        schoolContext = await joinSchool({
           joinCode: joinCode.trim().toUpperCase(),
         });
       }
 
-      onConnected();
+      onConnected(schoolContext);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Koneksi sekolah gagal.';
       setSubmitError(message);

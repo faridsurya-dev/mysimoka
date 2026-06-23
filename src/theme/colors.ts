@@ -6,6 +6,7 @@ export const colors = {
     primary500: '#2D9CDB',
     primary300: '#8DD0F2',
     primary100: '#E9F6FD',
+    primary50: '#F4FBFF',
   },
   neutral: {
     950: '#162534',
@@ -31,6 +32,7 @@ export const colors = {
   },
   surface: {
     app: '#F8FAFB',
+    card: '#FFFFFF',
     primary: '#FFFFFF',
     secondary: '#F2F5F8',
     muted: '#EDF4F8',
@@ -66,6 +68,8 @@ export const colors = {
     successBackground: '#EAF8F0',
     warningBackground: '#FFF6E6',
     errorBackground: '#FDEEEE',
+    errorBorder: '#F5B9B9',
+    errorText: '#B42318',
     infoBackground: '#EAF5FC',
   },
 } as const;

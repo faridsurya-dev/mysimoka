@@ -22,8 +22,10 @@ type ProfileOverviewScreenProps = {
   schoolAddress: string | null;
   schoolJoinCode: string | null;
   canEditSchoolProfile: boolean;
+  isLoadingSchoolProfile: boolean;
   isRegeneratingJoinCode: boolean;
   schoolActionError: string | null;
+  schoolProfileLoadError: string | null;
   academicYears: Array<{ id: string; label: string; isActive: boolean }>;
   isLoadingAcademicYears: boolean;
   isSavingAcademicYear: boolean;
@@ -68,8 +70,10 @@ export function ProfileOverviewScreen({
   schoolAddress,
   schoolJoinCode,
   canEditSchoolProfile,
+  isLoadingSchoolProfile,
   isRegeneratingJoinCode,
   schoolActionError,
+  schoolProfileLoadError,
   academicYears,
   isLoadingAcademicYears,
   isSavingAcademicYear,
@@ -231,6 +235,12 @@ export function ProfileOverviewScreen({
           </View>
 
           <View style={styles.schoolInfoList}>
+            {isLoadingSchoolProfile ? (
+              <Text style={styles.schoolInfoHelperText}>Memuat informasi sekolah...</Text>
+            ) : null}
+            {schoolProfileLoadError ? (
+              <Text style={styles.schoolEditErrorText}>{schoolProfileLoadError}</Text>
+            ) : null}
             <View style={styles.schoolInfoRow}>
               <Text style={styles.schoolInfoLabel}>Nama Sekolah</Text>
               <Text style={styles.schoolInfoValue}>{schoolName}</Text>

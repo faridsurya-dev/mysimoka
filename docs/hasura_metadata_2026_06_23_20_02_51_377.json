@@ -1,0 +1,2702 @@
+{
+  "resource_version": 68,
+  "metadata": {
+    "version": 3,
+    "sources": [
+      {
+        "name": "default",
+        "kind": "postgres",
+        "tables": [
+          {
+            "table": {
+              "name": "refresh_tokens",
+              "schema": "auth"
+            },
+            "object_relationships": [
+              {
+                "name": "user",
+                "using": {
+                  "foreign_key_constraint_on": "user_id"
+                }
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "roles",
+              "schema": "auth"
+            },
+            "array_relationships": [
+              {
+                "name": "user_roles",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "role_id",
+                    "table": {
+                      "name": "user_roles",
+                      "schema": "auth"
+                    }
+                  }
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_system",
+                    "code",
+                    "description",
+                    "name",
+                    "created_at",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_system",
+                    "code",
+                    "description",
+                    "name",
+                    "created_at",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_system",
+                    "code",
+                    "description",
+                    "name",
+                    "created_at",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_system",
+                    "code",
+                    "description",
+                    "name",
+                    "created_at",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "code",
+                    "name",
+                    "description",
+                    "is_system",
+                    "created_at"
+                  ],
+                  "filter": {}
+                }
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_system",
+                    "code",
+                    "description",
+                    "name",
+                    "created_at",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_system",
+                    "code",
+                    "description",
+                    "name",
+                    "created_at",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "user_roles",
+              "schema": "auth"
+            },
+            "object_relationships": [
+              {
+                "name": "role",
+                "using": {
+                  "foreign_key_constraint_on": "role_id"
+                }
+              },
+              {
+                "name": "user",
+                "using": {
+                  "foreign_key_constraint_on": "user_id"
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_default",
+                    "created_at",
+                    "role_id",
+                    "user_id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_default",
+                    "created_at",
+                    "role_id",
+                    "user_id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_default",
+                    "created_at",
+                    "role_id",
+                    "user_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_default",
+                    "created_at",
+                    "role_id",
+                    "user_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "user_id",
+                    "role_id",
+                    "is_default",
+                    "created_at"
+                  ],
+                  "filter": {
+                    "user_id": {
+                      "_eq": "X-Hasura-User-Id"
+                    }
+                  }
+                }
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_default",
+                    "created_at",
+                    "role_id",
+                    "user_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_default",
+                    "created_at",
+                    "role_id",
+                    "user_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "users",
+              "schema": "auth"
+            },
+            "array_relationships": [
+              {
+                "name": "face_embeddings",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "submitted_by",
+                    "table": {
+                      "name": "face_embeddings",
+                      "schema": "public"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "refresh_tokens",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "user_id",
+                    "table": {
+                      "name": "refresh_tokens",
+                      "schema": "auth"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "school_memberships",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "user_id",
+                    "table": {
+                      "name": "school_memberships",
+                      "schema": "public"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "schools",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "created_by",
+                    "table": {
+                      "name": "schools",
+                      "schema": "public"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "user_roles",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "user_id",
+                    "table": {
+                      "name": "user_roles",
+                      "schema": "auth"
+                    }
+                  }
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_blocked",
+                    "is_email_verified",
+                    "blocked_reason",
+                    "email",
+                    "email_verification_token",
+                    "full_name",
+                    "image_url",
+                    "password_hash",
+                    "blocked_at",
+                    "created_at",
+                    "email_verification_sent_at",
+                    "updated_at",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_blocked",
+                    "is_email_verified",
+                    "blocked_reason",
+                    "email",
+                    "email_verification_token",
+                    "full_name",
+                    "image_url",
+                    "password_hash",
+                    "blocked_at",
+                    "created_at",
+                    "email_verification_sent_at",
+                    "updated_at",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_blocked",
+                    "is_email_verified",
+                    "blocked_reason",
+                    "email",
+                    "email_verification_token",
+                    "full_name",
+                    "image_url",
+                    "password_hash",
+                    "blocked_at",
+                    "created_at",
+                    "email_verification_sent_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_blocked",
+                    "is_email_verified",
+                    "blocked_reason",
+                    "email",
+                    "email_verification_token",
+                    "full_name",
+                    "image_url",
+                    "password_hash",
+                    "blocked_at",
+                    "created_at",
+                    "email_verification_sent_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "email",
+                    "full_name",
+                    "image_url",
+                    "is_email_verified",
+                    "is_blocked",
+                    "blocked_at",
+                    "blocked_reason",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "id": {
+                      "_eq": "X-Hasura-User-Id"
+                    }
+                  }
+                }
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_blocked",
+                    "is_email_verified",
+                    "blocked_reason",
+                    "email",
+                    "email_verification_token",
+                    "full_name",
+                    "image_url",
+                    "password_hash",
+                    "blocked_at",
+                    "created_at",
+                    "email_verification_sent_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_blocked",
+                    "is_email_verified",
+                    "blocked_reason",
+                    "email",
+                    "email_verification_token",
+                    "full_name",
+                    "image_url",
+                    "password_hash",
+                    "blocked_at",
+                    "created_at",
+                    "email_verification_sent_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "full_name",
+                    "image_url"
+                  ],
+                  "filter": {
+                    "id": {
+                      "_eq": "X-Hasura-User-Id"
+                    }
+                  },
+                  "check": null
+                }
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "academic_years",
+              "schema": "public"
+            },
+            "array_relationships": [
+              {
+                "name": "classes",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "academic_year_id",
+                    "table": {
+                      "name": "classes",
+                      "schema": "public"
+                    }
+                  }
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "end_year",
+                    "label",
+                    "start_year",
+                    "created_at",
+                    "updated_at",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "end_year",
+                    "label",
+                    "start_year",
+                    "created_at",
+                    "updated_at",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "teacher",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "end_year",
+                    "label",
+                    "start_year",
+                    "created_at",
+                    "updated_at",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "end_year",
+                    "label",
+                    "start_year",
+                    "created_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "end_year",
+                    "label",
+                    "start_year",
+                    "created_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "label",
+                    "start_year",
+                    "end_year",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {},
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "teacher",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "label",
+                    "start_year",
+                    "end_year",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {},
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "label",
+                    "start_year",
+                    "end_year",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {},
+                  "allow_aggregations": true
+                }
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "end_year",
+                    "label",
+                    "start_year",
+                    "created_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": null
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "end_year",
+                    "label",
+                    "start_year",
+                    "created_at",
+                    "updated_at",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "classes",
+              "schema": "public"
+            },
+            "object_relationships": [
+              {
+                "name": "academic_year",
+                "using": {
+                  "foreign_key_constraint_on": "academic_year_id"
+                }
+              },
+              {
+                "name": "grade_level",
+                "using": {
+                  "foreign_key_constraint_on": "grade_level_id"
+                }
+              },
+              {
+                "name": "school",
+                "using": {
+                  "foreign_key_constraint_on": "school_id"
+                }
+              }
+            ],
+            "array_relationships": [
+              {
+                "name": "student_enrollments",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "class_id",
+                    "table": {
+                      "name": "student_enrollments",
+                      "schema": "public"
+                    }
+                  }
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {
+                    "school": {
+                      "school_memberships": {
+                        "_and": [
+                          {
+                            "user_id": {
+                              "_eq": "X-Hasura-User-Id"
+                            }
+                          },
+                          {
+                            "status": {
+                              "_eq": "active"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "columns": [
+                    "school_id",
+                    "academic_year_id",
+                    "grade_level_id",
+                    "name"
+                  ]
+                }
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {
+                    "school": {
+                      "school_memberships": {
+                        "_and": [
+                          {
+                            "user_id": {
+                              "_eq": "X-Hasura-User-Id"
+                            }
+                          },
+                          {
+                            "role": {
+                              "_eq": "school_admin"
+                            }
+                          },
+                          {
+                            "status": {
+                              "_eq": "active"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "columns": [
+                    "school_id",
+                    "academic_year_id",
+                    "grade_level_id",
+                    "name"
+                  ]
+                }
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "school_id",
+                    "academic_year_id",
+                    "grade_level_id",
+                    "name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "school": {
+                      "school_memberships": {
+                        "_and": [
+                          {
+                            "user_id": {
+                              "_eq": "X-Hasura-User-Id"
+                            }
+                          },
+                          {
+                            "status": {
+                              "_eq": "active"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "school_id",
+                    "academic_year_id",
+                    "grade_level_id",
+                    "name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "school": {
+                      "school_memberships": {
+                        "_and": [
+                          {
+                            "user_id": {
+                              "_eq": "X-Hasura-User-Id"
+                            }
+                          },
+                          {
+                            "role": {
+                              "_eq": "school_admin"
+                            }
+                          },
+                          {
+                            "status": {
+                              "_eq": "active"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "teacher",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "school_id",
+                    "academic_year_id",
+                    "grade_level_id",
+                    "name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "school": {
+                      "school_memberships": {
+                        "_and": [
+                          {
+                            "user_id": {
+                              "_eq": "X-Hasura-User-Id"
+                            }
+                          },
+                          {
+                            "status": {
+                              "_eq": "active"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "name",
+                    "created_at",
+                    "updated_at",
+                    "academic_year_id",
+                    "grade_level_id",
+                    "id",
+                    "school_id"
+                  ],
+                  "filter": {},
+                  "check": null
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "name",
+                    "grade_level_id"
+                  ],
+                  "filter": {
+                    "school": {
+                      "school_memberships": {
+                        "_and": [
+                          {
+                            "user_id": {
+                              "_eq": "X-Hasura-User-Id"
+                            }
+                          },
+                          {
+                            "role": {
+                              "_eq": "school_admin"
+                            }
+                          },
+                          {
+                            "status": {
+                              "_eq": "active"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "check": null
+                }
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "face_embeddings",
+              "schema": "public"
+            },
+            "object_relationships": [
+              {
+                "name": "student",
+                "using": {
+                  "foreign_key_constraint_on": "student_id"
+                }
+              },
+              {
+                "name": "submitted_by_user",
+                "using": {
+                  "foreign_key_constraint_on": "submitted_by"
+                }
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_id",
+                    "submitted_by",
+                    "file_path",
+                    "detection_score",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "student": {
+                      "enrollments": {
+                        "class": {
+                          "school": {
+                            "school_memberships": {
+                              "_and": [
+                                {
+                                  "user_id": {
+                                    "_eq": "X-Hasura-User-Id"
+                                  }
+                                },
+                                {
+                                  "status": {
+                                    "_eq": "active"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_id",
+                    "submitted_by",
+                    "file_path",
+                    "detection_score",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "student": {
+                      "enrollments": {
+                        "class": {
+                          "school": {
+                            "school_memberships": {
+                              "_and": [
+                                {
+                                  "user_id": {
+                                    "_eq": "X-Hasura-User-Id"
+                                  }
+                                },
+                                {
+                                  "role": {
+                                    "_eq": "school_admin"
+                                  }
+                                },
+                                {
+                                  "status": {
+                                    "_eq": "active"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "role": "teacher",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_id",
+                    "submitted_by",
+                    "file_path",
+                    "detection_score",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "student": {
+                      "enrollments": {
+                        "_and": [
+                          {
+                            "status": {
+                              "_eq": "active"
+                            }
+                          },
+                          {
+                            "class": {
+                              "school": {
+                                "school_memberships": {
+                                  "_and": [
+                                    {
+                                      "user_id": {
+                                        "_eq": "X-Hasura-User-Id"
+                                      }
+                                    },
+                                    {
+                                      "status": {
+                                        "_eq": "active"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "grade_levels",
+              "schema": "public"
+            },
+            "array_relationships": [
+              {
+                "name": "classes",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "grade_level_id",
+                    "table": {
+                      "name": "classes",
+                      "schema": "public"
+                    }
+                  }
+                }
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "level_number",
+                    "label",
+                    "is_active",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {},
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "level_number",
+                    "label",
+                    "is_active",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "is_active": {
+                      "_eq": true
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "teacher",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "level_number",
+                    "label",
+                    "is_active",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "is_active": {
+                      "_eq": true
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "level_number",
+                    "label",
+                    "is_active",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "is_active": {
+                      "_eq": true
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "immunization_sessions",
+              "schema": "public"
+            },
+            "insert_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "session_date",
+                    "dose_label",
+                    "name",
+                    "note",
+                    "officer_name",
+                    "vaccine_name",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "class_id",
+                    "created_by",
+                    "id",
+                    "school_id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "session_date",
+                    "dose_label",
+                    "name",
+                    "note",
+                    "officer_name",
+                    "vaccine_name",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "class_id",
+                    "created_by",
+                    "id",
+                    "school_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "session_date",
+                    "dose_label",
+                    "name",
+                    "note",
+                    "officer_name",
+                    "vaccine_name",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "class_id",
+                    "created_by",
+                    "id",
+                    "school_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "measurement_sessions",
+              "schema": "public"
+            },
+            "insert_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "session_date",
+                    "name",
+                    "note",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "class_id",
+                    "created_by",
+                    "id",
+                    "school_id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "session_date",
+                    "name",
+                    "note",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "class_id",
+                    "created_by",
+                    "id",
+                    "school_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "session_date",
+                    "name",
+                    "note",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "class_id",
+                    "created_by",
+                    "id",
+                    "school_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "school_memberships",
+              "schema": "public"
+            },
+            "object_relationships": [
+              {
+                "name": "school",
+                "using": {
+                  "foreign_key_constraint_on": "school_id"
+                }
+              },
+              {
+                "name": "user",
+                "using": {
+                  "foreign_key_constraint_on": "user_id"
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {},
+                  "check": null
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "is_active",
+                    "role",
+                    "status",
+                    "created_at",
+                    "joined_at",
+                    "updated_at",
+                    "id",
+                    "school_id",
+                    "user_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "schools",
+              "schema": "public"
+            },
+            "object_relationships": [
+              {
+                "name": "user",
+                "using": {
+                  "foreign_key_constraint_on": "created_by"
+                }
+              }
+            ],
+            "array_relationships": [
+              {
+                "name": "classes",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "school_id",
+                    "table": {
+                      "name": "classes",
+                      "schema": "public"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "school_memberships",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "school_id",
+                    "table": {
+                      "name": "school_memberships",
+                      "schema": "public"
+                    }
+                  }
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "user",
+                "permission": {
+                  "columns": [
+                    "address",
+                    "join_code",
+                    "name",
+                    "number",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              },
+              {
+                "role": "school_member",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "student_enrollments",
+              "schema": "public"
+            },
+            "object_relationships": [
+              {
+                "name": "class",
+                "using": {
+                  "foreign_key_constraint_on": "class_id"
+                }
+              },
+              {
+                "name": "student",
+                "using": {
+                  "foreign_key_constraint_on": "student_id"
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {
+                    "class": {
+                      "school": {
+                        "school_memberships": {
+                          "_and": [
+                            {
+                              "user_id": {
+                                "_eq": "X-Hasura-User-Id"
+                              }
+                            },
+                            {
+                              "status": {
+                                "_eq": "active"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "columns": [
+                    "student_id",
+                    "class_id",
+                    "status",
+                    "enrolled_at"
+                  ]
+                }
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {
+                    "class": {
+                      "school": {
+                        "school_memberships": {
+                          "_and": [
+                            {
+                              "user_id": {
+                                "_eq": "X-Hasura-User-Id"
+                              }
+                            },
+                            {
+                              "role": {
+                                "_eq": "school_admin"
+                              }
+                            },
+                            {
+                              "status": {
+                                "_eq": "active"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "columns": [
+                    "student_id",
+                    "class_id",
+                    "status",
+                    "enrolled_at"
+                  ]
+                }
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_id",
+                    "class_id",
+                    "status",
+                    "enrolled_at",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "class": {
+                      "school": {
+                        "school_memberships": {
+                          "_and": [
+                            {
+                              "user_id": {
+                                "_eq": "X-Hasura-User-Id"
+                              }
+                            },
+                            {
+                              "status": {
+                                "_eq": "active"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_id",
+                    "class_id",
+                    "status",
+                    "enrolled_at",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "class": {
+                      "school": {
+                        "school_memberships": {
+                          "_and": [
+                            {
+                              "user_id": {
+                                "_eq": "X-Hasura-User-Id"
+                              }
+                            },
+                            {
+                              "role": {
+                                "_eq": "school_admin"
+                              }
+                            },
+                            {
+                              "status": {
+                                "_eq": "active"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "teacher",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_id",
+                    "class_id",
+                    "status",
+                    "enrolled_at",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "class": {
+                      "school": {
+                        "school_memberships": {
+                          "_and": [
+                            {
+                              "user_id": {
+                                "_eq": "X-Hasura-User-Id"
+                              }
+                            },
+                            {
+                              "status": {
+                                "_eq": "active"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "status",
+                    "enrolled_at",
+                    "class_id"
+                  ],
+                  "filter": {
+                    "class": {
+                      "school": {
+                        "school_memberships": {
+                          "_and": [
+                            {
+                              "user_id": {
+                                "_eq": "X-Hasura-User-Id"
+                              }
+                            },
+                            {
+                              "role": {
+                                "_eq": "school_admin"
+                              }
+                            },
+                            {
+                              "status": {
+                                "_eq": "active"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "check": null
+                }
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "student_immunization_records",
+              "schema": "public"
+            },
+            "insert_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "adverse_event_notes",
+                    "batch_number",
+                    "dose_label",
+                    "injection_site",
+                    "notes",
+                    "officer_name",
+                    "vaccine_name",
+                    "administered_at",
+                    "created_at",
+                    "updated_at",
+                    "capture_method",
+                    "id",
+                    "recorded_by",
+                    "session_id",
+                    "student_enrollment_id",
+                    "student_id",
+                    "status",
+                    "client_record_id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "adverse_event_notes",
+                    "batch_number",
+                    "dose_label",
+                    "injection_site",
+                    "notes",
+                    "officer_name",
+                    "vaccine_name",
+                    "administered_at",
+                    "created_at",
+                    "updated_at",
+                    "capture_method",
+                    "id",
+                    "recorded_by",
+                    "session_id",
+                    "student_enrollment_id",
+                    "student_id",
+                    "status",
+                    "client_record_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "adverse_event_notes",
+                    "batch_number",
+                    "dose_label",
+                    "injection_site",
+                    "notes",
+                    "officer_name",
+                    "vaccine_name",
+                    "administered_at",
+                    "created_at",
+                    "updated_at",
+                    "capture_method",
+                    "id",
+                    "recorded_by",
+                    "session_id",
+                    "student_enrollment_id",
+                    "student_id",
+                    "status",
+                    "client_record_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "student_measurement_records",
+              "schema": "public"
+            },
+            "insert_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "height_cm",
+                    "weight_kg",
+                    "device_id",
+                    "device_name",
+                    "notes",
+                    "created_at",
+                    "measured_at",
+                    "updated_at",
+                    "capture_method",
+                    "capture_source",
+                    "id",
+                    "recorded_by",
+                    "session_id",
+                    "student_enrollment_id",
+                    "student_id",
+                    "device_payload",
+                    "client_record_id"
+                  ]
+                },
+                "comment": ""
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "height_cm",
+                    "weight_kg",
+                    "device_id",
+                    "device_name",
+                    "notes",
+                    "created_at",
+                    "measured_at",
+                    "updated_at",
+                    "capture_method",
+                    "capture_source",
+                    "id",
+                    "recorded_by",
+                    "session_id",
+                    "student_enrollment_id",
+                    "student_id",
+                    "device_payload",
+                    "client_record_id"
+                  ],
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "height_cm",
+                    "weight_kg",
+                    "device_id",
+                    "device_name",
+                    "notes",
+                    "created_at",
+                    "measured_at",
+                    "updated_at",
+                    "capture_method",
+                    "capture_source",
+                    "id",
+                    "recorded_by",
+                    "session_id",
+                    "student_enrollment_id",
+                    "student_id",
+                    "device_payload",
+                    "client_record_id"
+                  ],
+                  "filter": {},
+                  "check": {}
+                },
+                "comment": ""
+              }
+            ],
+            "delete_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "filter": {}
+                },
+                "comment": ""
+              }
+            ]
+          },
+          {
+            "table": {
+              "name": "students",
+              "schema": "public"
+            },
+            "array_relationships": [
+              {
+                "name": "enrollments",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "student_id",
+                    "table": {
+                      "name": "student_enrollments",
+                      "schema": "public"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "face_embeddings",
+                "using": {
+                  "foreign_key_constraint_on": {
+                    "column": "student_id",
+                    "table": {
+                      "name": "face_embeddings",
+                      "schema": "public"
+                    }
+                  }
+                }
+              }
+            ],
+            "insert_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "student_number",
+                    "full_name",
+                    "date_of_birth",
+                    "gender",
+                    "address",
+                    "parent_name",
+                    "parent_phone",
+                    "notes",
+                    "is_active"
+                  ]
+                }
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "check": {},
+                  "columns": [
+                    "student_number",
+                    "full_name",
+                    "date_of_birth",
+                    "gender",
+                    "address",
+                    "parent_name",
+                    "parent_phone",
+                    "notes",
+                    "is_active"
+                  ]
+                }
+              }
+            ],
+            "select_permissions": [
+              {
+                "role": "admin_sekolah",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_number",
+                    "full_name",
+                    "date_of_birth",
+                    "gender",
+                    "address",
+                    "parent_name",
+                    "parent_phone",
+                    "notes",
+                    "is_active",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "enrollments": {
+                      "class": {
+                        "school": {
+                          "school_memberships": {
+                            "_and": [
+                              {
+                                "user_id": {
+                                  "_eq": "X-Hasura-User-Id"
+                                }
+                              },
+                              {
+                                "status": {
+                                  "_eq": "active"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_number",
+                    "full_name",
+                    "date_of_birth",
+                    "gender",
+                    "address",
+                    "parent_name",
+                    "parent_phone",
+                    "notes",
+                    "is_active",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "enrollments": {
+                      "class": {
+                        "school": {
+                          "school_memberships": {
+                            "_and": [
+                              {
+                                "user_id": {
+                                  "_eq": "X-Hasura-User-Id"
+                                }
+                              },
+                              {
+                                "role": {
+                                  "_eq": "school_admin"
+                                }
+                              },
+                              {
+                                "status": {
+                                  "_eq": "active"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              },
+              {
+                "role": "teacher",
+                "permission": {
+                  "columns": [
+                    "id",
+                    "student_number",
+                    "full_name",
+                    "date_of_birth",
+                    "gender",
+                    "address",
+                    "parent_name",
+                    "parent_phone",
+                    "notes",
+                    "is_active",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "filter": {
+                    "enrollments": {
+                      "_and": [
+                        {
+                          "status": {
+                            "_eq": "active"
+                          }
+                        },
+                        {
+                          "class": {
+                            "school": {
+                              "school_memberships": {
+                                "_and": [
+                                  {
+                                    "user_id": {
+                                      "_eq": "X-Hasura-User-Id"
+                                    }
+                                  },
+                                  {
+                                    "status": {
+                                      "_eq": "active"
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "allow_aggregations": true
+                }
+              }
+            ],
+            "update_permissions": [
+              {
+                "role": "school_admin",
+                "permission": {
+                  "columns": [
+                    "student_number",
+                    "full_name",
+                    "date_of_birth",
+                    "gender",
+                    "address",
+                    "parent_name",
+                    "parent_phone",
+                    "notes",
+                    "is_active"
+                  ],
+                  "filter": {
+                    "enrollments": {
+                      "class": {
+                        "school": {
+                          "school_memberships": {
+                            "_and": [
+                              {
+                                "user_id": {
+                                  "_eq": "X-Hasura-User-Id"
+                                }
+                              },
+                              {
+                                "role": {
+                                  "_eq": "school_admin"
+                                }
+                              },
+                              {
+                                "status": {
+                                  "_eq": "active"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "check": null
+                }
+              }
+            ]
+          }
+        ],
+        "configuration": {
+          "connection_info": {
+            "database_url": {
+              "from_env": "HASURA_GRAPHQL_DATABASE_URL"
+            },
+            "isolation_level": "read-committed",
+            "pool_settings": {
+              "connection_lifetime": 600,
+              "idle_timeout": 180,
+              "max_connections": 50,
+              "retries": 1
+            },
+            "use_prepared_statements": true
+          }
+        }
+      }
+    ]
+  }
+}

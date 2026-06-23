@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
@@ -39,8 +39,9 @@ import {
   clearCurrentSchoolContext,
   createAcademicYear,
   deleteAcademicYear,
-  API_BASE_URL,
+  AUTH_BASE_URL,
   getAuthSession,
+  getSchoolProfile,
   hydrateAuthSession,
   listAcademicYears,
   listMemberships,
@@ -54,8 +55,13 @@ import {
   sortRolesByPriority,
   updateAcademicYear,
 } from '../services';
+import type { ClassroomListItem, DashboardStudentListItem } from '../services';
 import { colors, radius, spacing, typography } from '../theme';
-import type { CreateSessionPayload } from '../types';
+import type {
+  CreateSessionPayload,
+  ImmunizationSessionListItem,
+  MeasurementSessionListItem,
+} from '../types';
 import type { TeacherListItem } from '../types';
 import {
   DashboardRoute,
@@ -82,6 +88,7 @@ const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
 const DEFAULT_SCHOOL_NAME = 'Sekolah';
 const BOOTSTRAP_FALLBACK_DELAY_MS = 8000;
 const HEALTHCHECK_TIMEOUT_MS = 5000;
+const BOOTSTRAP_NETWORK_TIMEOUT_MS = 6000;
 
 type UnknownObject = Record<string, unknown>;
 
@@ -114,6 +121,15 @@ function toDisplayValue(value: string | null | undefined, fallback: string): str
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : fallback;
+}
+
+function isUuidString(value: string | null | undefined): value is string {
+  if (!value) {
+    return false;
+  }
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  );
 }
 
 function readStringOrNumberValue(source: UnknownObject | null, keys: string[]): string | null {
@@ -190,6 +206,23 @@ function isAuthSessionInvalidError(error: unknown): boolean {
   );
 }
 
+async function withBootstrapTimeout<T>(task: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timeout.`));
+    }, BOOTSTRAP_NETWORK_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([task, timeout]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 function isActiveMembershipStatus(status: string): boolean {
   const normalized = status.trim().toLowerCase();
   return normalized === 'active' || normalized === 'approved' || normalized === 'accepted';
@@ -199,6 +232,9 @@ function isMembershipConnected(
   membership: Awaited<ReturnType<typeof listMemberships>>[number],
 ): boolean {
   if (membership.is_active) {
+    return true;
+  }
+  if (membership.school_id && normalizeRoleKey(membership.role) !== 'user') {
     return true;
   }
   return isActiveMembershipStatus(membership.status);
@@ -314,6 +350,8 @@ export function RootNavigator() {
     useState('');
   const [teachers, setTeachers] = useState<TeacherListItem[]>(TEACHER_LIST_ITEMS);
   const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<DashboardStudentListItem | null>(null);
+  const [selectedClassroom, setSelectedClassroom] = useState<ClassroomListItem | null>(null);
   const [studentProfileBackRoute, setStudentProfileBackRoute] = useState<
     'class-detail' | 'student-search-results' | 'student-list'
   >('class-detail');
@@ -327,6 +365,10 @@ export function RootNavigator() {
     'Petugas UKS',
   );
   const [activeSessionDate, setActiveSessionDate] = useState<string>(new Date().toISOString());
+  const [activeMeasurementSession, setActiveMeasurementSession] =
+    useState<MeasurementSessionListItem | null>(null);
+  const [activeImmunizationSession, setActiveImmunizationSession] =
+    useState<ImmunizationSessionListItem | null>(null);
   const [identifiedStudentName, setIdentifiedStudentName] = useState<string | null>(null);
   const [faceCropPreview, setFaceCropPreview] = useState<FaceCropPreviewPayload | null>(null);
   const [faceCameraFacing, setFaceCameraFacing] = useState<'back' | 'front'>('back');
@@ -334,6 +376,8 @@ export function RootNavigator() {
     useState<ProfileRoute>('profile-overview');
   const [isRegeneratingJoinCode, setIsRegeneratingJoinCode] = useState(false);
   const [schoolActionError, setSchoolActionError] = useState<string | null>(null);
+  const [isLoadingSchoolProfile, setIsLoadingSchoolProfile] = useState(false);
+  const [schoolProfileLoadError, setSchoolProfileLoadError] = useState<string | null>(null);
   const [academicYears, setAcademicYears] = useState<
     Array<{ id: string; label: string; isActive: boolean }>
   >([]);
@@ -343,6 +387,50 @@ export function RootNavigator() {
   const sessionUser = asObject(getAuthSession().user);
   const profileData = buildProfileSettingsData(sessionUser, schoolMemberships);
 
+  const refreshSchoolMemberships = async (): Promise<Awaited<ReturnType<typeof listMemberships>>> => {
+    const memberships = await listMemberships();
+    setSchoolMemberships(memberships);
+    const activeMembership =
+      memberships.find(item => isMembershipConnected(item) && item.is_active) ??
+      memberships.find(item => isMembershipConnected(item)) ??
+      null;
+
+    if (activeMembership) {
+      setCurrentSchoolId(activeMembership.school_id);
+      setCurrentSchool(activeMembership.school_name);
+      await saveCurrentSchoolContext({
+        schoolId: activeMembership.school_id,
+        schoolName: activeMembership.school_name,
+      });
+    }
+
+    return memberships;
+  };
+
+  const refreshActiveSchoolProfile = useCallback(async (schoolId: string): Promise<void> => {
+    const school = await getSchoolProfile(schoolId);
+    setSchoolMemberships(previous =>
+      previous.map(item =>
+        item.school_id === school.id
+          ? {
+              ...item,
+              name: school.name ?? item.name,
+              school_name: school.name ?? item.school_name,
+              school_number: school.number,
+              school_address: school.address,
+              school_join_code: school.joinCode ?? item.school_join_code,
+            }
+          : item,
+      ),
+    );
+    setCurrentSchoolId(school.id);
+    setCurrentSchool(school.name ?? currentSchool);
+    await saveCurrentSchoolContext({
+      schoolId: school.id,
+      schoolName: school.name ?? currentSchool,
+    });
+  }, [currentSchool]);
+
   const checkStartupHealth = async (): Promise<void> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
@@ -350,7 +438,7 @@ export function RootNavigator() {
     }, HEALTHCHECK_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/health`, {
+      const response = await fetch(`${AUTH_BASE_URL}/health`, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -374,7 +462,55 @@ export function RootNavigator() {
   };
 
   useEffect(() => {
-    if (activeTab !== 'profile' || !profileData.schoolId) {
+    if (activeTab !== 'profile' || !isAuthenticated) {
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingSchoolProfile(true);
+    setSchoolProfileLoadError(null);
+
+    if (!profileData.schoolId) {
+      setSchoolProfileLoadError('Sekolah aktif belum dipilih.');
+      setIsLoadingSchoolProfile(false);
+      return;
+    }
+    if (!isUuidString(profileData.schoolId)) {
+      clearCurrentSchoolContext().catch(() => undefined);
+      setCurrentSchoolId(null);
+      setSchoolProfileLoadError('ID sekolah aktif tidak valid. Silakan pilih sekolah ulang.');
+      refreshSchoolMemberships().catch(() => undefined);
+      setIsLoadingSchoolProfile(false);
+      return;
+    }
+
+    refreshActiveSchoolProfile(profileData.schoolId)
+      .then(() => {
+        if (isMounted) {
+          setSchoolProfileLoadError(null);
+        }
+      })
+      .catch(error => {
+        if (!isMounted) {
+          return;
+        }
+        const message =
+          error instanceof Error ? error.message : 'Gagal memuat informasi sekolah.';
+        setSchoolProfileLoadError(message);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingSchoolProfile(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, isAuthenticated, profileData.schoolId, refreshActiveSchoolProfile]);
+
+  useEffect(() => {
+    if (activeTab !== 'profile' || !profileData.schoolId || !isUuidString(profileData.schoolId)) {
       setAcademicYears([]);
       setAcademicYearActionError(null);
       return;
@@ -418,25 +554,17 @@ export function RootNavigator() {
     }, BOOTSTRAP_FALLBACK_DELAY_MS);
 
     const bootstrapAuth = async () => {
-      let canContinue = true;
       try {
         setIsBootstrapSlow(false);
         setBootstrapHealthError(null);
         try {
           await checkStartupHealth();
         } catch (error) {
-          canContinue = false;
-          if (isMounted) {
-            setIsBootstrapSlow(true);
+          if (__DEV__) {
             const message =
-              error instanceof Error
-                ? error.message
-                : 'Tidak bisa terhubung ke service auth.';
-            setBootstrapHealthError(
-              `${message} Endpoint: ${API_BASE_URL}/health`,
-            );
+              error instanceof Error ? error.message : 'Tidak bisa terhubung ke service auth.';
+            console.log('[bootstrap][auth][health][warn]', `${message} Endpoint: ${AUTH_BASE_URL}/health`);
           }
-          return;
         }
 
         const restoredSession = await hydrateAuthSession();
@@ -449,7 +577,7 @@ export function RootNavigator() {
         let memberships: Awaited<ReturnType<typeof listMemberships>> = [];
         if (hasActiveSession) {
           try {
-            memberships = await listMemberships();
+            memberships = await withBootstrapTimeout(listMemberships(), 'List membership');
             setSchoolMemberships(memberships);
             hasSchoolMembership = memberships.some(item => isMembershipConnected(item));
           } catch (error) {
@@ -466,6 +594,12 @@ export function RootNavigator() {
                 );
               }
               return;
+            }
+            if (__DEV__) {
+              console.log(
+                '[bootstrap][memberships][warn]',
+                error instanceof Error ? error.message : 'unknown error',
+              );
             }
             hasSchoolMembership = false;
           }
@@ -507,7 +641,7 @@ export function RootNavigator() {
         }
       } finally {
         if (isMounted) {
-          setIsBootstrappingAuth(!canContinue ? true : false);
+          setIsBootstrappingAuth(false);
         }
       }
     };
@@ -588,20 +722,54 @@ export function RootNavigator() {
     if (authRoute === 'school-connection') {
       return (
         <SchoolConnectionScreen
-          onConnected={() => {
+          onConnected={schoolContext => {
             listMemberships()
-              .then(memberships => {
+              .then(async memberships => {
                 const activeMemberships = memberships.filter(item => isMembershipConnected(item));
                 setSchoolMemberships(memberships);
-                if (activeMemberships.length === 0) {
-                  setAuthRoute('school-connection');
+
+                const selectedMembership =
+                  activeMemberships.find(item => item.school_id === schoolContext.schoolId) ??
+                  activeMemberships.find(item => item.is_active) ??
+                  activeMemberships[0] ??
+                  {
+                    school_id: schoolContext.schoolId,
+                    school_name: schoolContext.schoolName,
+                    role: 'school_admin',
+                    is_active: true,
+                  };
+                setCurrentSchoolId(selectedMembership.school_id);
+                setCurrentSchool(selectedMembership.school_name);
+                setSchoolMemberships(previous =>
+                  previous.map(item => ({
+                    ...item,
+                    is_active: item.school_id === selectedMembership.school_id,
+                  })),
+                );
+                await saveCurrentSchoolContext({
+                  schoolId: selectedMembership.school_id,
+                  schoolName: selectedMembership.school_name,
+                });
+                setIsSchoolSelectionVisible(false);
+                setIsAuthenticated(true);
+                setActiveTab('dashboard');
+                setDashboardRoute('dashboard');
+              })
+              .catch(async error => {
+                if (isAuthSessionInvalidError(error)) {
+                  clearAuthSession();
+                  clearCurrentSchoolContext().catch(() => undefined);
+                  setAuthRoute('login');
                   return;
                 }
-                setIsSchoolSelectionVisible(true);
+
+                setCurrentSchoolId(schoolContext.schoolId);
+                setCurrentSchool(schoolContext.schoolName);
+                await saveCurrentSchoolContext(schoolContext);
+                setIsSchoolSelectionVisible(false);
                 setIsAuthenticated(true);
-              })
-              .catch(() => {
-                setAuthRoute('login');
+                setActiveTab('dashboard');
+                setDashboardRoute('dashboard');
               });
           }}
           onLogout={() => {
@@ -623,11 +791,6 @@ export function RootNavigator() {
           });
           setCurrentSchool(extractSchoolNameFromLoginUser(result.user) ?? DEFAULT_SCHOOL_NAME);
 
-          if (result.requiresSchoolConnection) {
-            setAuthRoute('school-connection');
-            return;
-          }
-
           listMemberships()
             .then(memberships => {
               const activeMemberships = memberships.filter(item => isMembershipConnected(item));
@@ -638,10 +801,35 @@ export function RootNavigator() {
                 return;
               }
 
+              if (activeMemberships.length === 1) {
+                const selectedMembership = activeMemberships[0];
+                setCurrentSchoolId(selectedMembership.school_id);
+                setCurrentSchool(selectedMembership.school_name);
+                setSchoolMemberships(previous =>
+                  previous.map(item => ({
+                    ...item,
+                    is_active: item.school_id === selectedMembership.school_id,
+                  }))
+                );
+                saveCurrentSchoolContext({
+                  schoolId: selectedMembership.school_id,
+                  schoolName: selectedMembership.school_name,
+                }).catch(() => undefined);
+                setIsAuthenticated(true);
+                setIsSchoolSelectionVisible(false);
+                return;
+              }
+
               setIsAuthenticated(true);
               setIsSchoolSelectionVisible(true);
             })
-            .catch(() => {
+            .catch(error => {
+              if (__DEV__) {
+                console.log(
+                  '[login][memberships][error]',
+                  error instanceof Error ? error.message : 'unknown error',
+                );
+              }
               setAuthRoute('school-connection');
             });
         }}
@@ -725,16 +913,24 @@ export function RootNavigator() {
             teachers,
             selectedTeacher:
               teachers.find(item => item.id === selectedTeacherId) ?? null,
-            onOpenClassDetail: () => setDashboardRoute('class-detail'),
-            onOpenStudentFromClass: () => {
+            selectedStudent,
+            selectedClassroom,
+            onOpenClassDetail: classroom => {
+              setSelectedClassroom(classroom);
+              setDashboardRoute('class-detail');
+            },
+            onOpenStudentFromClass: student => {
+              setSelectedStudent(student);
               setStudentProfileBackRoute('class-detail');
               setDashboardRoute('student-profile');
             },
-            onOpenStudentFromSearchResults: () => {
+            onOpenStudentFromSearchResults: student => {
+              setSelectedStudent(student);
               setStudentProfileBackRoute('student-search-results');
               setDashboardRoute('student-profile');
             },
-            onOpenStudentFromList: () => {
+            onOpenStudentFromList: student => {
+              setSelectedStudent(student);
               setStudentProfileBackRoute('student-list');
               setDashboardRoute('student-profile');
             },
@@ -742,12 +938,10 @@ export function RootNavigator() {
               setDashboardStudentSearchKeyword(keyword);
               setDashboardRoute('student-search-results');
             },
-            onOpenImmunizationRecording: () => {
+            onOpenRecordingHome: () => {
               setActiveTab('measurement');
-              setMeasurementProgram('immunization');
-              setMeasurementRoute('create-session');
-              setActiveImmunizationDose(null);
-              setActiveImmunizationOfficer('Petugas UKS');
+              setMeasurementProgram('measurement');
+              setMeasurementRoute('session-list');
             },
             onStartMeasurementFromClass: () => {
               setActiveTab('measurement');
@@ -774,6 +968,9 @@ export function RootNavigator() {
 
       {activeTab === 'measurement'
         ? renderMeasurementStack({
+            schoolId: currentSchoolId,
+            activeMeasurementSession,
+            activeImmunizationSession,
             identifiedStudentName,
             measurementRoute,
             measurementProgram,
@@ -781,11 +978,29 @@ export function RootNavigator() {
             faceCameraFacing,
             onFaceCameraFacingChange: setFaceCameraFacing,
             onBackToSessionList: () => setMeasurementRoute('session-list'),
-            onOpenCreateSession: () => setMeasurementRoute('create-session'),
+            onOpenCreateSession: () => {
+              setActiveMeasurementSession(null);
+              setActiveImmunizationSession(null);
+              setMeasurementRoute('create-session');
+            },
             onCreateSession: (payload: CreateSessionPayload) => {
               setActiveSessionDate(payload.sessionDate);
 
               if (measurementProgram === 'measurement') {
+                if (payload.sessionId && payload.classId) {
+                  setActiveMeasurementSession({
+                    id: payload.sessionId,
+                    schoolId: currentSchoolId ?? '',
+                    classId: payload.classId,
+                    className: payload.className,
+                    name: payload.sessionName,
+                    note: payload.note || null,
+                    sessionDate: payload.sessionDate,
+                    status: 'active',
+                    totalStudents: 0,
+                    recordedCount: 0,
+                  });
+                }
                 setMeasurementRoute('manual');
                 return;
               }
@@ -793,9 +1008,39 @@ export function RootNavigator() {
               setActiveImmunizationType(payload.immunizationType ?? 'Td');
               setActiveImmunizationDose(payload.immunizationDose ?? null);
               setActiveImmunizationOfficer(payload.immunizationOfficer ?? 'Petugas UKS');
+              if (payload.sessionId && payload.classId) {
+                setActiveImmunizationSession({
+                  id: payload.sessionId,
+                  schoolId: currentSchoolId ?? '',
+                  classId: payload.classId,
+                  className: payload.className,
+                  name: payload.sessionName,
+                  vaccineName: payload.immunizationType ?? 'Td',
+                  doseLabel: payload.immunizationDose ?? null,
+                  officerName: payload.immunizationOfficer ?? 'Petugas UKS',
+                  note: payload.note || null,
+                  sessionDate: payload.sessionDate,
+                  status: 'active',
+                  totalStudents: 0,
+                  recordedCount: 0,
+                });
+              }
               setMeasurementRoute('immunization-manual');
             },
             onOpenFaceIdentification: () => setMeasurementRoute('face-identification'),
+            onOpenMeasurementSession: session => {
+              setActiveMeasurementSession(session);
+              setActiveSessionDate(session.sessionDate);
+              setMeasurementRoute('manual');
+            },
+            onOpenImmunizationSession: session => {
+              setActiveImmunizationSession(session);
+              setActiveImmunizationType(session.vaccineName);
+              setActiveImmunizationDose(session.doseLabel);
+              setActiveImmunizationOfficer(session.officerName ?? 'Petugas UKS');
+              setActiveSessionDate(session.sessionDate);
+              setMeasurementRoute('immunization-manual');
+            },
             onFaceCropReady: payload => {
               setFaceCropPreview(payload);
               setMeasurementRoute('face-crop-preview');
@@ -825,7 +1070,7 @@ export function RootNavigator() {
             onBackToProfile: () => setProfileRoute('profile-overview'),
             onOpenEditProfile: () => setProfileRoute('edit-profile'),
             onOpenEditSchoolProfile: () => {
-              if (!profileData.canEditSchoolProfile) {
+              if (!profileData.canEditSchoolProfile || !isUuidString(profileData.schoolId)) {
                 return;
               }
               setSchoolActionError(null);
@@ -835,15 +1080,18 @@ export function RootNavigator() {
             onOpenEditEmail: () => setProfileRoute('edit-email'),
             onOpenEditPassword: () => setProfileRoute('edit-password'),
             onRegenerateJoinCode: () => {
-              if (!profileData.canEditSchoolProfile || !profileData.schoolId || isRegeneratingJoinCode) {
+              if (
+                !profileData.canEditSchoolProfile ||
+                !isUuidString(profileData.schoolId) ||
+                isRegeneratingJoinCode
+              ) {
                 return;
               }
 
               setIsRegeneratingJoinCode(true);
               regenerateSchoolJoinCode(profileData.schoolId)
-                .then(() => listMemberships())
-                .then(memberships => {
-                  setSchoolMemberships(memberships);
+                .then(() => refreshActiveSchoolProfile(profileData.schoolId as string))
+                .then(() => {
                   setSchoolActionError(null);
                 })
                 .catch(error => {
@@ -858,7 +1106,7 @@ export function RootNavigator() {
                 });
             },
             onAddAcademicYear: (name: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -899,7 +1147,7 @@ export function RootNavigator() {
                 });
             },
             onSetActiveAcademicYear: (academicYearId: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -925,7 +1173,7 @@ export function RootNavigator() {
                 });
             },
             onUpdateAcademicYear: (academicYearId: string, name: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -961,7 +1209,7 @@ export function RootNavigator() {
                 });
             },
             onDeleteAcademicYear: (academicYearId: string) => {
-              if (!profileData.schoolId || isSavingAcademicYear) {
+              if (!isUuidString(profileData.schoolId) || isSavingAcademicYear) {
                 return;
               }
 
@@ -984,10 +1232,10 @@ export function RootNavigator() {
                 });
             },
             onSchoolProfileSaved: () => {
-              listMemberships()
-                .then(memberships => {
-                  setSchoolMemberships(memberships);
-                })
+              if (!isUuidString(profileData.schoolId)) {
+                return;
+              }
+              refreshActiveSchoolProfile(profileData.schoolId)
                 .catch(() => undefined);
             },
             onSwitchSchool: () => {
@@ -1010,6 +1258,8 @@ export function RootNavigator() {
                   setActiveImmunizationDose(null);
                   setActiveImmunizationOfficer('Petugas UKS');
                   setActiveSessionDate(new Date().toISOString());
+                  setActiveMeasurementSession(null);
+                  setActiveImmunizationSession(null);
                   setIdentifiedStudentName(null);
                   setFaceCropPreview(null);
                   setIsSchoolSelectionVisible(true);
@@ -1036,6 +1286,8 @@ export function RootNavigator() {
               setActiveImmunizationDose(null);
               setActiveImmunizationOfficer('Petugas UKS');
               setActiveSessionDate(new Date().toISOString());
+              setActiveMeasurementSession(null);
+              setActiveImmunizationSession(null);
               setIdentifiedStudentName(null);
               setFaceCropPreview(null);
               setProfileRoute('profile-overview');
@@ -1043,6 +1295,8 @@ export function RootNavigator() {
             },
             isRegeneratingJoinCode,
             schoolActionError,
+            isLoadingSchoolProfile,
+            schoolProfileLoadError,
             academicYears,
             isLoadingAcademicYears,
             isSavingAcademicYear,
@@ -1111,12 +1365,14 @@ type DashboardStackOptions = {
   onSaveTeacher: (teacher: TeacherListItem) => void;
   teachers: TeacherListItem[];
   selectedTeacher: TeacherListItem | null;
-  onOpenClassDetail: () => void;
-  onOpenStudentFromClass: () => void;
-  onOpenStudentFromSearchResults: () => void;
-  onOpenStudentFromList: () => void;
+  selectedStudent: DashboardStudentListItem | null;
+  selectedClassroom: ClassroomListItem | null;
+  onOpenClassDetail: (classroom: ClassroomListItem) => void;
+  onOpenStudentFromClass: (student: DashboardStudentListItem) => void;
+  onOpenStudentFromSearchResults: (student: DashboardStudentListItem) => void;
+  onOpenStudentFromList: (student: DashboardStudentListItem) => void;
   onOpenStudentSearchResults: (keyword: string) => void;
-  onOpenImmunizationRecording: () => void;
+  onOpenRecordingHome: () => void;
   onStartMeasurementFromClass: () => void;
   onStartImmunizationFromStudentProfile: () => void;
   onOpenFaceRegistrationFromClass: () => void;
@@ -1138,12 +1394,14 @@ function renderDashboardStack({
   onSaveTeacher,
   teachers,
   selectedTeacher,
+  selectedStudent,
+  selectedClassroom,
   onOpenClassDetail,
   onOpenStudentFromClass,
   onOpenStudentFromSearchResults,
   onOpenStudentFromList,
   onOpenStudentSearchResults,
-  onOpenImmunizationRecording,
+  onOpenRecordingHome,
   onStartMeasurementFromClass,
   onStartImmunizationFromStudentProfile,
   onOpenFaceRegistrationFromClass,
@@ -1155,6 +1413,7 @@ function renderDashboardStack({
     case 'class-list':
       return (
         <ClassListScreen
+          schoolId={currentSchoolId}
           onBack={onBackToDashboard}
           onOpenClassDetail={onOpenClassDetail}
         />
@@ -1162,6 +1421,7 @@ function renderDashboardStack({
     case 'teacher-list':
       return (
         <TeacherListScreen
+          schoolId={currentSchoolId}
           onBack={onBackToDashboard}
           onOpenTeacherDetail={onOpenTeacherDetail}
           onAddTeacher={onAddTeacher}
@@ -1180,6 +1440,7 @@ function renderDashboardStack({
       if (!selectedTeacher) {
         return (
           <TeacherListScreen
+            schoolId={currentSchoolId}
             onBack={onBackToDashboard}
             onOpenTeacherDetail={onOpenTeacherDetail}
             onAddTeacher={onAddTeacher}
@@ -1199,6 +1460,8 @@ function renderDashboardStack({
       return (
         <ClassDetailScreen
           onBack={onOpenClassList}
+          schoolId={currentSchoolId}
+          classroom={selectedClassroom}
           onOpenStudent={onOpenStudentFromClass}
           onStartMeasurement={onStartMeasurementFromClass}
           onOpenFaceRegistration={onOpenFaceRegistrationFromClass}
@@ -1208,24 +1471,21 @@ function renderDashboardStack({
       return (
         <FaceRegistrationScreen
           onBack={onBackFromFaceRegistration}
-          studentNames={[
-            'Alya Putri Maharani',
-            'Bima Saputra',
-            'Citra Maharani',
-            'Dimas Pratama',
-          ]}
+          schoolId={currentSchoolId}
         />
       );
     case 'student-profile':
       return (
         <StudentProfileScreen
           onBack={onBackFromStudentProfile}
+          student={selectedStudent}
           onOpenImmunizationRecord={onStartImmunizationFromStudentProfile}
         />
       );
     case 'student-search-results':
       return (
         <StudentSearchResultsScreen
+          schoolId={currentSchoolId}
           keyword={studentSearchKeyword}
           onBack={onBackToDashboard}
           onOpenStudentProfile={onOpenStudentFromSearchResults}
@@ -1236,10 +1496,11 @@ function renderDashboardStack({
       return (
         <DashboardScreen
           currentSchool={currentSchool}
+          schoolId={currentSchoolId}
           onOpenClassList={onOpenClassList}
           onOpenStudentList={onOpenStudentList}
           onOpenTeacherList={onOpenTeacherList}
-          onOpenImmunizationRecording={onOpenImmunizationRecording}
+          onOpenRecording={onOpenRecordingHome}
           onSearchStudents={onOpenStudentSearchResults}
         />
       );
@@ -1247,6 +1508,9 @@ function renderDashboardStack({
 }
 
 type MeasurementStackOptions = {
+  schoolId: string | null;
+  activeMeasurementSession: MeasurementSessionListItem | null;
+  activeImmunizationSession: ImmunizationSessionListItem | null;
   identifiedStudentName: string | null;
   measurementRoute: MeasurementRoute;
   measurementProgram: 'measurement' | 'immunization';
@@ -1261,6 +1525,8 @@ type MeasurementStackOptions = {
   onOpenCreateSession: () => void;
   onCreateSession: (payload: CreateSessionPayload) => void;
   onOpenFaceIdentification: () => void;
+  onOpenMeasurementSession: (session: MeasurementSessionListItem) => void;
+  onOpenImmunizationSession: (session: ImmunizationSessionListItem) => void;
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onFaceIdentificationMatched: (studentName: string) => void;
   onOpenManual: () => void;
@@ -1271,6 +1537,9 @@ type MeasurementStackOptions = {
 };
 
 function renderMeasurementStack({
+  schoolId,
+  activeMeasurementSession,
+  activeImmunizationSession,
   identifiedStudentName,
   measurementRoute,
   measurementProgram,
@@ -1285,6 +1554,8 @@ function renderMeasurementStack({
   onOpenCreateSession,
   onCreateSession,
   onOpenFaceIdentification,
+  onOpenMeasurementSession,
+  onOpenImmunizationSession,
   onFaceCropReady,
   onFaceIdentificationMatched,
   onOpenManual,
@@ -1297,6 +1568,7 @@ function renderMeasurementStack({
     case 'create-session':
       return (
         <CreateSessionScreen
+          schoolId={schoolId}
           mode={measurementProgram}
           onBack={onBackToSessionList}
           onCreateSession={onCreateSession}
@@ -1351,7 +1623,12 @@ function renderMeasurementStack({
     case 'manual':
       return (
         <StudentMeasurementScreen
+          sessionId={activeMeasurementSession?.id ?? null}
+          sessionName={activeMeasurementSession?.name}
+          sessionDate={activeMeasurementSession?.sessionDate ?? activeSessionDate}
+          className={activeMeasurementSession?.className}
           onBack={onBackToSessionList}
+          onOpenDeviceManager={onOpenDeviceManager}
           onOpenFaceIdentification={onOpenFaceIdentification}
           onOpenStudentSearch={onOpenStudentSearch}
         />
@@ -1360,6 +1637,9 @@ function renderMeasurementStack({
       return (
         <StudentImmunizationScreen
           onBack={onBackToSessionList}
+          sessionId={activeImmunizationSession?.id ?? null}
+          sessionName={activeImmunizationSession?.name}
+          className={activeImmunizationSession?.className}
           sessionImmunizationType={activeImmunizationType}
           sessionImmunizationDose={activeImmunizationDose}
           sessionImmunizationOfficer={activeImmunizationOfficer}
@@ -1374,14 +1654,26 @@ function renderMeasurementStack({
     default:
       return (
         <SessionListScreen
+          schoolId={schoolId}
           mode={measurementProgram}
           onSwitchMode={onSwitchProgram}
           onCreateSession={onOpenCreateSession}
-          onOpenSessionDetail={
-            measurementProgram === 'measurement'
-              ? onOpenManual
-              : onOpenImmunizationManual
-          }
+          onOpenSessionDetail={session => {
+            if (measurementProgram === 'measurement') {
+              if (session) {
+                onOpenMeasurementSession(session as MeasurementSessionListItem);
+                return;
+              }
+              onOpenManual();
+              return;
+            }
+
+            if (session) {
+              onOpenImmunizationSession(session as ImmunizationSessionListItem);
+              return;
+            }
+            onOpenImmunizationManual();
+          }}
         />
       );
   }
@@ -1402,6 +1694,8 @@ type ProfileStackOptions = {
   onLogout: () => void;
   isRegeneratingJoinCode: boolean;
   schoolActionError: string | null;
+  isLoadingSchoolProfile: boolean;
+  schoolProfileLoadError: string | null;
   academicYears: Array<{ id: string; label: string; isActive: boolean }>;
   isLoadingAcademicYears: boolean;
   isSavingAcademicYear: boolean;
@@ -1426,6 +1720,8 @@ function renderProfileStack({
   onLogout,
   isRegeneratingJoinCode,
   schoolActionError,
+  isLoadingSchoolProfile,
+  schoolProfileLoadError,
   profileData,
   academicYears,
   isLoadingAcademicYears,
@@ -1484,7 +1780,9 @@ function renderProfileStack({
           roleLabel={profileData.roleLabels}
           schoolActionError={schoolActionError}
           schoolAddress={profileData.schoolAddress}
+          isLoadingSchoolProfile={isLoadingSchoolProfile}
           isRegeneratingJoinCode={isRegeneratingJoinCode}
+          schoolProfileLoadError={schoolProfileLoadError}
           schoolJoinCode={profileData.schoolJoinCode}
           schoolName={profileData.schoolName}
           schoolNumber={profileData.schoolNumber}

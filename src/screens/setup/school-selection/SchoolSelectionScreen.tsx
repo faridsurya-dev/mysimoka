@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Screen, StatusPill } from '../../../shared/components';
-import type { SchoolMembership } from '../../../services';
+import { normalizeRoleKey, type SchoolMembership } from '../../../services';
 import { colors, radius, spacing, typography } from '../../../theme';
 
 type SchoolSelectionScreenProps = {
@@ -17,10 +17,27 @@ export function SchoolSelectionScreen({
   selectedSchoolId = null,
   errorMessage = null,
 }: SchoolSelectionScreenProps) {
-  const activeMemberships = memberships.filter(item => {
-    const normalizedStatus = item.status.trim().toLowerCase();
-    return item.is_active || normalizedStatus === 'active' || normalizedStatus === 'approved' || normalizedStatus === 'accepted';
-  });
+  const activeMemberships = Array.from(
+    memberships
+      .filter(item => {
+        const normalizedStatus = item.status.trim().toLowerCase();
+        return (
+          item.is_active ||
+          (item.school_id.trim().length > 0 && normalizeRoleKey(item.role) !== 'user') ||
+          normalizedStatus === 'active' ||
+          normalizedStatus === 'approved' ||
+          normalizedStatus === 'accepted'
+        );
+      })
+      .reduce<Map<string, SchoolMembership>>((membershipBySchool, membership) => {
+        const existingMembership = membershipBySchool.get(membership.school_id);
+        if (!existingMembership || membership.is_active) {
+          membershipBySchool.set(membership.school_id, membership);
+        }
+        return membershipBySchool;
+      }, new Map())
+      .values(),
+  );
 
   return (
     <Screen contentContainerStyle={styles.content}>
