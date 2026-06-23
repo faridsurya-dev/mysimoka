@@ -55,6 +55,7 @@ export function StudentListScreen({
   const [isBirthDatePickerVisible, setIsBirthDatePickerVisible] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [isSubmittingCreate, setIsSubmittingCreate] = useState(false);
+  const isCreateNisnMissing = createNisn.trim().length === 0;
 
   const loadStudents = useCallback(async () => {
     if (!schoolId) {
@@ -212,6 +213,10 @@ export function StudentListScreen({
     }
     if (!createClassroomId) {
       setCreateError('Kelas wajib dipilih.');
+      return;
+    }
+    if (isCreateNisnMissing) {
+      setCreateError('NISN wajib diisi.');
       return;
     }
 
@@ -630,7 +635,7 @@ export function StudentListScreen({
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.dialogFieldLabel}>NISN (Opsional)</Text>
+              <Text style={styles.dialogFieldLabel}>NISN</Text>
               <TextInput
                 value={createNisn}
                 onChangeText={setCreateNisn}
@@ -757,11 +762,16 @@ export function StudentListScreen({
                 <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
               </Pressable>
               <Pressable
+                disabled={isSubmittingCreate || isCreateNisnMissing}
                 onPress={handleSubmitCreateStudent}
                 style={({ pressed }) => [
                   styles.dialogPrimaryButton,
-                  pressed && styles.dialogPrimaryButtonPressed,
-                  isSubmittingCreate && styles.dialogPrimaryButtonDisabled,
+                  pressed &&
+                    !isSubmittingCreate &&
+                    !isCreateNisnMissing &&
+                    styles.dialogPrimaryButtonPressed,
+                  (isSubmittingCreate || isCreateNisnMissing) &&
+                    styles.dialogPrimaryButtonDisabled,
                 ]}>
                 <Text style={styles.dialogPrimaryButtonLabel}>
                   {isSubmittingCreate ? 'Menyimpan...' : 'Simpan'}
@@ -985,7 +995,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[20],
   },
   dialogBackdropPressable: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   dialogCard: {
     borderRadius: radius.lg,

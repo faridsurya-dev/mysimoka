@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { listClassroomsBySchool } from '../../services';
+import {
+  createImmunizationSession,
+  createMeasurementSession,
+  listClassroomsBySchool,
+} from '../../services';
+import type { ClassroomListItem } from '../../services';
 import { PrimaryButton, Screen, TextField } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { CreateSessionPayload } from '../../types';
@@ -90,8 +95,10 @@ export function CreateSessionScreen({
   const [immunizationOfficer, setImmunizationOfficer] = useState('Petugas UKS');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isClassSuggestionOpen, setIsClassSuggestionOpen] = useState(false);
-  const [classOptions, setClassOptions] = useState<string[]>([]);
+  const [classOptions, setClassOptions] = useState<ClassroomListItem[]>([]);
   const [classOptionsError, setClassOptionsError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const loadClassOptions = useCallback(async () => {
     if (!schoolId) {
@@ -102,7 +109,8 @@ export function CreateSessionScreen({
 
     try {
       const rows = await listClassroomsBySchool(schoolId);
-      setClassOptions(rows.map(row => row.name));
+      setClassOptions(rows);
+      setClassName(current => (current === 'Kelas 3A' && rows[0] ? rows[0].name : current));
       setClassOptionsError(null);
     } catch (error) {
       setClassOptions([]);
@@ -124,7 +132,12 @@ export function CreateSessionScreen({
       return classOptions;
     }
 
-    return classOptions.filter(option => option.toLowerCase().includes(keyword));
+    return classOptions.filter(option => option.name.toLowerCase().includes(keyword));
+  }, [className, classOptions]);
+
+  const selectedClass = useMemo(() => {
+    const normalizedName = className.trim().toLowerCase();
+    return classOptions.find(option => option.name.toLowerCase() === normalizedName) ?? null;
   }, [className, classOptions]);
 
   const calendarDays = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
@@ -133,19 +146,22 @@ export function CreateSessionScreen({
     return (
       sessionName.trim().length === 0 ||
       className.trim().length === 0 ||
+      (mode === 'measurement' && !selectedClass) ||
+      isSubmitting ||
       (mode === 'immunization' &&
         (immunizationType.trim().length === 0 || immunizationOfficer.trim().length === 0))
     );
-  }, [className, immunizationOfficer, immunizationType, mode, sessionName]);
+  }, [className, immunizationOfficer, immunizationType, isSubmitting, mode, selectedClass, sessionName]);
 
-  const handleCreateSession = () => {
+  const handleCreateSession = async () => {
     if (isSubmitDisabled) {
       return;
     }
 
-    onCreateSession({
+    const basePayload = {
+      classId: selectedClass?.id,
       sessionName: sessionName.trim(),
-      className: className.trim(),
+      className: selectedClass?.name ?? className.trim(),
       note: note.trim(),
       sessionDate: sessionDate.toISOString(),
       immunizationType: mode === 'immunization' ? immunizationType : undefined,
@@ -155,7 +171,69 @@ export function CreateSessionScreen({
           : undefined,
       immunizationOfficer:
         mode === 'immunization' ? immunizationOfficer.trim() : undefined,
-    });
+    };
+
+    if (mode === 'immunization') {
+      if (!schoolId || !selectedClass) {
+        setSubmitError('Sekolah dan kelas wajib dipilih sebelum membuat sesi.');
+        return;
+      }
+
+      setIsSubmitting(true);
+      setSubmitError(null);
+      try {
+        const createdSession = await createImmunizationSession({
+          schoolId,
+          classId: selectedClass.id,
+          name: basePayload.sessionName,
+          vaccineName: immunizationType,
+          doseLabel: immunizationDose,
+          officerName: immunizationOfficer,
+          note: basePayload.note,
+          sessionDate: basePayload.sessionDate,
+        });
+        onCreateSession({
+          ...basePayload,
+          sessionId: createdSession.id,
+          classId: createdSession.classId,
+          className: createdSession.className,
+          sessionDate: createdSession.sessionDate,
+        });
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : 'Gagal membuat sesi imunisasi.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    if (!schoolId || !selectedClass) {
+      setSubmitError('Sekolah dan kelas wajib dipilih sebelum membuat sesi.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      const createdSession = await createMeasurementSession({
+        schoolId,
+        classId: selectedClass.id,
+        name: basePayload.sessionName,
+        note: basePayload.note,
+        sessionDate: basePayload.sessionDate,
+      });
+      onCreateSession({
+        ...basePayload,
+        sessionId: createdSession.id,
+        classId: createdSession.classId,
+        className: createdSession.className,
+        sessionDate: createdSession.sessionDate,
+      });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Gagal membuat sesi pengukuran.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const openDatePicker = () => {
@@ -267,16 +345,16 @@ export function CreateSessionScreen({
                 {filteredClassOptions.length > 0 ? (
                   filteredClassOptions.slice(0, 6).map(option => (
                     <Pressable
-                      key={option}
+                      key={option.id}
                       onPressIn={() => {
-                        setClassName(option);
+                        setClassName(option.name);
                         setIsClassSuggestionOpen(false);
                       }}
                       style={({ pressed }) => [
                         styles.suggestionItem,
                         pressed && styles.suggestionItemPressed,
                       ]}>
-                      <Text style={styles.suggestionLabel}>{option}</Text>
+                      <Text style={styles.suggestionLabel}>{option.name}</Text>
                     </Pressable>
                   ))
                 ) : (
@@ -302,10 +380,22 @@ export function CreateSessionScreen({
           />
         </View>
 
+        {submitError ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>{submitError}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.footerActions}>
           <PrimaryButton
             disabled={isSubmitDisabled}
-            label={mode === 'measurement' ? 'Buat dan Mulai Pengukuran' : 'Buat dan Mulai Imunisasi'}
+            label={
+              isSubmitting
+                ? 'Membuat sesi...'
+                : mode === 'measurement'
+                  ? 'Buat dan Mulai Pengukuran'
+                  : 'Buat dan Mulai Imunisasi'
+            }
             onPress={handleCreateSession}
           />
         </View>
@@ -537,6 +627,17 @@ const styles = StyleSheet.create({
   footerActions: {
     marginTop: spacing[8],
     marginBottom: spacing[8],
+  },
+  errorCard: {
+    borderWidth: 1,
+    borderColor: colors.feedback.errorBorder,
+    borderRadius: radius.md,
+    backgroundColor: colors.feedback.errorBackground,
+    padding: spacing[12],
+  },
+  errorText: {
+    ...typography.bodySm,
+    color: colors.feedback.errorText,
   },
   modalBackdrop: {
     flex: 1,

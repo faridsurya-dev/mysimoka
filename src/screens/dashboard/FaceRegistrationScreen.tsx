@@ -36,6 +36,7 @@ type FaceRegistrationScreenProps = {
 
 type CapturedPhoto = {
   imageUri: string;
+  imageBase64?: string;
   fileName?: string;
   mimeType?: string;
   imageWidth: number;
@@ -354,7 +355,8 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
         selectionLimit: 1,
         maxWidth: 1200,
         maxHeight: 1200,
-        quality: 0.82,
+        quality: 0.8,
+        includeBase64: true,
       });
 
       if (result.didCancel) {
@@ -368,6 +370,7 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
       }
       setCapturedPhoto({
         imageUri: selectedAsset.uri,
+        imageBase64: selectedAsset.base64,
         fileName: selectedAsset.fileName ?? 'device-face.jpg',
         mimeType: selectedAsset.type ?? 'image/jpeg',
         imageWidth: Math.max(selectedAsset.width, 1),
@@ -653,6 +656,7 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
         images: [
           {
             uri: capturedPhoto.imageUri,
+            base64: capturedPhoto.imageBase64,
             name: capturedPhoto.fileName ?? `${selectedCrop.id}.jpg`,
             type: capturedPhoto.mimeType ?? 'image/jpeg',
           },
@@ -699,6 +703,7 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
       await registerStudentFacesBulk({
         images: pendingPairs.map(({ crop }) => ({
           uri: capturedPhoto.imageUri,
+          base64: capturedPhoto.imageBase64,
           name: capturedPhoto.fileName ?? `${crop.id}.jpg`,
           type: capturedPhoto.mimeType ?? 'image/jpeg',
         })),

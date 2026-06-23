@@ -57,7 +57,11 @@ import {
 } from '../services';
 import type { ClassroomListItem, DashboardStudentListItem } from '../services';
 import { colors, radius, spacing, typography } from '../theme';
-import type { CreateSessionPayload } from '../types';
+import type {
+  CreateSessionPayload,
+  ImmunizationSessionListItem,
+  MeasurementSessionListItem,
+} from '../types';
 import type { TeacherListItem } from '../types';
 import {
   DashboardRoute,
@@ -361,6 +365,10 @@ export function RootNavigator() {
     'Petugas UKS',
   );
   const [activeSessionDate, setActiveSessionDate] = useState<string>(new Date().toISOString());
+  const [activeMeasurementSession, setActiveMeasurementSession] =
+    useState<MeasurementSessionListItem | null>(null);
+  const [activeImmunizationSession, setActiveImmunizationSession] =
+    useState<ImmunizationSessionListItem | null>(null);
   const [identifiedStudentName, setIdentifiedStudentName] = useState<string | null>(null);
   const [faceCropPreview, setFaceCropPreview] = useState<FaceCropPreviewPayload | null>(null);
   const [faceCameraFacing, setFaceCameraFacing] = useState<'back' | 'front'>('back');
@@ -930,12 +938,10 @@ export function RootNavigator() {
               setDashboardStudentSearchKeyword(keyword);
               setDashboardRoute('student-search-results');
             },
-            onOpenImmunizationRecording: () => {
+            onOpenRecordingHome: () => {
               setActiveTab('measurement');
-              setMeasurementProgram('immunization');
-              setMeasurementRoute('create-session');
-              setActiveImmunizationDose(null);
-              setActiveImmunizationOfficer('Petugas UKS');
+              setMeasurementProgram('measurement');
+              setMeasurementRoute('session-list');
             },
             onStartMeasurementFromClass: () => {
               setActiveTab('measurement');
@@ -963,6 +969,8 @@ export function RootNavigator() {
       {activeTab === 'measurement'
         ? renderMeasurementStack({
             schoolId: currentSchoolId,
+            activeMeasurementSession,
+            activeImmunizationSession,
             identifiedStudentName,
             measurementRoute,
             measurementProgram,
@@ -970,11 +978,29 @@ export function RootNavigator() {
             faceCameraFacing,
             onFaceCameraFacingChange: setFaceCameraFacing,
             onBackToSessionList: () => setMeasurementRoute('session-list'),
-            onOpenCreateSession: () => setMeasurementRoute('create-session'),
+            onOpenCreateSession: () => {
+              setActiveMeasurementSession(null);
+              setActiveImmunizationSession(null);
+              setMeasurementRoute('create-session');
+            },
             onCreateSession: (payload: CreateSessionPayload) => {
               setActiveSessionDate(payload.sessionDate);
 
               if (measurementProgram === 'measurement') {
+                if (payload.sessionId && payload.classId) {
+                  setActiveMeasurementSession({
+                    id: payload.sessionId,
+                    schoolId: currentSchoolId ?? '',
+                    classId: payload.classId,
+                    className: payload.className,
+                    name: payload.sessionName,
+                    note: payload.note || null,
+                    sessionDate: payload.sessionDate,
+                    status: 'active',
+                    totalStudents: 0,
+                    recordedCount: 0,
+                  });
+                }
                 setMeasurementRoute('manual');
                 return;
               }
@@ -982,9 +1008,39 @@ export function RootNavigator() {
               setActiveImmunizationType(payload.immunizationType ?? 'Td');
               setActiveImmunizationDose(payload.immunizationDose ?? null);
               setActiveImmunizationOfficer(payload.immunizationOfficer ?? 'Petugas UKS');
+              if (payload.sessionId && payload.classId) {
+                setActiveImmunizationSession({
+                  id: payload.sessionId,
+                  schoolId: currentSchoolId ?? '',
+                  classId: payload.classId,
+                  className: payload.className,
+                  name: payload.sessionName,
+                  vaccineName: payload.immunizationType ?? 'Td',
+                  doseLabel: payload.immunizationDose ?? null,
+                  officerName: payload.immunizationOfficer ?? 'Petugas UKS',
+                  note: payload.note || null,
+                  sessionDate: payload.sessionDate,
+                  status: 'active',
+                  totalStudents: 0,
+                  recordedCount: 0,
+                });
+              }
               setMeasurementRoute('immunization-manual');
             },
             onOpenFaceIdentification: () => setMeasurementRoute('face-identification'),
+            onOpenMeasurementSession: session => {
+              setActiveMeasurementSession(session);
+              setActiveSessionDate(session.sessionDate);
+              setMeasurementRoute('manual');
+            },
+            onOpenImmunizationSession: session => {
+              setActiveImmunizationSession(session);
+              setActiveImmunizationType(session.vaccineName);
+              setActiveImmunizationDose(session.doseLabel);
+              setActiveImmunizationOfficer(session.officerName ?? 'Petugas UKS');
+              setActiveSessionDate(session.sessionDate);
+              setMeasurementRoute('immunization-manual');
+            },
             onFaceCropReady: payload => {
               setFaceCropPreview(payload);
               setMeasurementRoute('face-crop-preview');
@@ -1202,6 +1258,8 @@ export function RootNavigator() {
                   setActiveImmunizationDose(null);
                   setActiveImmunizationOfficer('Petugas UKS');
                   setActiveSessionDate(new Date().toISOString());
+                  setActiveMeasurementSession(null);
+                  setActiveImmunizationSession(null);
                   setIdentifiedStudentName(null);
                   setFaceCropPreview(null);
                   setIsSchoolSelectionVisible(true);
@@ -1228,6 +1286,8 @@ export function RootNavigator() {
               setActiveImmunizationDose(null);
               setActiveImmunizationOfficer('Petugas UKS');
               setActiveSessionDate(new Date().toISOString());
+              setActiveMeasurementSession(null);
+              setActiveImmunizationSession(null);
               setIdentifiedStudentName(null);
               setFaceCropPreview(null);
               setProfileRoute('profile-overview');
@@ -1312,7 +1372,7 @@ type DashboardStackOptions = {
   onOpenStudentFromSearchResults: (student: DashboardStudentListItem) => void;
   onOpenStudentFromList: (student: DashboardStudentListItem) => void;
   onOpenStudentSearchResults: (keyword: string) => void;
-  onOpenImmunizationRecording: () => void;
+  onOpenRecordingHome: () => void;
   onStartMeasurementFromClass: () => void;
   onStartImmunizationFromStudentProfile: () => void;
   onOpenFaceRegistrationFromClass: () => void;
@@ -1341,7 +1401,7 @@ function renderDashboardStack({
   onOpenStudentFromSearchResults,
   onOpenStudentFromList,
   onOpenStudentSearchResults,
-  onOpenImmunizationRecording,
+  onOpenRecordingHome,
   onStartMeasurementFromClass,
   onStartImmunizationFromStudentProfile,
   onOpenFaceRegistrationFromClass,
@@ -1440,7 +1500,7 @@ function renderDashboardStack({
           onOpenClassList={onOpenClassList}
           onOpenStudentList={onOpenStudentList}
           onOpenTeacherList={onOpenTeacherList}
-          onOpenImmunizationRecording={onOpenImmunizationRecording}
+          onOpenRecording={onOpenRecordingHome}
           onSearchStudents={onOpenStudentSearchResults}
         />
       );
@@ -1449,6 +1509,8 @@ function renderDashboardStack({
 
 type MeasurementStackOptions = {
   schoolId: string | null;
+  activeMeasurementSession: MeasurementSessionListItem | null;
+  activeImmunizationSession: ImmunizationSessionListItem | null;
   identifiedStudentName: string | null;
   measurementRoute: MeasurementRoute;
   measurementProgram: 'measurement' | 'immunization';
@@ -1463,6 +1525,8 @@ type MeasurementStackOptions = {
   onOpenCreateSession: () => void;
   onCreateSession: (payload: CreateSessionPayload) => void;
   onOpenFaceIdentification: () => void;
+  onOpenMeasurementSession: (session: MeasurementSessionListItem) => void;
+  onOpenImmunizationSession: (session: ImmunizationSessionListItem) => void;
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onFaceIdentificationMatched: (studentName: string) => void;
   onOpenManual: () => void;
@@ -1474,6 +1538,8 @@ type MeasurementStackOptions = {
 
 function renderMeasurementStack({
   schoolId,
+  activeMeasurementSession,
+  activeImmunizationSession,
   identifiedStudentName,
   measurementRoute,
   measurementProgram,
@@ -1488,6 +1554,8 @@ function renderMeasurementStack({
   onOpenCreateSession,
   onCreateSession,
   onOpenFaceIdentification,
+  onOpenMeasurementSession,
+  onOpenImmunizationSession,
   onFaceCropReady,
   onFaceIdentificationMatched,
   onOpenManual,
@@ -1555,7 +1623,12 @@ function renderMeasurementStack({
     case 'manual':
       return (
         <StudentMeasurementScreen
+          sessionId={activeMeasurementSession?.id ?? null}
+          sessionName={activeMeasurementSession?.name}
+          sessionDate={activeMeasurementSession?.sessionDate ?? activeSessionDate}
+          className={activeMeasurementSession?.className}
           onBack={onBackToSessionList}
+          onOpenDeviceManager={onOpenDeviceManager}
           onOpenFaceIdentification={onOpenFaceIdentification}
           onOpenStudentSearch={onOpenStudentSearch}
         />
@@ -1564,6 +1637,9 @@ function renderMeasurementStack({
       return (
         <StudentImmunizationScreen
           onBack={onBackToSessionList}
+          sessionId={activeImmunizationSession?.id ?? null}
+          sessionName={activeImmunizationSession?.name}
+          className={activeImmunizationSession?.className}
           sessionImmunizationType={activeImmunizationType}
           sessionImmunizationDose={activeImmunizationDose}
           sessionImmunizationOfficer={activeImmunizationOfficer}
@@ -1578,14 +1654,26 @@ function renderMeasurementStack({
     default:
       return (
         <SessionListScreen
+          schoolId={schoolId}
           mode={measurementProgram}
           onSwitchMode={onSwitchProgram}
           onCreateSession={onOpenCreateSession}
-          onOpenSessionDetail={
-            measurementProgram === 'measurement'
-              ? onOpenManual
-              : onOpenImmunizationManual
-          }
+          onOpenSessionDetail={session => {
+            if (measurementProgram === 'measurement') {
+              if (session) {
+                onOpenMeasurementSession(session as MeasurementSessionListItem);
+                return;
+              }
+              onOpenManual();
+              return;
+            }
+
+            if (session) {
+              onOpenImmunizationSession(session as ImmunizationSessionListItem);
+              return;
+            }
+            onOpenImmunizationManual();
+          }}
         />
       );
   }

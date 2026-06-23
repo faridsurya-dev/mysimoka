@@ -13,17 +13,15 @@ import { BarChart, LineChart } from 'react-native-gifted-charts';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  DASHBOARD_AVERAGE_METRICS,
-  DASHBOARD_BMI_CATEGORY_DATA,
-  DASHBOARD_HEIGHT_TREND,
   DASHBOARD_QUICK_MENUS,
-  DASHBOARD_WEIGHT_TREND,
 } from '../../features/dashboard';
 import {
+  getDashboardMeasurementAnalytics,
   getAuthSession,
   getMyProfile,
   listMemberships,
   listStudentsBySchool,
+  type DashboardMeasurementAnalytics,
   type DashboardStudentListItem,
 } from '../../services';
 import { InfoCard, Screen } from '../../shared/components';
@@ -35,7 +33,7 @@ type DashboardScreenProps = {
   onOpenClassList: () => void;
   onOpenStudentList: () => void;
   onOpenTeacherList: () => void;
-  onOpenImmunizationRecording: () => void;
+  onOpenRecording: () => void;
   onSearchStudents: (keyword: string) => void;
 };
 
@@ -250,13 +248,36 @@ function formatDateLabel(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function getChartMaxValue(data: Array<{ value: number }>, fallback: number) {
+  const maxValue = Math.max(...data.map(item => item.value), 0);
+  if (maxValue <= 0) {
+    return fallback;
+  }
+
+  return Math.ceil(maxValue * 1.2);
+}
+
+function buildAxisLabels(maxValue: number, sections = 4) {
+  return Array.from({ length: sections }, (_, index) =>
+    formatChartAxisValue((maxValue / sections) * (index + 1)),
+  );
+}
+
+function formatChartAxisValue(value: number) {
+  if (value >= 100) {
+    return String(Math.round(value));
+  }
+
+  return value.toFixed(1).replace(/\.0$/, '');
+}
+
 export function DashboardScreen({
   currentSchool,
   schoolId,
   onOpenClassList,
   onOpenStudentList,
   onOpenTeacherList,
-  onOpenImmunizationRecording,
+  onOpenRecording,
   onSearchStudents,
 }: DashboardScreenProps) {
   const insets = useSafeAreaInsets();
@@ -266,6 +287,10 @@ export function DashboardScreen({
   const [activeMembershipRole, setActiveMembershipRole] = useState<string | null>(null);
   const [students, setStudents] = useState<DashboardStudentListItem[]>([]);
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [measurementAnalytics, setMeasurementAnalytics] =
+    useState<DashboardMeasurementAnalytics | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [isPeriodDialogVisible, setIsPeriodDialogVisible] = useState(false);
   const [periodStartDate, setPeriodStartDate] = useState(() => new Date(2026, 0, 1));
   const [periodEndDate, setPeriodEndDate] = useState(() => new Date(2026, 11, 31));
@@ -274,6 +299,29 @@ export function DashboardScreen({
   const [studentQuery, setStudentQuery] = useState('');
   const periodStartDateLabel = formatDateLabel(periodStartDate);
   const periodEndDateLabel = formatDateLabel(periodEndDate);
+  const analytics =
+    measurementAnalytics ??
+    {
+      averageMetrics: [
+        { label: 'Rata-rata Tinggi', value: '0', unit: 'cm' },
+        { label: 'Rata-rata Berat', value: '0', unit: 'kg' },
+        { label: 'Rata-rata BMI', value: '0', unit: '' },
+      ],
+      bmiCategoryData: [
+        { value: 0, label: 'Kurus', frontColor: colors.accent.amber },
+        { value: 0, label: 'Normal', frontColor: colors.accent.teal },
+        { value: 0, label: 'Gemuk', frontColor: colors.brand.primary500 },
+        { value: 0, label: 'Obes', frontColor: colors.accent.red },
+      ],
+      heightTrend: [{ value: 0, label: '-' }],
+      weightTrend: [{ value: 0, label: '-' }],
+      measuredRecordCount: 0,
+    };
+  const bmiChartMaxValue = getChartMaxValue(analytics.bmiCategoryData, 4);
+  const heightChartMaxValue = getChartMaxValue(analytics.heightTrend, 160);
+  const weightChartMaxValue = getChartMaxValue(analytics.weightTrend, 80);
+  const heightAxisLabels = buildAxisLabels(heightChartMaxValue);
+  const weightAxisLabels = buildAxisLabels(weightChartMaxValue);
   const totalStudentsSubtitle = 'Periode aktif';
   const demographicCards = useMemo(() => {
     const activeStudents = students.filter(student => student.isActive !== false);
@@ -381,6 +429,48 @@ export function DashboardScreen({
       isMounted = false;
     };
   }, [schoolId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!schoolId) {
+      setMeasurementAnalytics(null);
+      setAnalyticsError(null);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setIsLoadingAnalytics(true);
+    setAnalyticsError(null);
+    getDashboardMeasurementAnalytics({
+      schoolId,
+      startDate: periodStartDateLabel,
+      endDate: periodEndDateLabel,
+    })
+      .then(result => {
+        if (isMounted) {
+          setMeasurementAnalytics(result);
+        }
+      })
+      .catch(error => {
+        if (isMounted) {
+          setMeasurementAnalytics(null);
+          setAnalyticsError(
+            error instanceof Error ? error.message : 'Gagal memuat analitik pengukuran.',
+          );
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingAnalytics(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [periodEndDateLabel, periodStartDateLabel, schoolId]);
 
   const handlePeriodDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     if (!activePeriodPickerField) {
@@ -504,22 +594,22 @@ export function DashboardScreen({
                     ? onOpenStudentList
                   : menu.label === 'Guru'
                     ? onOpenTeacherList
-                  : menu.label === 'Imunisasi'
-                    ? onOpenImmunizationRecording
+                  : menu.label === 'Pencatatan'
+                    ? onOpenRecording
                     : undefined
               }
               disabled={
                 menu.label !== 'Kelas' &&
                 menu.label !== 'Siswa' &&
                 menu.label !== 'Guru' &&
-                menu.label !== 'Imunisasi'
+                menu.label !== 'Pencatatan'
               }
               style={({ pressed }) => [
                 styles.quickMenuCard,
                 (menu.label === 'Kelas' ||
                   menu.label === 'Siswa' ||
                   menu.label === 'Guru' ||
-                  menu.label === 'Imunisasi') &&
+                  menu.label === 'Pencatatan') &&
                   pressed &&
                   styles.quickMenuCardPressed,
               ]}>
@@ -552,7 +642,11 @@ export function DashboardScreen({
         <View style={styles.analyticsBlockHeader}>
           <Text style={styles.analyticsBlockTitle}>Analitik Pengukuran</Text>
           <Text style={styles.analyticsBlockDescription}>
-            Ringkasan metrik dan tren berdasarkan rentang tanggal terpilih.
+            {isLoadingAnalytics
+              ? 'Memuat ringkasan pengukuran...'
+              : analyticsError
+                ? analyticsError
+                : `${analytics.measuredRecordCount} record pengukuran pada rentang tanggal terpilih.`}
           </Text>
         </View>
 
@@ -569,7 +663,7 @@ export function DashboardScreen({
             description="Nilai rata-rata tinggi, berat, dan BMI siswa pada periode aktif."
           />
           <View style={styles.metricGrid}>
-            {DASHBOARD_AVERAGE_METRICS.map(card => (
+            {analytics.averageMetrics.map(card => (
               <View key={card.label} style={styles.dataTile}>
                 <Text style={styles.dataTileLabel}>{card.label}</Text>
                 <View style={styles.metricValueRow}>
@@ -593,13 +687,14 @@ export function DashboardScreen({
                 barBorderTopLeftRadius={10}
                 barBorderTopRightRadius={10}
                 barWidth={34}
-                data={DASHBOARD_BMI_CATEGORY_DATA}
+                data={analytics.bmiCategoryData}
                 disablePress
                 frontColor={colors.brand.primary500}
                 hideRules={false}
                 hideYAxisText={false}
                 initialSpacing={16}
                 isAnimated
+                maxValue={bmiChartMaxValue}
                 noOfSections={4}
                 rulesColor={colors.border.subtle}
                 spacing={24}
@@ -628,7 +723,7 @@ export function DashboardScreen({
                   areaChart
                   adjustToWidth
                   color1={colors.brand.primary500}
-                  data={DASHBOARD_HEIGHT_TREND}
+                  data={analytics.heightTrend}
                   dataPointsColor1={colors.brand.primary500}
                   endFillColor1="rgba(45, 156, 219, 0.06)"
                   endOpacity={0.1}
@@ -637,7 +732,7 @@ export function DashboardScreen({
                   hideRules={false}
                   initialSpacing={8}
                   isAnimated
-                  maxValue={135}
+                  maxValue={heightChartMaxValue}
                   noOfSections={4}
                   rulesColor={colors.border.subtle}
                   showVerticalLines={false}
@@ -650,7 +745,7 @@ export function DashboardScreen({
                   xAxisLabelTextStyle={styles.chartAxisLabel}
                   xAxisThickness={1}
                   yAxisColor={colors.border.subtle}
-                  yAxisLabelTexts={['127', '129', '131', '133', '135']}
+                  yAxisLabelTexts={heightAxisLabels}
                   yAxisTextStyle={styles.chartAxisLabel}
                   yAxisThickness={0}
                 />
@@ -664,7 +759,7 @@ export function DashboardScreen({
                   areaChart
                   adjustToWidth
                   color1={colors.accent.teal}
-                  data={DASHBOARD_WEIGHT_TREND}
+                  data={analytics.weightTrend}
                   dataPointsColor1={colors.accent.teal}
                   endFillColor1="rgba(39, 174, 96, 0.06)"
                   endOpacity={0.1}
@@ -673,7 +768,7 @@ export function DashboardScreen({
                   hideRules={false}
                   initialSpacing={8}
                   isAnimated
-                  maxValue={32}
+                  maxValue={weightChartMaxValue}
                   noOfSections={4}
                   rulesColor={colors.border.subtle}
                   showVerticalLines={false}
@@ -686,7 +781,7 @@ export function DashboardScreen({
                   xAxisLabelTextStyle={styles.chartAxisLabel}
                   xAxisThickness={1}
                   yAxisColor={colors.border.subtle}
-                  yAxisLabelTexts={['26', '28', '30', '32']}
+                  yAxisLabelTexts={weightAxisLabels}
                   yAxisTextStyle={styles.chartAxisLabel}
                   yAxisThickness={0}
                 />
@@ -863,6 +958,26 @@ function QuickMenuIcon({ menuLabel }: QuickMenuIconProps) {
     );
   }
 
+  if (menuLabel === 'Pencatatan') {
+    return (
+      <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+        <Path
+          d="M6 4v16M6 4h9.5A2.5 2.5 0 0 1 18 6.5v11A2.5 2.5 0 0 1 15.5 20H6"
+          stroke={colors.brand.primary600}
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M9 8h3M9 12h5M9 16h3"
+          stroke={colors.brand.primary600}
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+      </Svg>
+    );
+  }
+
   return (
     <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
       <Path
@@ -1015,6 +1130,7 @@ const styles = StyleSheet.create({
   },
   quickMenuGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing[8],
   },
   quickMenuCard: {

@@ -536,7 +536,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.neutral[900],
   },
   permissionOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing[20],
@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   detectedFacesOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 3,
   },
   detectedFaceBox: {
