@@ -49,7 +49,15 @@ export function setConnectedBleDevice(device: { id: string; name: string } | nul
   emitChange();
 }
 
+const SAME_WEIGHT_REFRESH_MS = 1000;
+
 export function setLatestWeightKg(weightKg: number) {
+  // Repeated identical readings would re-render every subscribed screen.
+  const previousAt = snapshot.latestWeightAt ? Date.parse(snapshot.latestWeightAt) : 0;
+  if (snapshot.latestWeightKg === weightKg && Date.now() - previousAt < SAME_WEIGHT_REFRESH_MS) {
+    return;
+  }
+
   snapshot = {
     ...snapshot,
     latestWeightKg: weightKg,

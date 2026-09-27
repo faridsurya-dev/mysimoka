@@ -50,6 +50,10 @@ function pushDebugLog(
   rawValueBase64: string | null = null,
   parsedWeightKg: number | null = null,
 ) {
+  if (debugLogListeners.size === 0) {
+    return;
+  }
+
   emitDebugLog({
     timestamp: new Date().toISOString(),
     deviceId,
@@ -88,6 +92,21 @@ export function setDeviceMacAddress(deviceId: string, macAddress: string | null 
 }
 
 function base64ToBytes(base64Value: string) {
+  // Hermes ships a native atob; fall back to the JS decoder elsewhere.
+  const nativeAtob = (globalThis as { atob?: (value: string) => string }).atob;
+  if (nativeAtob) {
+    try {
+      const binary = nativeAtob(base64Value);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    } catch {
+      throw new Error('Invalid base64 payload.');
+    }
+  }
+
   const normalized = base64Value.replace(/[^A-Za-z0-9+/=]/g, '');
   const output: number[] = [];
   let index = 0;
@@ -212,6 +231,12 @@ function normalizeUuid(input: string) {
   return lower;
 }
 
+// Forget last-seen payloads so the first packet after a (re)connect is decoded.
+export function resetAdvertisementCache(deviceId: string) {
+  lastAdvHexByDevice.delete(deviceId);
+  lastManufacturerHexByDevice.delete(deviceId);
+}
+
 export function handleS400Advertisement(deviceId: string, serviceData: Record<string, string> | null | undefined) {
   if (!serviceData) {
     return false;
@@ -233,6 +258,10 @@ export function handleS400Advertisement(deviceId: string, serviceData: Record<st
       const payloadHexPreview = payloadHex.slice(0, 120);
       const previousHex = lastAdvHexByDevice.get(deviceId) ?? null;
       const hasChanged = previousHex !== payloadHex;
+      // Scales repeat the same frame many times per second; decrypt each frame once.
+      if (!hasChanged) {
+        continue;
+      }
       lastAdvHexByDevice.set(deviceId, payloadHex);
 
       const packetType = shortUuid === XIAOMI_SERVICE_UUID_SHORT ? 'adv FE95' : 'adv 0x181B';
@@ -241,7 +270,7 @@ export function handleS400Advertisement(deviceId: string, serviceData: Record<st
         'BodyCompositionMeasurement',
         BODY_COMPOSITION_SERVICE_UUID,
         BODY_COMPOSITION_MEASUREMENT_CHAR_UUID,
-        `${packetType} diterima (${payloadLength} byte) ${hasChanged ? '[berubah]' : '[sama]'}`,
+        `${packetType} diterima (${payloadLength} byte) [berubah]`,
         value,
         null,
       );
@@ -297,7 +326,9 @@ export function handleS400ManufacturerData(
     const payloadHex = bytesToHex(bytes);
     const payloadLength = bytes.length;
     const previousHex = lastManufacturerHexByDevice.get(deviceId) ?? null;
-    const hasChanged = previousHex !== payloadHex;
+    if (previousHex === payloadHex) {
+      return true;
+    }
     lastManufacturerHexByDevice.set(deviceId, payloadHex);
 
     pushDebugLog(
@@ -305,7 +336,7 @@ export function handleS400ManufacturerData(
       'BodyCompositionMeasurement',
       BODY_COMPOSITION_SERVICE_UUID,
       BODY_COMPOSITION_MEASUREMENT_CHAR_UUID,
-      `manufacturerData diterima (${payloadLength} byte) ${hasChanged ? '[berubah]' : '[sama]'}`,
+      `manufacturerData diterima (${payloadLength} byte) [berubah]`,
       manufacturerDataBase64,
       null,
     );

@@ -46,4 +46,10 @@ jest.mock('react-native-ble-plx', () => ({
   State: {
     PoweredOn: 'PoweredOn',
   },
+  ScanMode: {
+    Opportunistic: -1,
+    LowPower: 0,
+    Balanced: 1,
+    LowLatency: 2,
+  },
 }));

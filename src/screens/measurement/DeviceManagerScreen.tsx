@@ -1,22 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { PrimaryButton, Screen } from '../../shared/components';
 import { S400_BIND_KEY } from '../../services/environment';
 import {
-  bleManager,
-  setDeviceMacAddress,
-  ensureBlePoweredOn,
-  getBleDeviceName,
-  handleS400Advertisement,
-  handleS400ManufacturerData,
-  requestBlePermissions,
-  setS400BindKey,
-  setConnectedBleDevice,
+  connectDevice,
+  disconnectDevice,
+  scanDevices,
   subscribeWeightScaleDebugLog,
-  startMonitoringWeightScale,
-  stopMonitoringWeightScale,
+  useDeviceManager,
   useDeviceSession,
 } from '../../features/device';
 import { colors, radius, spacing, typography } from '../../theme';
@@ -24,12 +17,6 @@ import { colors, radius, spacing, typography } from '../../theme';
 type DeviceManagerScreenProps = {
   onBack?: () => void;
 };
-type DetectedDevice = {
-  id: string;
-  name: string;
-  isConnected: boolean;
-};
-
 
 function formatWeightKg(weightKg: number) {
   if (!Number.isFinite(weightKg)) {
@@ -52,14 +39,17 @@ function formatTimestamp(value: string) {
   }
 }
 
-function isLikelyS400Device(name: string) {
-  return /s400|xmtzc/i.test(name);
-}
-
 export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   const insets = useSafeAreaInsets();
   const headerHeight = insets.top + 72;
   const deviceSession = useDeviceSession();
+  const {
+    isScanning,
+    detectedDevices,
+    busyDeviceId,
+    busyAction,
+    message: scanMessage,
+  } = useDeviceManager();
   const formattedLatestWeight =
     deviceSession.latestWeightKg !== null
       ? formatWeightKg(deviceSession.latestWeightKg) ?? '-'
@@ -70,16 +60,11 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   const latestWeightDisplay = formattedLatestWeightAt
     ? `${formattedLatestWeight} • ${formattedLatestWeightAt}`
     : formattedLatestWeight;
-  const [isScanning, setIsScanning] = useState(false);
-  const [detectedDevices, setDetectedDevices] = useState<DetectedDevice[]>([]);
-  const [busyDeviceId, setBusyDeviceId] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<'connect' | 'disconnect' | null>(null);
-  const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [measurementLogs, setMeasurementLogs] = useState<string[]>([]);
-  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const broadcastScanActiveRef = useRef(false);
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
 
+  // BLE scan/connection is owned by the device manager and survives this screen
+  // unmounting; the screen only renders state and collects the raw log.
   useEffect(() => {
     const unsubscribe = subscribeWeightScaleDebugLog(entry => {
       const timeLabel = formatTimestamp(entry.timestamp) ?? entry.timestamp;
@@ -94,300 +79,16 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    setS400BindKey(S400_BIND_KEY);
-  }, []);
-
-  useEffect(() => {
-    if (!connectedDevice) {
-      if (broadcastScanActiveRef.current) {
-        bleManager.stopDeviceScan().catch(() => undefined);
-        broadcastScanActiveRef.current = false;
-      }
-      return;
-    }
-
-    const startBroadcastScan = async () => {
-      try {
-        await bleManager.stopDeviceScan();
-      } catch {
-        // no-op
-      }
-
-      try {
-        await bleManager.startDeviceScan(null, { allowDuplicates: true }, (error, scannedDevice) => {
-          if (error) {
-            setScanMessage(current =>
-              current ?? `Scan broadcast gagal: ${error.message || 'unknown error'}`,
-            );
-            return;
-          }
-
-          if (!scannedDevice) {
-            return;
-          }
-
-          const scannedName = getBleDeviceName(scannedDevice);
-          const connectedId = connectedDevice.id.toLowerCase();
-          const scannedId = scannedDevice.id.toLowerCase();
-          const isSameDeviceById = scannedId === connectedId;
-          const hasS400NameHint = /s400|xmtzc/i.test(scannedName);
-          const serviceData =
-            (scannedDevice as unknown as { serviceData?: Record<string, string> }).serviceData ?? null;
-          const hasManufacturerPacket = handleS400ManufacturerData(
-            scannedDevice.id,
-            scannedDevice.manufacturerData,
-          );
-          setDeviceMacAddress(scannedDevice.id, scannedDevice.id);
-
-          const isS400Packet = handleS400Advertisement(
-            scannedDevice.id,
-            serviceData,
-          );
-
-          if (isS400Packet || hasManufacturerPacket) {
-            setScanMessage('Menerima broadcast data S400 (service data terdeteksi).');
-            return;
-          }
-
-          if (isSameDeviceById || hasS400NameHint) {
-            const hasServiceData = !!serviceData && Object.keys(serviceData).length > 0;
-            const serviceKeys = hasServiceData ? Object.keys(serviceData).join(',') : '-';
-            const hasManufacturerData = !!scannedDevice.manufacturerData;
-            const logLine =
-              `[scan] id=${scannedDevice.id} name=${scannedName} serviceKeys=${serviceKeys} manufacturerData=${hasManufacturerData ? 'yes' : 'no'}`;
-            setMeasurementLogs(currentLogs => [logLine, ...currentLogs].slice(0, 50));
-          }
-        });
-        broadcastScanActiveRef.current = true;
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Gagal memulai scan broadcast perangkat.';
-        setScanMessage(message);
-      }
-    };
-
-    startBroadcastScan();
-
-    return () => {
-      if (broadcastScanActiveRef.current) {
-        bleManager.stopDeviceScan().catch(() => undefined);
-        broadcastScanActiveRef.current = false;
-      }
-    };
-  }, [connectedDevice]);
-
-  useEffect(() => {
-    return () => {
-      if (scanTimeoutRef.current) {
-        clearTimeout(scanTimeoutRef.current);
-      }
-      bleManager.stopDeviceScan().catch(() => undefined);
-      broadcastScanActiveRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!connectedDevice) {
-      return;
-    }
-
-    const disconnectSubscription = bleManager.onDeviceDisconnected(connectedDevice.id, () => {
-      stopMonitoringWeightScale(connectedDevice.id);
-      setConnectedBleDevice(null);
-      setDetectedDevices(currentDevices =>
-        currentDevices.map(device =>
-          device.id === connectedDevice.id ? { ...device, isConnected: false } : device,
-        ),
-      );
-      setBusyAction(null);
-      setBusyDeviceId(null);
-      setScanMessage(`Koneksi ke ${connectedDevice.name} terputus.`);
-    });
-
-    return () => {
-      disconnectSubscription.remove();
-    };
-  }, [connectedDevice]);
-
-  const handleScanDevices = async () => {
-    if (scanTimeoutRef.current) {
-      clearTimeout(scanTimeoutRef.current);
-    }
-
-    await bleManager.stopDeviceScan();
-
-    const hasPermission = await requestBlePermissions();
-    if (!hasPermission) {
-      setScanMessage('Izin Bluetooth belum diberikan, jadi pemindaian tidak bisa dimulai.');
-      return;
-    }
-
-    const isBluetoothReady = await ensureBlePoweredOn();
-    if (!isBluetoothReady) {
-      setScanMessage('Bluetooth belum aktif. Nyalakan Bluetooth lalu coba scan lagi.');
-      return;
-    }
-
-    setIsScanning(true);
-    setScanMessage(null);
-    setDetectedDevices(currentDevices => currentDevices.filter(device => device.isConnected));
-
-    try {
-      await bleManager.startDeviceScan(null, null, (error, device) => {
-        if (error) {
-          if (scanTimeoutRef.current) {
-            clearTimeout(scanTimeoutRef.current);
-            scanTimeoutRef.current = null;
-          }
-          setScanMessage(error.message || 'Pemindaian Bluetooth gagal dijalankan.');
-          setIsScanning(false);
-          bleManager.stopDeviceScan().catch(() => undefined);
-          return;
-        }
-
-        if (!device) {
-          return;
-        }
-
-        const deviceName = getBleDeviceName(device);
-        setDeviceMacAddress(device.id, device.id);
-        handleS400Advertisement(
-          device.id,
-          (device as unknown as { serviceData?: Record<string, string> }).serviceData ?? null,
-        );
-        handleS400ManufacturerData(device.id, device.manufacturerData);
-
-        setDetectedDevices(currentDevices => {
-          const existingDevice = currentDevices.find(item => item.id === device.id);
-
-          if (existingDevice) {
-            return currentDevices.map(item =>
-              item.id === device.id ? { ...item, name: deviceName } : item,
-            );
-          }
-
-          return [
-            ...currentDevices,
-            {
-              id: device.id,
-              name: deviceName,
-              isConnected: false,
-            },
-          ];
-        });
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Pemindaian Bluetooth gagal dimulai.';
-      setIsScanning(false);
-      setScanMessage(message);
-      return;
-    }
-
-    scanTimeoutRef.current = setTimeout(() => {
-      setIsScanning(false);
-      bleManager.stopDeviceScan().catch(() => undefined);
-      setScanMessage(currentMessage =>
-        currentMessage ??
-        'Pemindaian selesai. Pilih satu perangkat BLT yang ingin dihubungkan.',
-      );
-      scanTimeoutRef.current = null;
-    }, 7000);
+  const handleScanDevices = () => {
+    scanDevices();
   };
 
-  const handleConnectDevice = async (deviceId: string) => {
-    if (scanTimeoutRef.current) {
-      clearTimeout(scanTimeoutRef.current);
-      scanTimeoutRef.current = null;
-    }
-
-    setBusyAction('connect');
-    setBusyDeviceId(deviceId);
-    setScanMessage(null);
-
-    try {
-      await bleManager.stopDeviceScan();
-      const target = detectedDevices.find(item => item.id === deviceId) ?? null;
-      const fallbackName = target?.name ?? deviceId;
-
-      const shouldPreferBroadcast = isLikelyS400Device(fallbackName);
-      const device = shouldPreferBroadcast
-        ? await bleManager.connectToDevice(deviceId, { timeout: 6000 }).catch(() => null)
-        : await bleManager.connectToDevice(deviceId, { timeout: 10000 });
-
-      if (!device && shouldPreferBroadcast) {
-        setConnectedBleDevice({ id: deviceId, name: fallbackName });
-        setDetectedDevices(currentDevices =>
-          currentDevices.map(item => ({
-            ...item,
-            isConnected: item.id === deviceId,
-          })),
-        );
-        setScanMessage(
-          'S400 aktif dalam mode broadcast. Menunggu paket iklan untuk pembacaan berat.',
-        );
-        return;
-      }
-
-      if (!device) {
-        throw new Error('Perangkat tidak bisa dihubungkan.');
-      }
-
-      const deviceName = getBleDeviceName(device);
-      setConnectedBleDevice({ id: device.id, name: deviceName });
-
-      const canReadWeight = isLikelyS400Device(deviceName)
-        ? true
-        : await startMonitoringWeightScale(device);
-      setDetectedDevices(currentDevices =>
-        currentDevices.map(item => ({
-          ...item,
-          isConnected: item.id === deviceId,
-        })),
-      );
-      setScanMessage(
-        isLikelyS400Device(deviceName)
-          ? 'Perangkat S400 terhubung. Menunggu paket terenkripsi dan proses decode berat.'
-          : canReadWeight
-            ? 'Perangkat BLT berhasil terhubung. Pembacaan berat via BLE aktif.'
-            : 'Perangkat BLT berhasil terhubung, tapi layanan timbangan (GATT Weight Scale) tidak terdeteksi.',
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Gagal menghubungkan perangkat.';
-      setScanMessage(message);
-    } finally {
-      setIsScanning(false);
-      setBusyAction(null);
-      setBusyDeviceId(null);
-    }
+  const handleConnectDevice = (deviceId: string) => {
+    connectDevice(deviceId);
   };
 
-  const handleDisconnectDevice = async (deviceId: string) => {
-    setBusyAction('disconnect');
-    setBusyDeviceId(deviceId);
-    setScanMessage(null);
-
-    try {
-      stopMonitoringWeightScale(deviceId);
-      const connectedName =
-        detectedDevices.find(item => item.id === deviceId)?.name ?? deviceId;
-      if (!isLikelyS400Device(connectedName)) {
-        await bleManager.cancelDeviceConnection(deviceId);
-      }
-      setConnectedBleDevice(null);
-      setDetectedDevices(currentDevices =>
-        currentDevices.map(device =>
-          device.id === deviceId ? { ...device, isConnected: false } : device,
-        ),
-      );
-      setScanMessage('Perangkat BLT berhasil diputuskan.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Gagal memutuskan perangkat.';
-      setScanMessage(message);
-    } finally {
-      setBusyAction(null);
-      setBusyDeviceId(null);
-    }
+  const handleDisconnectDevice = (deviceId: string) => {
+    disconnectDevice(deviceId);
   };
 
   return (
