@@ -6,6 +6,7 @@ import {
   FlatList,
   GestureResponderEvent,
   Image,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -26,8 +27,20 @@ import {
   registerStudentFacesBulk,
   type DashboardStudentListItem,
 } from '../../services';
-import { PrimaryButton } from '../../shared/components';
-import { colors, radius, spacing, typography } from '../../theme';
+import {
+  Avatar,
+  EmptyState,
+  Icon,
+  IconButton,
+  InlineAlert,
+  LoadingState,
+  PrimaryButton,
+  ScreenHeader,
+  SegmentedControl,
+  StatusPill,
+  type SegmentedOption,
+} from '../../shared/components';
+import { colors, layout, radius, shadows, spacing, typography } from '../../theme';
 
 type FaceRegistrationScreenProps = {
   onBack: () => void;
@@ -66,6 +79,17 @@ const RAW_ZOOM_MAX = 3;
 const DEFAULT_MIN_FACE_SIZE = 0.08;
 const LANDSCAPE_MIN_FACE_SIZE = 0.04;
 const FALLBACK_MIN_FACE_SIZE = 0.02;
+/** Tombol aksi di kartu siswa: 40px visual + hitSlop = area sentuh 48px. */
+const ACTION_SIZE = 40;
+const ACTION_HIT_SLOP = 4;
+const GUIDE_CORNER = 32;
+const GUIDE_STROKE = 3;
+/** Latar semi-transparan untuk label di atas preview kamera (tidak ada token setara). */
+const CAMERA_CHROME = 'rgba(17, 29, 42, 0.72)';
+const IMAGE_SOURCE_OPTIONS: ReadonlyArray<SegmentedOption<'camera' | 'device'>> = [
+  { value: 'camera', label: 'Kamera' },
+  { value: 'device', label: 'Galeri' },
+];
 
 function mapRectOriginalToRotated(
   rect: CropRect,
@@ -807,40 +831,119 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
 
   const sliderContentPadding = Math.max((sliderWidth - SLIDE_SIZE) / 2, spacing[12]);
 
+  const handleOpenSettings = () => {
+    Linking.openSettings().catch(() => undefined);
+  };
+
+  const isCameraToggleDisabled = imageSource !== 'camera' || !canToggleCamera || !!capturedPhoto;
+  const showCameraSpinner =
+    imageSource === 'camera' &&
+    !capturedPhoto &&
+    hasPermission &&
+    !!device &&
+    isAppActive &&
+    !isCameraInitialized &&
+    !cameraErrorText;
+
+  const renderCameraBlockingState = () => {
+    if (imageSource !== 'camera' || capturedPhoto) {
+      return null;
+    }
+
+    if (!hasPermission) {
+      return (
+        <View style={styles.blockingOverlay}>
+          <View style={styles.blockingCard}>
+            <EmptyState
+              compact
+              icon="lock"
+              title="Akses kamera diperlukan"
+              description="Izinkan kamera untuk memotret siswa. Anda juga bisa memakai foto dari galeri."
+            />
+            <View style={styles.blockingActions}>
+              <PrimaryButton
+                fullWidth
+                label="Izinkan Kamera"
+                loading={isRequestingPermission}
+                onPress={handleRequestPermission}
+              />
+              <View style={styles.actionRow}>
+                <PrimaryButton
+                  label="Buka Pengaturan"
+                  onPress={handleOpenSettings}
+                  size="md"
+                  style={styles.primaryAction}
+                  variant="ghost"
+                />
+                <PrimaryButton
+                  label="Pakai Galeri"
+                  onPress={() => handleChangeImageSource('device')}
+                  size="md"
+                  style={styles.primaryAction}
+                  variant="ghost"
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    if (!device) {
+      return (
+        <View style={styles.blockingOverlay}>
+          <View style={styles.blockingCard}>
+            <EmptyState
+              compact
+              icon="alert"
+              title="Kamera tidak ditemukan"
+              description="Perangkat ini tidak memiliki kamera yang bisa dipakai. Gunakan foto dari galeri."
+            />
+            <PrimaryButton
+              fullWidth
+              label="Pilih dari Galeri"
+              onPress={() => handleChangeImageSource('device')}
+            />
+          </View>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <View style={styles.container}>
       {step === 1 ? (
-        <View
-          pointerEvents="box-none"
-          style={[styles.topOverlay, { paddingTop: Math.max(insets.top + spacing[8], spacing[16]) }]}>
-          <View style={styles.headerRow}>
-            <Pressable onPress={onBack} style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M15 6l-6 6 6 6" stroke={colors.text.inverse} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Pressable>
-            <View style={styles.headerCopy}>
-              <Text style={styles.headerTitle}>Registrasi Wajah</Text>
-              <Text style={styles.headerSubtitle}>Tahap {step} dari 2</Text>
-            </View>
-            <Pressable
-              disabled={imageSource !== 'camera' || !canToggleCamera || !!capturedPhoto}
-              onPress={handleToggleCameraFacing}
-              style={({ pressed }) => [
-                styles.cameraFacingButton,
-                (imageSource !== 'camera' || !canToggleCamera || !!capturedPhoto) &&
-                  styles.cameraFacingButtonDisabled,
-                pressed &&
-                  imageSource === 'camera' &&
-                  canToggleCamera &&
-                  !capturedPhoto &&
-                  styles.cameraFacingButtonPressed,
-              ]}>
-              <Text style={styles.cameraFacingButtonLabel}>Kamera: {cameraFacingLabel}</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
+        <ScreenHeader
+          backAccessibilityLabel="Tutup registrasi wajah"
+          onBack={onBack}
+          right={
+            imageSource === 'camera' ? (
+              <IconButton
+                accessibilityLabel={`Gunakan kamera ${activeCameraFacing === 'front' ? 'belakang' : 'depan'}`}
+                disabled={isCameraToggleDisabled}
+                onPress={handleToggleCameraFacing}
+                variant="outline">
+                <Icon color={colors.brand.primary700} name="switch" size={20} />
+              </IconButton>
+            ) : undefined
+          }
+          subtitle={
+            imageSource === 'camera'
+              ? `Tahap 1 dari 2 · Opsional · Kamera ${cameraFacingLabel.toLowerCase()}`
+              : 'Tahap 1 dari 2 · Opsional'
+          }
+          title="Registrasi Wajah"
+        />
+      ) : (
+        <ScreenHeader
+          backAccessibilityLabel="Kembali ke tahap 1"
+          onBack={() => setStep(1)}
+          subtitle="Tahap 2 dari 2 · Pasangkan wajah dengan siswa"
+          title="Registrasi Wajah"
+        />
+      )}
 
       {step === 1 ? (
         <View style={styles.stepContainer}>
@@ -869,36 +972,39 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                   />
                 ) : imageSource === 'device' ? (
                   <View style={styles.deviceSourceEmpty}>
-                    <Text style={styles.deviceSourceTitle}>Pilih Foto dari Perangkat</Text>
-                    <Text style={styles.deviceSourceDescription}>
-                      Gunakan foto yang berisi satu atau beberapa wajah siswa untuk diproses.
-                    </Text>
-                    <PrimaryButton
-                      disabled={isPickingDeviceImage}
-                      label={isPickingDeviceImage ? 'Membuka Galeri...' : 'Pilih Foto'}
-                      onPress={handlePickImageFromDevice}
-                      style={styles.deviceSourceButton}
+                    <EmptyState
+                      icon="user"
+                      title="Pilih foto dari perangkat"
+                      description="Gunakan foto yang berisi satu atau beberapa wajah siswa. Pastikan wajah terlihat jelas dan cukup terang."
                     />
                   </View>
                 ) : (
                   <View style={styles.cameraFallback} />
                 )}
 
-                {!hasPermission && imageSource === 'camera' ? (
-                  <View style={styles.permissionOverlay}>
-                    <Text style={styles.permissionTitle}>Akses Kamera Diperlukan</Text>
-                    <Text style={styles.permissionDescription}>
-                      Izinkan kamera untuk memulai registrasi wajah siswa.
-                    </Text>
-                    <Pressable
-                      onPress={handleRequestPermission}
-                      style={({ pressed }) => [styles.permissionButton, pressed && styles.permissionButtonPressed]}>
-                      <Text style={styles.permissionButtonText}>
-                        {isRequestingPermission ? 'Meminta izin...' : 'Izinkan Kamera'}
+                {imageSource === 'camera' && hasPermission && device ? (
+                  <View pointerEvents="none" style={styles.cameraGuideLayer}>
+                    <View style={styles.cameraHint}>
+                      <Text style={styles.cameraHintText}>
+                        Pastikan semua wajah terlihat jelas di dalam bingkai
                       </Text>
-                    </Pressable>
+                    </View>
+                    <View style={styles.cameraGuideFrame}>
+                      {(['topLeft', 'topRight', 'bottomLeft', 'bottomRight'] as const).map(corner => (
+                        <View key={corner} style={[styles.guideCorner, styles[corner]]} />
+                      ))}
+                    </View>
                   </View>
                 ) : null}
+
+                {showCameraSpinner ? (
+                  <View pointerEvents="none" style={styles.cameraSpinner}>
+                    <ActivityIndicator color={colors.text.inverse} size="large" />
+                    <Text style={styles.cameraSpinnerText}>Menyalakan kamera...</Text>
+                  </View>
+                ) : null}
+
+                {renderCameraBlockingState()}
               </>
             ) : (
               <View
@@ -918,88 +1024,48 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                     },
                   ]}
                 />
+                <View pointerEvents="none" style={styles.zoomBadge}>
+                  <Text style={styles.cameraHintText}>
+                    Cubit untuk zoom · {rawPreviewZoom.toFixed(1)}x
+                  </Text>
+                </View>
               </View>
             )}
-
           </View>
 
-          <View style={[styles.bottomPanel, { paddingBottom: Math.max(insets.bottom + spacing[12], spacing[12]) }]}>
-            <View style={styles.sourceSelectorGroup}>
-              <Pressable
-                onPress={() => handleChangeImageSource('camera')}
-                style={({ pressed }) => [
-                  styles.sourceSwitchButton,
-                  imageSource === 'camera' && styles.sourceSwitchButtonActive,
-                  pressed && styles.sourceSwitchButtonPressed,
-                ]}>
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M4.5 8.5h3l1.2-2h6.6l1.2 2h3A1.5 1.5 0 0 1 21 10v8.5A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5V10a1.5 1.5 0 0 1 1.5-1.5Z"
-                    stroke={imageSource === 'camera' ? colors.brand.primary700 : colors.text.secondary}
-                    strokeWidth={1.8}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <Path
-                    d="M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-                    stroke={imageSource === 'camera' ? colors.brand.primary700 : colors.text.secondary}
-                    strokeWidth={1.8}
-                  />
-                </Svg>
-                <Text
-                  style={[
-                    styles.sourceSwitchButtonLabel,
-                    imageSource === 'camera' && styles.sourceSwitchButtonLabelActive,
-                  ]}>
-                  Kamera
-                </Text>
-              </Pressable>
-              <View style={styles.sourceSelectorDivider} />
-              <Pressable
-                onPress={() => handleChangeImageSource('device')}
-                style={({ pressed }) => [
-                  styles.sourceSwitchButton,
-                  imageSource === 'device' && styles.sourceSwitchButtonActive,
-                  pressed && styles.sourceSwitchButtonPressed,
-                ]}>
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M4.5 6.5h15A1.5 1.5 0 0 1 21 8v8.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 16.5V8a1.5 1.5 0 0 1 1.5-1.5Z"
-                    stroke={imageSource === 'device' ? colors.brand.primary700 : colors.text.secondary}
-                    strokeWidth={1.8}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <Path
-                    d="m8 14 2.2-2.2a1 1 0 0 1 1.4 0L16 16M8 10.5h.01"
-                    stroke={imageSource === 'device' ? colors.brand.primary700 : colors.text.secondary}
-                    strokeWidth={1.8}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-                <Text
-                  style={[
-                    styles.sourceSwitchButtonLabel,
-                    imageSource === 'device' && styles.sourceSwitchButtonLabelActive,
-                  ]}>
-                  Galeri
-                </Text>
-              </Pressable>
-            </View>
-            <Text style={styles.statusText}>{statusText}</Text>
+          <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + spacing[16] }]}>
+            <SegmentedControl
+              onChange={handleChangeImageSource}
+              options={IMAGE_SOURCE_OPTIONS}
+              value={imageSource}
+            />
+
+            {cameraErrorText ? (
+              <InlineAlert message={cameraErrorText} tone="error" />
+            ) : (
+              <Text accessibilityLiveRegion="polite" style={styles.statusText}>
+                {statusText}
+              </Text>
+            )}
 
             {capturedPhoto ? (
               <>
-                <Text style={styles.pinchHint}>
-                  Gunakan gestur pinch untuk zoom preview sebelum proses crop.
-                </Text>
-
                 <View style={styles.thumbsWrap}>
-                  <Text style={styles.thumbsTitle}>Hasil Crop Wajah (satu per satu)</Text>
+                  <View style={styles.thumbsHeader}>
+                    <Text style={styles.thumbsTitle}>Hasil crop wajah</Text>
+                    {faceCrops.length > 0 ? (
+                      <StatusPill label={`${faceCrops.length} wajah`} size="sm" tone="success" />
+                    ) : null}
+                  </View>
                   {isDetectingFaces ? (
                     <View style={styles.detectingCard}>
-                      <Text style={styles.detectingLabel}>Sedang memproses crop wajah...</Text>
+                      <LoadingState inline label="Mendeteksi wajah dari foto..." />
+                    </View>
+                  ) : faceCrops.length === 0 ? (
+                    <View style={styles.detectingCard}>
+                      <Text style={styles.detectingLabel}>
+                        Atur zoom bila perlu, lalu tekan "Proses Crop".
+                      </Text>
                     </View>
                   ) : (
                     <FlatList
@@ -1012,6 +1078,9 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                         const isSelected = index === selectedCropIndex;
                         return (
                           <Pressable
+                            accessibilityLabel={`Wajah ${index + 1}`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: isSelected }}
                             onPress={() => setSelectedCropIndex(index)}
                             style={[styles.thumbFrame, isSelected && styles.thumbFrameSelected]}>
                             {capturedPhoto ? (
@@ -1031,18 +1100,25 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                 </View>
 
                 <View style={styles.actionRow}>
-                  <Pressable onPress={handleRetake} style={({ pressed }) => [styles.secondaryAction, pressed && styles.secondaryActionPressed]}>
-                    <Text style={styles.secondaryActionLabel}>Ambil Ulang</Text>
-                  </Pressable>
+                  <PrimaryButton
+                    label="Ambil Ulang"
+                    onPress={handleRetake}
+                    size="md"
+                    style={styles.primaryAction}
+                    variant="outline"
+                  />
                   <PrimaryButton
                     disabled={isDetectingFaces}
                     label={isDetectingFaces ? 'Memproses...' : 'Proses Crop'}
                     onPress={handleProcessCrop}
+                    size="md"
                     style={styles.primaryAction}
+                    variant="secondary"
                   />
                 </View>
                 <PrimaryButton
                   disabled={!canContinueToStepTwo || isDetectingFaces}
+                  fullWidth
                   label="Lanjut ke Tahap 2"
                   onPress={() => setStep(2)}
                 />
@@ -1050,26 +1126,28 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
             ) : (
               <PrimaryButton
                 disabled={imageSource === 'camera' ? !isCameraReady : isPickingDeviceImage}
-                label={imageSource === 'camera' ? 'Capture' : isPickingDeviceImage ? 'Membuka Galeri...' : 'Pilih Foto'}
+                fullWidth
+                label={imageSource === 'camera' ? 'Ambil Foto' : isPickingDeviceImage ? 'Membuka Galeri...' : 'Pilih Foto'}
+                loading={imageSource === 'device' && isPickingDeviceImage}
                 onPress={imageSource === 'camera' ? handleCapture : handlePickImageFromDevice}
               />
             )}
           </View>
         </View>
       ) : (
-        <View
-          style={[
-            styles.stepContainer,
-            styles.stepTwoContainer,
-            { paddingTop: Math.max(insets.top + spacing[12], spacing[24]) },
-          ]}>
+        <View style={[styles.stepContainer, styles.stepTwoContainer]}>
           <View style={styles.stepTwoHeader}>
-            <Text style={styles.stepTwoHeaderTitle}>Pairing Wajah Anggota Kelas</Text>
-            <Text style={styles.stepTwoHeaderSubtitle}>
-              {selectedCrop ? `Face ${selectedCropIndex + 1} dari ${faceCrops.length}` : 'Tidak ada face crop'}
-            </Text>
+            {selectedCrop ? (
+              <StatusPill
+                label={`Wajah ${selectedCropIndex + 1} dari ${faceCrops.length}`}
+                style={styles.stepTwoPill}
+                tone="info"
+              />
+            ) : (
+              <StatusPill label="Tidak ada crop wajah" style={styles.stepTwoPill} tone="warning" />
+            )}
             <Text style={styles.stepTwoHeaderHint}>
-              Foto di tengah adalah face terseleksi. Pilih siswa di daftar untuk memasangkan.
+              Geser foto untuk memilih wajah, lalu ketuk nama siswa untuk memasangkan.
             </Text>
           </View>
 
@@ -1119,8 +1197,10 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                           />
                         ) : null}
                         {isAssigned ? (
-                          <View style={styles.slidePairedBadge}>
-                            <Text style={styles.slidePairedBadgeLabel}>{assignedName}</Text>
+                          <View style={[styles.slidePairedBadge, isRegistered && styles.slidePairedBadgeDone]}>
+                            <Text numberOfLines={1} style={styles.slidePairedBadgeLabel}>
+                              {assignedName}
+                            </Text>
                           </View>
                         ) : null}
                       </View>
@@ -1138,14 +1218,18 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.studentListContent}
               ListEmptyComponent={
-                <View style={styles.studentListEmpty}>
-                  <Text style={styles.studentListEmptyTitle}>
-                    {isLoadingStudents ? 'Memuat siswa...' : 'Siswa belum tersedia'}
-                  </Text>
-                  <Text style={styles.studentListEmptyBody}>
-                    {studentsError ?? 'Tambahkan siswa terlebih dahulu sebelum registrasi wajah.'}
-                  </Text>
-                </View>
+                isLoadingStudents ? (
+                  <LoadingState label="Memuat siswa..." />
+                ) : studentsError ? (
+                  <InlineAlert message={studentsError} title="Daftar siswa gagal dimuat" tone="error" />
+                ) : (
+                  <EmptyState
+                    compact
+                    icon="user"
+                    title="Siswa belum tersedia"
+                    description="Tambahkan siswa terlebih dahulu sebelum registrasi wajah."
+                  />
+                )
               }
               renderItem={({ item: student }) => {
                 const selectedCropId = selectedCrop?.id;
@@ -1159,9 +1243,12 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                 const isUploadingThisCard = !!selectedCropId && isSelected && uploadingCropId === selectedCropId;
                 const canTapCard = !isDetectingFaces && !isUploadingAny && (hasAssignedFace || !!selectedCrop);
                 const isUploadEnabled = isSelected && !isDetectingFaces && !isUploadingAny && !isRegistered;
+                const isUnassignDisabled = assignedIndex < 0 || isDetectingFaces || isUploadingAny;
 
                 return (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !canTapCard, selected: isSelected }}
                     disabled={!canTapCard}
                     onPress={() => {
                       if (assignedIndex >= 0) {
@@ -1200,48 +1287,43 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                       pressed && canTapCard && styles.studentChipPressed,
                     ]}>
                     <View style={styles.studentChipRow}>
+                      <Avatar name={student.name} size={36} />
                       <View style={styles.studentChipCopy}>
-                        <Text style={[styles.studentChipLabel, isSelected && styles.studentChipLabelSelected]}>{student.name}</Text>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.studentChipLabel, isSelected && styles.studentChipLabelSelected]}>
+                          {student.name}
+                        </Text>
                         {isRegistered ? (
-                          <Text style={styles.studentChipMetaPaired}>
-                            Face Registered
-                          </Text>
+                          <StatusPill label="Wajah terdaftar" size="sm" tone="success" />
                         ) : hasAssignedFace ? (
-                          <Text style={styles.studentChipMetaAssigned}>Face Paired</Text>
+                          <StatusPill label="Sudah dipasangkan" size="sm" tone="info" />
+                        ) : null}
+                        {isAssignedElsewhere ? (
+                          <Text style={styles.studentChipMeta}>Terpasang di wajah lain, ketuk untuk fokus</Text>
                         ) : null}
                       </View>
                       <View style={styles.studentChipActions}>
                         <Pressable
+                          accessibilityLabel={isRegistered ? `Wajah ${student.name} sudah terdaftar` : `Unggah wajah ${student.name}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: !isUploadEnabled, busy: isUploadingThisCard }}
                           disabled={!isUploadEnabled}
+                          hitSlop={ACTION_HIT_SLOP}
                           onPress={handleUploadSelectedFace}
                           style={({ pressed }) => [
                             styles.iconActionButton,
                             styles.iconUploadButton,
                             isRegistered && styles.iconUploadButtonDone,
-                            !isUploadEnabled && styles.iconActionButtonDisabled,
+                            !isUploadEnabled && !isRegistered && styles.iconActionButtonDisabled,
                             pressed && isUploadEnabled && styles.iconActionButtonPressed,
                           ]}>
                           {isRegistered ? (
-                            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                              <Path
-                                d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"
-                                stroke={colors.accent.teal}
-                                strokeWidth={2}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                              <Path
-                                d="m8 12 2.5 2.5L16 9"
-                                stroke={colors.accent.teal}
-                                strokeWidth={2}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </Svg>
+                            <Icon color={colors.feedback.successText} name="check" size={18} />
                           ) : isUploadingThisCard ? (
                             <ActivityIndicator color={colors.brand.primary700} size="small" />
                           ) : (
-                            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                               <Path
                                 d="M12 16V6m0 0-3.5 3.5M12 6l3.5 3.5M5 15.5V18a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18v-2.5"
                                 stroke={colors.brand.primary700}
@@ -1253,23 +1335,22 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                           )}
                         </Pressable>
                         <Pressable
-                          disabled={assignedIndex < 0 || isDetectingFaces || isUploadingAny}
+                          accessibilityLabel={`Lepas pasangan wajah ${student.name}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: isUnassignDisabled }}
+                          disabled={isUnassignDisabled}
+                          hitSlop={ACTION_HIT_SLOP}
                           onPress={() => handleUnassignStudent(student.id)}
                           style={({ pressed }) => [
                             styles.iconActionButton,
                             styles.iconTrashButton,
-                            (assignedIndex < 0 || isDetectingFaces || isUploadingAny) &&
-                              styles.iconActionButtonDisabled,
-                            pressed &&
-                              assignedIndex >= 0 &&
-                              !isDetectingFaces &&
-                              !isUploadingAny &&
-                              styles.iconActionButtonPressed,
+                            isUnassignDisabled && styles.iconActionButtonDisabled,
+                            pressed && !isUnassignDisabled && styles.iconActionButtonPressed,
                           ]}>
-                          <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                             <Path
                               d="M4.5 7h15M9.5 10.5v6M14.5 10.5v6M7.5 7l.7 10a2 2 0 0 0 2 1.9h3.6a2 2 0 0 0 2-1.9l.7-10M9 7V5.8a.8.8 0 0 1 .8-.8h4.4a.8.8 0 0 1 .8.8V7"
-                              stroke={colors.accent.red}
+                              stroke={colors.feedback.errorText}
                               strokeWidth={2}
                               strokeLinecap="round"
                               strokeLinejoin="round"
@@ -1278,22 +1359,20 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
                         </Pressable>
                       </View>
                     </View>
-                    {isAssignedElsewhere ? (
-                      <Text style={styles.studentChipMeta}>Terpasang di face lain, tap untuk fokus</Text>
-                    ) : null}
                   </Pressable>
                 );
               }}
             />
           </View>
 
-          <View style={[styles.stepTwoFooter, { paddingBottom: Math.max(insets.bottom + spacing[12], spacing[12]) }]}>
+          <View style={[styles.stepTwoFooter, { paddingBottom: insets.bottom + spacing[16] }]}>
             <View style={styles.actionRow}>
-              <Pressable
+              <PrimaryButton
+                label="Kembali"
                 onPress={() => setStep(1)}
-                style={({ pressed }) => [styles.secondaryAction, pressed && styles.secondaryActionPressed]}>
-                <Text style={styles.secondaryActionLabel}>Kembali Tahap 1</Text>
-              </Pressable>
+                style={styles.primaryAction}
+                variant="outline"
+              />
               <PrimaryButton
                 loading={isUploadingAll}
                 label={isUploadingAll ? 'Mengupload...' : 'Selesai'}
@@ -1311,104 +1390,15 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.neutral[900],
-  },
-  topOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: spacing[16],
-    zIndex: 5,
-    elevation: 5,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(15,23,42,0.62)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconButtonPressed: {
-    backgroundColor: 'rgba(15,23,42,0.82)',
-  },
-  headerCopy: {
-    flex: 1,
-    gap: spacing[2],
-  },
-  headerTitle: {
-    ...typography.headingMd,
-    color: colors.text.inverse,
-  },
-  headerSubtitle: {
-    ...typography.bodySm,
-    color: colors.neutral[300],
-  },
-  cameraFacingButton: {
-    minHeight: 40,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[12],
-    backgroundColor: 'rgba(15,23,42,0.62)',
-  },
-  cameraFacingButtonPressed: {
-    backgroundColor: 'rgba(15,23,42,0.82)',
-  },
-  cameraFacingButtonDisabled: {
-    backgroundColor: 'rgba(15,23,42,0.4)',
-  },
-  cameraFacingButtonLabel: {
-    ...typography.labelSm,
-    color: colors.text.inverse,
+    backgroundColor: colors.surface.app,
   },
   stepContainer: {
     flex: 1,
   },
-  sourceSelectorGroup: {
-    flexDirection: 'row',
-    minHeight: 46,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.secondary,
-    overflow: 'hidden',
-  },
-  sourceSelectorDivider: {
-    width: 1,
-    backgroundColor: colors.border.subtle,
-  },
-  sourceSwitchButton: {
-    flex: 1,
-    minHeight: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: spacing[8],
-    backgroundColor: 'transparent',
-  },
-  sourceSwitchButtonActive: {
-    backgroundColor: colors.brand.primary100,
-  },
-  sourceSwitchButtonPressed: {
-    opacity: 0.9,
-  },
-  sourceSwitchButtonLabel: {
-    ...typography.labelSm,
-    color: colors.text.secondary,
-  },
-  sourceSwitchButtonLabelActive: {
-    color: colors.brand.primary700,
-  },
   cameraArea: {
     flex: 1,
     overflow: 'hidden',
+    backgroundColor: colors.neutral[950],
   },
   cameraPreview: {
     flex: 1,
@@ -1423,87 +1413,136 @@ const styles = StyleSheet.create({
   },
   cameraFallback: {
     flex: 1,
-    backgroundColor: colors.neutral[900],
+    backgroundColor: colors.neutral[950],
+  },
+  cameraGuideLayer: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[16],
+    padding: spacing[16],
+  },
+  cameraHint: {
+    borderRadius: radius.pill,
+    backgroundColor: CAMERA_CHROME,
+    paddingHorizontal: spacing[14],
+    paddingVertical: spacing[8],
+  },
+  cameraHintText: {
+    ...typography.labelSm,
+    color: colors.text.inverse,
+    textAlign: 'center',
+  },
+  cameraGuideFrame: {
+    width: '86%',
+    aspectRatio: 4 / 3,
+  },
+  guideCorner: {
+    position: 'absolute',
+    width: GUIDE_CORNER,
+    height: GUIDE_CORNER,
+    borderColor: colors.text.inverse,
+  },
+  topLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: GUIDE_STROKE,
+    borderLeftWidth: GUIDE_STROKE,
+    borderTopLeftRadius: radius.md,
+  },
+  topRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: GUIDE_STROKE,
+    borderRightWidth: GUIDE_STROKE,
+    borderTopRightRadius: radius.md,
+  },
+  bottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: GUIDE_STROKE,
+    borderLeftWidth: GUIDE_STROKE,
+    borderBottomLeftRadius: radius.md,
+  },
+  bottomRight: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: GUIDE_STROKE,
+    borderRightWidth: GUIDE_STROKE,
+    borderBottomRightRadius: radius.md,
+  },
+  cameraSpinner: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[12],
+    backgroundColor: colors.overlay.backdrop,
+  },
+  cameraSpinnerText: {
+    ...typography.bodySmStrong,
+    color: colors.text.inverse,
+  },
+  zoomBadge: {
+    position: 'absolute',
+    top: spacing[12],
+    alignSelf: 'center',
+    borderRadius: radius.pill,
+    backgroundColor: CAMERA_CHROME,
+    paddingHorizontal: spacing[14],
+    paddingVertical: spacing[8],
   },
   deviceSourceEmpty: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing[20],
-    gap: spacing[12],
-    backgroundColor: colors.neutral[900],
+    paddingHorizontal: layout.screenPaddingX,
+    backgroundColor: colors.surface.app,
   },
-  deviceSourceTitle: {
-    ...typography.headingMd,
-    color: colors.text.inverse,
-    textAlign: 'center',
-  },
-  deviceSourceDescription: {
-    ...typography.bodySm,
-    color: colors.neutral[300],
-    textAlign: 'center',
-  },
-  deviceSourceButton: {
-    minWidth: 180,
-  },
-  permissionOverlay: {
+  blockingOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing[20],
-    backgroundColor: 'rgba(0,0,0,0.52)',
+    paddingHorizontal: layout.screenPaddingX,
+    backgroundColor: colors.overlay.backdrop,
     zIndex: 2,
   },
-  permissionTitle: {
-    ...typography.headingMd,
-    color: colors.text.inverse,
-    textAlign: 'center',
+  blockingCard: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface.card,
+    padding: spacing[16],
+    gap: spacing[8],
+    ...shadows.lg,
   },
-  permissionDescription: {
-    ...typography.bodySm,
-    color: colors.text.inverse,
-    textAlign: 'center',
-    marginTop: spacing[8],
-  },
-  permissionButton: {
-    marginTop: spacing[16],
-    minHeight: 44,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing[16],
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.accent.teal,
-  },
-  permissionButtonPressed: {
-    opacity: 0.86,
-  },
-  permissionButtonText: {
-    ...typography.labelMd,
-    color: colors.text.primary,
+  blockingActions: {
+    gap: spacing[4],
   },
   bottomPanel: {
-    backgroundColor: colors.surface.primary,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderTopWidth: 1,
-    borderTopColor: colors.border.subtle,
-    paddingHorizontal: spacing[16],
+    backgroundColor: colors.surface.card,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    marginTop: -radius.xl,
+    paddingHorizontal: layout.screenPaddingX,
     paddingTop: spacing[16],
     gap: spacing[12],
+    ...shadows.md,
   },
   statusText: {
     ...typography.bodySm,
     color: colors.text.secondary,
   },
-  pinchHint: {
-    ...typography.caption,
-    color: colors.text.secondary,
-  },
   thumbsWrap: {
     gap: spacing[8],
   },
+  thumbsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[8],
+  },
   thumbsTitle: {
-    ...typography.labelMd,
+    ...typography.titleSm,
     color: colors.text.primary,
   },
   thumbListContent: {
@@ -1513,7 +1552,8 @@ const styles = StyleSheet.create({
     minHeight: 72,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.border.subtle,
+    borderStyle: 'dashed',
+    borderColor: colors.border.strong,
     backgroundColor: colors.surface.secondary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1544,44 +1584,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing[8],
   },
-  secondaryAction: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface.primary,
-  },
-  secondaryActionPressed: {
-    backgroundColor: colors.surface.secondary,
-  },
-  secondaryActionLabel: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
   primaryAction: {
     flex: 1,
   },
   stepTwoContainer: {
-    flex: 1,
     backgroundColor: colors.surface.app,
-    paddingHorizontal: spacing[16],
   },
   stepTwoHeader: {
-    gap: spacing[4],
-    paddingBottom: spacing[12],
+    gap: spacing[8],
+    alignItems: 'center',
+    paddingHorizontal: layout.screenPaddingX,
+    paddingTop: spacing[16],
   },
-  stepTwoHeaderTitle: {
-    ...typography.headingMd,
-    color: colors.text.primary,
-    textAlign: 'center',
-  },
-  stepTwoHeaderSubtitle: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
-    textAlign: 'center',
+  stepTwoPill: {
+    alignSelf: 'center',
   },
   stepTwoHeaderHint: {
     ...typography.bodySm,
@@ -1589,17 +1605,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   stepTwoSliderSection: {
-    paddingBottom: spacing[8],
+    paddingBottom: spacing[4],
   },
   stepTwoListSection: {
     flex: 1,
     minHeight: 0,
+    paddingHorizontal: layout.screenPaddingX,
   },
   stepTwoFooter: {
     paddingTop: spacing[12],
+    paddingHorizontal: layout.screenPaddingX,
     borderTopWidth: 1,
     borderTopColor: colors.border.subtle,
-    backgroundColor: colors.surface.app,
+    backgroundColor: colors.surface.card,
   },
   sliderWrap: {
     paddingVertical: spacing[12],
@@ -1613,12 +1631,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
+    backgroundColor: colors.surface.card,
     overflow: 'hidden',
+    ...shadows.sm,
   },
   slideFrameSelected: {
     borderColor: colors.brand.primary500,
-    borderWidth: 2,
+    borderWidth: 3,
   },
   slideFramePaired: {
     borderColor: colors.accent.teal,
@@ -1629,64 +1648,52 @@ const styles = StyleSheet.create({
     right: spacing[8],
     bottom: spacing[8],
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(39,174,96,0.9)',
+    backgroundColor: colors.brand.primary700,
     minHeight: 24,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing[8],
   },
+  slidePairedBadgeDone: {
+    backgroundColor: colors.feedback.successText,
+  },
   slidePairedBadgeLabel: {
     ...typography.caption,
+    fontWeight: '600',
     color: colors.text.inverse,
   },
   studentListContent: {
     gap: spacing[8],
-    paddingBottom: spacing[8],
-  },
-  studentListEmpty: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[20],
-    gap: spacing[8],
-  },
-  studentListEmptyTitle: {
-    ...typography.headingMd,
-    color: colors.text.primary,
-  },
-  studentListEmptyBody: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
+    paddingTop: spacing[4],
+    paddingBottom: spacing[12],
   },
   studentChip: {
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
+    backgroundColor: colors.surface.card,
     paddingHorizontal: spacing[12],
-    paddingVertical: spacing[12],
-    gap: spacing[4],
+    paddingVertical: spacing[10],
+    ...shadows.xs,
   },
   studentChipRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[8],
+    gap: spacing[12],
   },
   studentChipCopy: {
     flex: 1,
-    gap: spacing[2],
+    gap: spacing[4],
   },
   studentChipSelected: {
     borderColor: colors.brand.primary500,
-    backgroundColor: colors.brand.primary100,
+    backgroundColor: colors.surface.brandSubtle,
   },
   studentChipPressed: {
-    opacity: 0.88,
+    backgroundColor: colors.surface.pressed,
   },
   studentChipLabel: {
-    ...typography.labelMd,
+    ...typography.bodyMdStrong,
     color: colors.text.primary,
   },
   studentChipLabelSelected: {
@@ -1696,30 +1703,22 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.text.secondary,
   },
-  studentChipMetaAssigned: {
-    ...typography.caption,
-    color: colors.text.secondary,
-  },
-  studentChipMetaPaired: {
-    ...typography.caption,
-    color: colors.accent.teal,
-  },
   studentChipActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[8],
   },
   iconActionButton: {
-    width: 34,
-    height: 34,
-    borderRadius: radius.pill,
+    width: ACTION_SIZE,
+    height: ACTION_SIZE,
+    borderRadius: radius.sm,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surface.primary,
   },
   iconUploadButton: {
-    borderColor: colors.brand.primary300,
+    borderColor: colors.brand.primary200,
     backgroundColor: colors.brand.primary100,
   },
   iconUploadButtonDone: {
@@ -1731,7 +1730,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.feedback.errorBackground,
   },
   iconActionButtonDisabled: {
-    opacity: 0.45,
+    opacity: 0.4,
   },
   iconActionButtonPressed: {
     opacity: 0.8,

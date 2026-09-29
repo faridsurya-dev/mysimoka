@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   AppState,
   LayoutChangeEvent,
+  Linking,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -21,9 +22,24 @@ import {
   FrameFaceDetectionOptions,
 } from 'react-native-vision-camera-face-detector';
 import type { Frame } from 'react-native-vision-camera';
-import Svg, { Path } from 'react-native-svg';
 import { FaceCropPreviewPayload } from '../../navigation/types';
-import { colors, radius, spacing, typography } from '../../theme';
+import {
+  EmptyState,
+  Icon,
+  IconButton,
+  InlineAlert,
+  PrimaryButton,
+  ScreenHeader,
+  StatusPill,
+} from '../../shared/components';
+import { colors, layout, radius, shadows, spacing, typography } from '../../theme';
+
+/** Latar semi-transparan untuk label di atas preview kamera (tidak ada token setara). */
+const CAMERA_CHROME = 'rgba(17, 29, 42, 0.72)';
+/** Isi transparan kotak deteksi wajah (accent.teal, 14%). */
+const DETECTED_FACE_FILL = 'rgba(39, 174, 96, 0.14)';
+const GUIDE_CORNER = 28;
+const GUIDE_STROKE = 3;
 
 type FaceIdentificationScreenProps = {
   onBack: () => void;
@@ -326,17 +342,90 @@ export function FaceIdentificationScreen({
     onCameraFacingChange(cameraFacing === 'back' ? 'front' : 'back');
   };
 
+  const handleOpenSettings = () => {
+    Linking.openSettings().catch(() => undefined);
+  };
+
   const activeCameraFacing = device?.position === 'front' ? 'front' : 'back';
   const cameraFacingLabel = activeCameraFacing === 'back' ? 'Belakang' : 'Depan';
+  const showCameraGuide = hasPermission && !!device && !cameraErrorText;
+  const isFaceAligned = detectedFaces.length === 1;
+  const isBusy = hasPermission && !!device && isAppActive && (!isCameraInitialized || isCapturingFace);
+  const statusTone: 'danger' | 'success' | 'info' | 'neutral' = cameraErrorText
+    ? 'danger'
+    : isCapturingFace
+      ? 'success'
+      : detectedFaces.length > 0
+        ? 'info'
+        : 'neutral';
+
+  const renderBlockingState = () => {
+    if (!hasPermission) {
+      return (
+        <View style={styles.blockingOverlay}>
+          <View style={styles.blockingCard}>
+            <EmptyState
+              compact
+              icon="lock"
+              title="Akses kamera diperlukan"
+              description="Izinkan kamera untuk mengenali wajah siswa. Jika izin sudah ditolak, aktifkan lewat Pengaturan perangkat."
+            />
+            <View style={styles.blockingActions}>
+              <PrimaryButton
+                fullWidth
+                label="Izinkan Kamera"
+                loading={isRequestingPermission}
+                onPress={handleRequestPermission}
+              />
+              <PrimaryButton
+                fullWidth
+                label="Buka Pengaturan"
+                onPress={handleOpenSettings}
+                size="md"
+                variant="ghost"
+              />
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    if (!device) {
+      return (
+        <View style={styles.blockingOverlay}>
+          <View style={styles.blockingCard}>
+            <EmptyState
+              compact
+              icon="alert"
+              title="Kamera tidak ditemukan"
+              description="Perangkat ini tidak memiliki kamera yang bisa dipakai. Cari siswa secara manual untuk melanjutkan pengukuran."
+            />
+            <PrimaryButton fullWidth label="Cari Siswa Manual" onPress={onBack} />
+          </View>
+        </View>
+      );
+    }
+
+    return null;
+  };
 
   return (
     <View style={styles.container}>
-      {Platform.OS === 'android' ? (
-        <View
-          pointerEvents="none"
-          style={[styles.androidStatusBarBackground, { height: Math.max(insets.top, 24) }]}
-        />
-      ) : null}
+      <ScreenHeader
+        backAccessibilityLabel="Tutup identifikasi wajah"
+        onBack={onBack}
+        right={
+          <IconButton
+            accessibilityLabel={`Gunakan kamera ${activeCameraFacing === 'back' ? 'depan' : 'belakang'}`}
+            disabled={!canToggleCamera}
+            onPress={handleToggleCameraFacing}
+            variant="outline">
+            <Icon color={colors.brand.primary700} name="switch" size={20} />
+          </IconButton>
+        }
+        subtitle={`Uji coba · Kamera ${cameraFacingLabel.toLowerCase()}`}
+        title="Identifikasi Wajah"
+      />
 
       <View onLayout={onPreviewLayout} style={styles.cameraPreview}>
         {device && hasPermission ? (
@@ -368,26 +457,6 @@ export function FaceIdentificationScreen({
           <View style={styles.cameraFallback} />
         )}
 
-        {!hasPermission ? (
-          <View style={styles.permissionOverlay}>
-            <Text style={styles.permissionTitle}>Akses Kamera Diperlukan</Text>
-            <Text style={styles.permissionDescription}>
-              Izinkan kamera untuk melanjutkan identifikasi wajah siswa.
-            </Text>
-            <Pressable
-              accessibilityLabel="Izinkan kamera"
-              onPress={handleRequestPermission}
-              style={({ pressed }) => [
-                styles.permissionButton,
-                pressed && styles.permissionButtonPressed,
-              ]}>
-              <Text style={styles.permissionButtonText}>
-                {isRequestingPermission ? 'Meminta izin...' : 'Izinkan Kamera'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
         <View pointerEvents="none" style={styles.detectedFacesOverlay}>
           {detectedFaces.map((face, index) => {
             const projectedBounds = projectBoundsToPreview(face.bounds);
@@ -412,52 +481,66 @@ export function FaceIdentificationScreen({
           })}
         </View>
 
-        <View style={styles.faceGuideFrame} />
-        <View style={[styles.statusOverlay, { bottom: Math.max(insets.bottom + 12, 12) }]}>
-          <Text style={styles.statusText}>{statusText}</Text>
-        </View>
+        {showCameraGuide ? (
+          <View pointerEvents="none" style={styles.guideLayer}>
+            <View style={styles.guideHint}>
+              <Text style={styles.guideHintText}>
+                Satu wajah di dalam bingkai, menghadap lurus ke kamera
+              </Text>
+            </View>
+            <View style={styles.faceGuideFrame}>
+              {(['topLeft', 'topRight', 'bottomLeft', 'bottomRight'] as const).map(corner => (
+                <View
+                  key={corner}
+                  style={[
+                    styles.guideCorner,
+                    styles[corner],
+                    { borderColor: isFaceAligned ? colors.accent.teal : colors.text.inverse },
+                  ]}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {cameraErrorText ? (
+          <View style={styles.errorWrap}>
+            <InlineAlert title="Kamera bermasalah" message={cameraErrorText} tone="error" />
+          </View>
+        ) : null}
+
+        {renderBlockingState()}
       </View>
 
-      <View
-        pointerEvents="box-none"
-        style={[styles.topOverlay, { paddingTop: Math.max(insets.top + 8, 16) }]}>
-        <View style={styles.headerTopRow}>
-          <Pressable
-            accessibilityLabel={`Gunakan kamera ${activeCameraFacing === 'back' ? 'depan' : 'belakang'}`}
-            disabled={!canToggleCamera}
-            onPress={handleToggleCameraFacing}
-            style={({ pressed }) => [
-              styles.facingButton,
-              !canToggleCamera && styles.facingButtonDisabled,
-              pressed && canToggleCamera && styles.facingButtonPressed,
-            ]}>
-            <Text style={styles.facingButtonText}>Kamera: {cameraFacingLabel}</Text>
-          </Pressable>
-          <Pressable
-            accessibilityLabel="Tutup identifikasi wajah"
-            onPress={onBack}
-            style={({ pressed }) => [
-              styles.closeButton,
-              pressed && styles.closeButtonPressed,
-            ]}>
-            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M6 6l12 12"
-                stroke={colors.text.inverse}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <Path
-                d="M18 6 6 18"
-                stroke={colors.text.inverse}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </Pressable>
+      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + spacing[16] }]}>
+        <View accessibilityLiveRegion="polite" style={styles.statusRow}>
+          {isBusy ? (
+            <ActivityIndicator color={colors.brand.primary600} size="small" />
+          ) : (
+            <StatusPill
+              label={
+                statusTone === 'danger'
+                  ? 'Error'
+                  : statusTone === 'info'
+                    ? 'Terdeteksi'
+                    : 'Siap'
+              }
+              size="sm"
+              tone={statusTone}
+            />
+          )}
+          <Text style={styles.statusText}>{statusText}</Text>
         </View>
+        <Text style={styles.helperText}>
+          Fitur ini opsional. Foto diambil otomatis saat wajah terlihat jelas.
+        </Text>
+        <PrimaryButton
+          fullWidth
+          label="Cari Siswa Manual"
+          onPress={onBack}
+          size="md"
+          variant="outline"
+        />
       </View>
     </View>
   );
@@ -466,107 +549,19 @@ export function FaceIdentificationScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.neutral[900],
-  },
-  topOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: spacing[16],
-    zIndex: 5,
-    elevation: 5,
-  },
-  androidStatusBarBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: colors.surface.secondary,
-    zIndex: 4,
-    elevation: 4,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  facingButton: {
-    minHeight: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[12],
-    backgroundColor: 'rgba(15,23,42,0.62)',
-    zIndex: 6,
-    elevation: 6,
-  },
-  facingButtonPressed: {
-    backgroundColor: 'rgba(15,23,42,0.82)',
-  },
-  facingButtonDisabled: {
-    backgroundColor: 'rgba(15,23,42,0.4)',
-  },
-  facingButtonText: {
-    ...typography.labelSm,
-    color: colors.text.inverse,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(15,23,42,0.62)',
-    zIndex: 6,
-    elevation: 6,
-  },
-  closeButtonPressed: {
-    backgroundColor: 'rgba(15,23,42,0.82)',
+    backgroundColor: colors.surface.app,
   },
   cameraPreview: {
     flex: 1,
-    backgroundColor: colors.neutral[900],
+    backgroundColor: colors.neutral[950],
+    overflow: 'hidden',
   },
   cameraLivePreview: {
     flex: 1,
   },
   cameraFallback: {
     flex: 1,
-    backgroundColor: colors.neutral[900],
-  },
-  permissionOverlay: {
-    ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[20],
-    backgroundColor: 'rgba(0,0,0,0.52)',
-    zIndex: 2,
-  },
-  permissionTitle: {
-    ...typography.headingMd,
-    color: colors.text.inverse,
-    textAlign: 'center',
-  },
-  permissionDescription: {
-    ...typography.bodySm,
-    color: colors.text.inverse,
-    textAlign: 'center',
-    marginTop: spacing[8],
-  },
-  permissionButton: {
-    marginTop: spacing[14],
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[10],
-    borderRadius: radius.md,
-    backgroundColor: colors.accent.teal,
-  },
-  permissionButtonPressed: {
-    opacity: 0.85,
-  },
-  permissionButtonText: {
-    ...typography.labelMd,
-    color: colors.text.primary,
+    backgroundColor: colors.neutral[950],
   },
   detectedFacesOverlay: {
     ...StyleSheet.absoluteFill,
@@ -575,34 +570,115 @@ const styles = StyleSheet.create({
   detectedFaceBox: {
     position: 'absolute',
     borderWidth: 2,
-    borderColor: '#4ade80',
+    borderColor: colors.accent.teal,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(74, 222, 128, 0.12)',
+    backgroundColor: DETECTED_FACE_FILL,
   },
-  faceGuideFrame: {
-    position: 'absolute',
-    alignSelf: 'center',
-    top: '15%',
-    width: '70%',
-    aspectRatio: 1,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(255,255,255,0.6)',
-    borderRadius: radius.md,
+  guideLayer: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[16],
+    paddingHorizontal: spacing[16],
     zIndex: 2,
   },
-  statusOverlay: {
-    position: 'absolute',
-    left: spacing[12],
-    right: spacing[12],
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    borderRadius: radius.md,
-    paddingHorizontal: spacing[12],
+  guideHint: {
+    borderRadius: radius.pill,
+    backgroundColor: CAMERA_CHROME,
+    paddingHorizontal: spacing[14],
     paddingVertical: spacing[8],
   },
-  statusText: {
-    ...typography.bodySm,
+  guideHintText: {
+    ...typography.labelSm,
     color: colors.text.inverse,
     textAlign: 'center',
+  },
+  faceGuideFrame: {
+    width: '68%',
+    maxWidth: 320,
+    aspectRatio: 0.8,
+  },
+  guideCorner: {
+    position: 'absolute',
+    width: GUIDE_CORNER,
+    height: GUIDE_CORNER,
+  },
+  topLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: GUIDE_STROKE,
+    borderLeftWidth: GUIDE_STROKE,
+    borderTopLeftRadius: radius.md,
+  },
+  topRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: GUIDE_STROKE,
+    borderRightWidth: GUIDE_STROKE,
+    borderTopRightRadius: radius.md,
+  },
+  bottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: GUIDE_STROKE,
+    borderLeftWidth: GUIDE_STROKE,
+    borderBottomLeftRadius: radius.md,
+  },
+  bottomRight: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: GUIDE_STROKE,
+    borderRightWidth: GUIDE_STROKE,
+    borderBottomRightRadius: radius.md,
+  },
+  errorWrap: {
+    position: 'absolute',
+    top: spacing[12],
+    left: spacing[12],
+    right: spacing[12],
+    zIndex: 4,
+  },
+  blockingOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: layout.screenPaddingX,
+    backgroundColor: colors.overlay.backdrop,
+    zIndex: 5,
+  },
+  blockingCard: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface.card,
+    padding: spacing[16],
+    gap: spacing[8],
+    ...shadows.lg,
+  },
+  blockingActions: {
+    gap: spacing[4],
+  },
+  bottomPanel: {
+    backgroundColor: colors.surface.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.subtle,
+    paddingHorizontal: layout.screenPaddingX,
+    paddingTop: spacing[16],
+    gap: spacing[10],
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[10],
+    minHeight: 24,
+  },
+  statusText: {
+    ...typography.bodySmStrong,
+    flex: 1,
+    color: colors.text.primary,
+  },
+  helperText: {
+    ...typography.caption,
+    color: colors.text.muted,
   },
 });

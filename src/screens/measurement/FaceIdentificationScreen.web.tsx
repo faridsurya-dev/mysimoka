@@ -1,9 +1,10 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FaceCropPreviewPayload } from '../../navigation/types';
-import { PrimaryButton } from '../../shared/components';
-import { colors, radius, spacing, typography } from '../../theme';
+import { PrimaryButton, ScreenHeader, StatusPill } from '../../shared/components';
+import { colors, layout, radius, shadows, spacing, typography } from '../../theme';
+import { Icon } from '../dashboard/components/icons';
 
 type FaceIdentificationScreenProps = {
   onBack: () => void;
@@ -13,79 +14,57 @@ type FaceIdentificationScreenProps = {
   onIdentificationSuccess: (studentName: string) => void;
 };
 
-const PREVIEW_WIDTH = 1080;
-const PREVIEW_HEIGHT = 1920;
-
-const DEMO_IMAGE_URI =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIW2NgYGBgAAAABQABDQottAAAAABJRU5ErkJggg==';
-
+/**
+ * Versi web: identifikasi wajah membutuhkan kamera & deteksi wajah native,
+ * sehingga hanya tersedia di aplikasi mobile. Fitur ini opsional (uji coba).
+ * Konsisten dengan FaceRegistrationScreen.web.tsx. Props tetap sama agar
+ * RootNavigator tidak berubah.
+ */
 export function FaceIdentificationScreen({
   onBack,
-  cameraFacing,
-  onCameraFacingChange,
-  onFaceCropReady,
-  onIdentificationSuccess,
+  cameraFacing: _cameraFacing,
+  onCameraFacingChange: _onCameraFacingChange,
+  onFaceCropReady: _onFaceCropReady,
+  onIdentificationSuccess: _onIdentificationSuccess,
 }: FaceIdentificationScreenProps) {
   const insets = useSafeAreaInsets();
 
-  const simulateFaceCrop = () => {
-    onFaceCropReady({
-      imageUri: DEMO_IMAGE_URI,
-      imageWidth: PREVIEW_WIDTH,
-      imageHeight: PREVIEW_HEIGHT,
-      previewWidth: PREVIEW_WIDTH,
-      previewHeight: PREVIEW_HEIGHT,
-      crop: {
-        x: 300,
-        y: 360,
-        width: 420,
-        height: 520,
-      },
-    });
-  };
-
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + spacing[12] }]}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonLabel}>Kembali</Text>
-        </Pressable>
-        <Pressable
-          onPress={() =>
-            onCameraFacingChange(cameraFacing === 'back' ? 'front' : 'back')
-          }
-          style={styles.cameraFacingButton}>
-          <Text style={styles.cameraFacingLabel}>
-            {cameraFacing === 'back' ? 'Kamera Belakang' : 'Kamera Depan'}
+      <ScreenHeader onBack={onBack} subtitle="Uji coba · opsional" title="Identifikasi Wajah" />
+
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing[32] }]}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.card}>
+          <View style={styles.iconCircle}>
+            <Icon color={colors.brand.primary700} name="face" size={28} />
+          </View>
+          <StatusPill label="Butuh aplikasi Android/iOS" tone="info" />
+          <Text accessibilityRole="header" style={styles.title}>
+            Fitur ini tersedia di aplikasi mobile
           </Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.content}>
-        <Text style={styles.title}>Preview Web: Identifikasi Wajah</Text>
-        <Text style={styles.subtitle}>
-          Kamera native tidak tersedia di browser. Gunakan tombol simulasi untuk validasi alur UI.
-        </Text>
-
-        <View style={styles.previewPlaceholder}>
-          <Text style={styles.previewLabel}>Camera Placeholder</Text>
+          <Text style={styles.body}>
+            Identifikasi wajah memerlukan kamera perangkat dan deteksi wajah, sehingga hanya dapat
+            digunakan melalui aplikasi MySimoka di Android/iOS.
+          </Text>
+          <View style={styles.list}>
+            <Bullet text="Di web, cari siswa secara manual lewat daftar siswa sesi." />
+            <Bullet text="Tinggi dan berat badan tetap bisa dicatat dengan input manual." />
+            <Bullet text="Identifikasi wajah bersifat opsional dan masih tahap uji coba." />
+          </View>
+          <PrimaryButton fullWidth label="Cari Siswa Manual" onPress={onBack} />
         </View>
+      </ScrollView>
+    </View>
+  );
+}
 
-        <PrimaryButton
-          label="Simulasikan Face Crop"
-          onPress={simulateFaceCrop}
-          style={styles.primaryButton}
-        />
-
-        <Pressable
-          onPress={() => onIdentificationSuccess('Budi Santoso')}
-          style={({ pressed }) => [
-            styles.secondaryButton,
-            pressed && styles.secondaryButtonPressed,
-          ]}>
-          <Text style={styles.secondaryButtonLabel}>Simulasikan Identifikasi Berhasil</Text>
-        </Pressable>
-      </View>
+function Bullet({ text }: { text: string }) {
+  return (
+    <View style={styles.bullet}>
+      <Icon color={colors.accent.teal} name="check" size={16} />
+      <Text style={styles.bulletText}>{text}</Text>
     </View>
   );
 }
@@ -95,78 +74,54 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.app,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[20],
-    paddingBottom: spacing[12],
-  },
-  backButton: {
-    paddingVertical: spacing[8],
-    paddingHorizontal: spacing[12],
-    borderRadius: radius.md,
-    backgroundColor: colors.neutral[100],
-  },
-  backButtonLabel: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
-  cameraFacingButton: {
-    paddingVertical: spacing[8],
-    paddingHorizontal: spacing[12],
-    borderRadius: radius.md,
-    backgroundColor: colors.brand.primary100,
-  },
-  cameraFacingLabel: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
-  },
   content: {
-    paddingHorizontal: spacing[20],
-    paddingTop: spacing[12],
-    gap: spacing[16],
+    paddingHorizontal: layout.screenPaddingX,
+    paddingTop: spacing[20],
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
+  },
+  card: {
+    alignItems: 'center',
+    gap: spacing[12],
+    padding: spacing[24],
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.card,
+    ...shadows.sm,
+  },
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.lg,
+    backgroundColor: colors.brand.primary100,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
-    ...typography.headingSm,
+    ...typography.headingMd,
     color: colors.text.primary,
+    textAlign: 'center',
   },
-  subtitle: {
+  body: {
     ...typography.bodyMd,
     color: colors.text.secondary,
+    textAlign: 'center',
   },
-  previewPlaceholder: {
-    height: 360,
-    borderRadius: radius.lg,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: colors.neutral[300],
-    backgroundColor: colors.neutral[50],
-    alignItems: 'center',
-    justifyContent: 'center',
+  list: {
+    alignSelf: 'stretch',
+    gap: spacing[8],
+    paddingVertical: spacing[8],
   },
-  previewLabel: {
-    ...typography.labelLg,
-    color: colors.text.muted,
+  bullet: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[8],
   },
-  primaryButton: {
-    marginTop: spacing[4],
-  },
-  secondaryButton: {
-    minHeight: 48,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.brand.primary300,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[16],
-    backgroundColor: colors.brand.primary50,
-  },
-  secondaryButtonPressed: {
-    backgroundColor: colors.brand.primary100,
-  },
-  secondaryButtonLabel: {
-    ...typography.labelLg,
-    color: colors.brand.primary700,
+  bulletText: {
+    ...typography.bodySm,
+    flex: 1,
+    color: colors.text.secondary,
   },
 });
