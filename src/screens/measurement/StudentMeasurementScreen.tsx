@@ -1,10 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  GestureResponderEvent,
-  Image,
-  LayoutChangeEvent,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -12,10 +9,24 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import { useDeviceSession } from '../../features/device';
+// Import the store hook directly (not the device barrel) so this manual screen
+// never pulls the BLE stack in.
+import { useDeviceSession } from '../../features/device/useDeviceSession';
 import { listMeasurementStudents, saveStudentMeasurementRecord } from '../../services';
-import { Screen } from '../../shared/components';
+import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
+import {
+  Avatar,
+  EmptyState,
+  Icon,
+  IconButton,
+  InlineAlert,
+  LoadingState,
+  PrimaryButton,
+  Screen,
+  ScreenHeader,
+  SegmentedControl,
+  StatusPill,
+} from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { StudentMeasurementItem } from '../../types';
 
@@ -25,28 +36,49 @@ type StudentMeasurementScreenProps = {
   sessionDate?: string;
   className?: string;
   onBack: () => void;
-  onOpenDeviceManager: () => void;
-  onOpenFaceIdentification: () => void;
-  onOpenStudentSearch: () => void;
+  onOpenDeviceManager?: () => void;
+  onOpenFaceIdentification?: () => void;
 };
 
-const getStudentInitials = (name: string) =>
-  name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(part => part.charAt(0).toUpperCase())
-    .join('');
+const CAN_USE_BLE = Platform.OS === 'android' || Platform.OS === 'ios';
+const CAN_USE_FACE_ID = Platform.OS === 'android' || Platform.OS === 'ios';
 
-const keepDigitsOnly = (value: string) => value.replace(/\D+/g, '');
-const formatSavedTimestamp = (date: Date) =>
-  date.toLocaleString('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+const HEIGHT_RANGE = { min: 30, max: 250 };
+const WEIGHT_RANGE = { min: 2, max: 200 };
+
+const MODE_OPTIONS = [
+  { value: 'manual' as const, label: 'Manual' },
+  { value: 'auto' as const, label: 'Timbangan (opsional)' },
+];
+
+// Accepts "25,5" or "25.5"; keeps a single decimal separator and one decimal digit.
+export function sanitizeDecimalInput(value: string): string {
+  const normalized = value.replace(',', '.').replace(/[^0-9.]/g, '');
+  const dotIndex = normalized.indexOf('.');
+  if (dotIndex === -1) {
+    return normalized.slice(0, 3);
+  }
+  const integerPart = normalized.slice(0, dotIndex).slice(0, 3);
+  const decimalPart = normalized.slice(dotIndex + 1).replace(/\./g, '').slice(0, 1);
+  return `${integerPart}.${decimalPart}`;
+}
+
+function parseMeasurementNumber(value: string): number | null {
+  const trimmed = value.trim().replace(/\.$/, '');
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatSessionDate(value?: string) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return value ?? '';
+  }
+  return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+}
 
 export function StudentMeasurementScreen({
   sessionId = null,
@@ -56,61 +88,46 @@ export function StudentMeasurementScreen({
   onBack,
   onOpenDeviceManager,
   onOpenFaceIdentification,
-  onOpenStudentSearch,
 }: StudentMeasurementScreenProps) {
-  const insets = useSafeAreaInsets();
   const deviceSession = useDeviceSession();
   const [students, setStudents] = useState<StudentMeasurementItem[]>([]);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [measurementMode, setMeasurementMode] = useState<'manual' | 'auto'>('manual');
   const [heightValue, setHeightValue] = useState('');
   const [weightValue, setWeightValue] = useState('');
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [studentLoadError, setStudentLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [isSavingMeasurement, setIsSavingMeasurement] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [modalProgressWidth, setModalProgressWidth] = useState(0);
-  const [isUploadingSync, setIsUploadingSync] = useState(false);
-  const [lastUploadedCount, setLastUploadedCount] = useState(0);
-  const [showSyncSuccess, setShowSyncSuccess] = useState(false);
+  const [lastSavedName, setLastSavedName] = useState<string | null>(null);
 
   const selectedStudentIndex = selectedStudentId
     ? students.findIndex(student => student.id === selectedStudentId)
     : -1;
   const selectedStudent = selectedStudentIndex >= 0 ? students[selectedStudentIndex] : null;
-  const nextStudent =
-    selectedStudentIndex >= 0
-      ? students[(selectedStudentIndex + 1) % students.length]
-      : null;
-  const deviceConnection = {
-    heightConnected: false,
-    weightConnected: deviceSession.connectedDeviceId !== null,
-  };
-  const connectedDevicesCount =
-    Number(deviceConnection.heightConnected) + Number(deviceConnection.weightConnected);
-  const hasAnyDeviceConnected = connectedDevicesCount > 0;
   const measuredStudentsCount = students.filter(student => student.checked).length;
-  const pendingSyncCount = students.filter(
-    student => student.syncStatus === 'pending',
-  ).length;
-  const hasPendingSync = pendingSyncCount > 0;
-  const progressValue =
-    students.length > 0
-      ? measuredStudentsCount / students.length
-      : 0;
-  const sessionProgressWidth = `${progressValue * 100}%` as `${number}%`;
-  const sessionDateLabel = sessionDate
-    ? formatSavedTimestamp(new Date(sessionDate))
-    : formatSavedTimestamp(new Date());
+  const progressValue = students.length > 0 ? measuredStudentsCount / students.length : 0;
+  const progressWidth = `${Math.round(progressValue * 100)}%` as `${number}%`;
+  const isScaleConnected = deviceSession.connectedDeviceId !== null;
   const latestWeightDisplay =
     deviceSession.latestWeightKg === null
       ? null
       : deviceSession.latestWeightKg.toFixed(1).replace(/\.0$/, '');
 
+  const filteredStudents = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return students;
+    }
+    return students.filter(student => student.name.toLowerCase().includes(keyword));
+  }, [searchKeyword, students]);
+
   useEffect(() => {
     if (!sessionId) {
       setStudents([]);
-      setStudentLoadError('Sesi pengukuran belum dipilih.');
+      setStudentLoadError('Sesi pengukuran belum dipilih. Kembali lalu pilih atau buat sesi.');
       return;
     }
 
@@ -128,7 +145,7 @@ export function StudentMeasurementScreen({
         if (isMounted) {
           setStudents([]);
           setStudentLoadError(
-            error instanceof Error ? error.message : 'Gagal memuat siswa sesi.',
+            toRecordingErrorMessage(error, 'Gagal memuat siswa sesi.'),
           );
         }
       })
@@ -141,148 +158,51 @@ export function StudentMeasurementScreen({
     return () => {
       isMounted = false;
     };
-  }, [sessionId]);
+  }, [reloadToken, sessionId]);
 
   useEffect(() => {
     if (measurementMode !== 'auto' || latestWeightDisplay === null) {
       return;
     }
-
     setWeightValue(latestWeightDisplay);
   }, [latestWeightDisplay, measurementMode]);
 
-  const fillFormFromStudent = (student: StudentMeasurementItem) => {
-    setHeightValue(student.heightCm ?? '');
-    setWeightValue(student.weightKg ?? '');
-  };
-
-  const startFaceIdentificationMeasurement = () => {
-    onOpenFaceIdentification();
-  };
-
-  const startMeasurementFromSessionCard = () => {
-    const targetStudent =
-      students.find(student => !student.checked) ?? students[0] ?? null;
-
-    if (!targetStudent) {
+  useEffect(() => {
+    if (!lastSavedName) {
       return;
     }
+    const timer = setTimeout(() => setLastSavedName(null), 2600);
+    return () => clearTimeout(timer);
+  }, [lastSavedName]);
 
-    openMeasurementForm(targetStudent.id);
-  };
+  const openMeasurementForm = useCallback(
+    (studentId: string) => {
+      const student = students.find(item => item.id === studentId);
+      setSelectedStudentId(studentId);
+      setSaveError(null);
+      setHeightValue(student?.heightCm ?? '');
+      setWeightValue(
+        measurementMode === 'auto' && latestWeightDisplay !== null
+          ? latestWeightDisplay
+          : student?.weightKg ?? '',
+      );
+    },
+    [latestWeightDisplay, measurementMode, students],
+  );
 
-  const openMeasurementForm = (studentId: string) => {
-    const student = students.find(item => item.id === studentId);
-    setSelectedStudentId(studentId);
-    setSaveError(null);
-    if (student) {
-      fillFormFromStudent(student);
-      return;
+  const startMeasurement = () => {
+    const targetStudent = students.find(student => !student.checked) ?? students[0] ?? null;
+    if (targetStudent) {
+      openMeasurementForm(targetStudent.id);
     }
-    setHeightValue('');
-    setWeightValue('');
   };
 
   const moveStudentSelection = (direction: 1 | -1) => {
-    if (selectedStudentIndex < 0) {
+    if (selectedStudentIndex < 0 || students.length === 0) {
       return;
     }
-
-    const totalStudents = students.length;
-    const nextIndex = (selectedStudentIndex + direction + totalStudents) % totalStudents;
-    const targetStudent = students[nextIndex];
-
-    setSelectedStudentId(targetStudent.id);
-    fillFormFromStudent(targetStudent);
-  };
-
-  const selectStudentByIndex = (targetIndex: number) => {
-    const targetStudent = students[targetIndex];
-    if (!targetStudent) {
-      return;
-    }
-
-    setSelectedStudentId(targetStudent.id);
-    fillFormFromStudent(targetStudent);
-    setSaveError(null);
-  };
-
-  const handleProgressLayout = (event: LayoutChangeEvent) => {
-    setModalProgressWidth(event.nativeEvent.layout.width);
-  };
-
-  const handleProgressPress = (event: GestureResponderEvent) => {
-    if (students.length === 0 || modalProgressWidth <= 0) {
-      return;
-    }
-
-    const ratio = Math.min(Math.max(event.nativeEvent.locationX / modalProgressWidth, 0), 1);
-    const targetIndex = Math.min(Math.floor(ratio * students.length), students.length - 1);
-    selectStudentByIndex(targetIndex);
-  };
-
-  const saveAndContinueToNextStudent = async () => {
-    if (selectedStudentIndex < 0 || !selectedStudent || !sessionId || isSavingMeasurement) {
-      return;
-    }
-
-    const cleanHeight = keepDigitsOnly(heightValue);
-    const cleanWeight = keepDigitsOnly(weightValue);
-    const heightNumber = cleanHeight.length > 0 ? Number(cleanHeight) : null;
-    const weightNumber = cleanWeight.length > 0 ? Number(cleanWeight) : null;
-    if (heightNumber === null && weightNumber === null) {
-      setSaveError('Isi tinggi atau berat badan terlebih dahulu.');
-      return;
-    }
-
-    const heightDisplay = cleanHeight || '-';
-    const weightDisplay = cleanWeight || '-';
-    setIsSavingMeasurement(true);
-    setSaveError(null);
-
-    try {
-      const savedRecord = await saveStudentMeasurementRecord({
-        sessionId,
-        studentId: selectedStudent.id,
-        studentEnrollmentId: selectedStudent.studentEnrollmentId,
-        captureMethod: measurementMode === 'manual' ? 'manual' : 'automatic',
-        captureSource: measurementMode === 'manual' ? 'manual_form' : 'device_ble',
-        heightCm: heightNumber,
-        weightKg: weightNumber,
-        deviceId: measurementMode === 'auto' ? deviceSession.connectedDeviceId : null,
-        deviceName: measurementMode === 'auto' ? deviceSession.connectedDeviceName : null,
-        devicePayload:
-          measurementMode === 'auto'
-            ? {
-                latestWeightKg: deviceSession.latestWeightKg,
-                latestWeightAt: deviceSession.latestWeightAt,
-              }
-            : null,
-      });
-
-      setStudents(previousStudents =>
-        previousStudents.map((student, index) =>
-        index === selectedStudentIndex
-          ? {
-              ...student,
-              recordId: savedRecord.recordId,
-              measurement: `TB ${heightDisplay} cm • BB ${weightDisplay} kg`,
-              timestamp: savedRecord.timestamp,
-              checked: cleanHeight.length > 0 && cleanWeight.length > 0,
-              syncStatus: 'synced',
-              heightCm: cleanHeight,
-              weightKg: cleanWeight,
-            }
-          : student,
-        ),
-      );
-
-      moveStudentSelection(1);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Gagal menyimpan hasil pengukuran.');
-    } finally {
-      setIsSavingMeasurement(false);
-    }
+    const nextIndex = (selectedStudentIndex + direction + students.length) % students.length;
+    openMeasurementForm(students[nextIndex].id);
   };
 
   const closeMeasurementForm = () => {
@@ -292,238 +212,253 @@ export function StudentMeasurementScreen({
     setSaveError(null);
   };
 
-  const simulateUploadToServer = () => {
-    if (!hasPendingSync || isUploadingSync) {
+  const saveAndContinue = async () => {
+    if (!selectedStudent || !sessionId || isSavingMeasurement) {
       return;
     }
 
-    const uploadCount = pendingSyncCount;
-    setLastUploadedCount(uploadCount);
-    setIsUploadingSync(true);
-    setShowSyncSuccess(false);
-
-    setTimeout(() => {
-      setStudents(previousStudents =>
-        previousStudents.map(student =>
-          student.syncStatus === 'pending'
-            ? { ...student, syncStatus: 'synced' }
-            : student,
-        ),
+    const heightNumber = parseMeasurementNumber(heightValue);
+    const weightNumber = parseMeasurementNumber(weightValue);
+    if (heightNumber === null && weightNumber === null) {
+      setSaveError('Isi tinggi atau berat badan terlebih dahulu.');
+      return;
+    }
+    if (
+      heightNumber !== null &&
+      (heightNumber < HEIGHT_RANGE.min || heightNumber > HEIGHT_RANGE.max)
+    ) {
+      setSaveError(
+        `Tinggi badan harus di antara ${HEIGHT_RANGE.min}–${HEIGHT_RANGE.max} cm.`,
       );
-      setIsUploadingSync(false);
-      setShowSyncSuccess(true);
+      return;
+    }
+    if (
+      weightNumber !== null &&
+      (weightNumber < WEIGHT_RANGE.min || weightNumber > WEIGHT_RANGE.max)
+    ) {
+      setSaveError(`Berat badan harus di antara ${WEIGHT_RANGE.min}–${WEIGHT_RANGE.max} kg.`);
+      return;
+    }
 
-      setTimeout(() => {
-        setShowSyncSuccess(false);
-      }, 2600);
-    }, 1600);
+    const isAuto = measurementMode === 'auto' && isScaleConnected;
+    const savedStudentId = selectedStudent.id;
+    const savedStudentName = selectedStudent.name;
+    setIsSavingMeasurement(true);
+    setSaveError(null);
+
+    try {
+      const savedRecord = await saveStudentMeasurementRecord({
+        sessionId,
+        studentId: savedStudentId,
+        studentEnrollmentId: selectedStudent.studentEnrollmentId,
+        captureMethod: isAuto ? 'automatic' : 'manual',
+        captureSource: isAuto ? 'device_ble' : 'manual_form',
+        heightCm: heightNumber,
+        weightKg: weightNumber,
+        deviceId: isAuto ? deviceSession.connectedDeviceId : null,
+        deviceName: isAuto ? deviceSession.connectedDeviceName : null,
+        devicePayload: isAuto
+          ? {
+              latestWeightKg: deviceSession.latestWeightKg,
+              latestWeightAt: deviceSession.latestWeightAt,
+            }
+          : null,
+      });
+
+      const updatedStudents = students.map(student =>
+        student.id === savedStudentId
+          ? {
+              ...student,
+              recordId: savedRecord.recordId,
+              measurement: savedRecord.measurement,
+              timestamp: savedRecord.timestamp,
+              checked: savedRecord.checked,
+              syncStatus: 'synced' as const,
+              heightCm: savedRecord.heightCm,
+              weightKg: savedRecord.weightKg,
+            }
+          : student,
+      );
+      setStudents(updatedStudents);
+      setLastSavedName(savedStudentName);
+
+      // Continue with the next student that still has no complete record.
+      const currentIndex = updatedStudents.findIndex(student => student.id === savedStudentId);
+      const ordered = [
+        ...updatedStudents.slice(currentIndex + 1),
+        ...updatedStudents.slice(0, currentIndex),
+      ];
+      const nextPending = ordered.find(student => !student.checked);
+      if (nextPending) {
+        setSelectedStudentId(nextPending.id);
+        setHeightValue(nextPending.heightCm ?? '');
+        setWeightValue(
+          measurementMode === 'auto' && latestWeightDisplay !== null
+            ? latestWeightDisplay
+            : nextPending.weightKg ?? '',
+        );
+      } else {
+        closeMeasurementForm();
+      }
+    } catch (error) {
+      setSaveError(toRecordingErrorMessage(error, 'Gagal menyimpan hasil pengukuran.'));
+    } finally {
+      setIsSavingMeasurement(false);
+    }
   };
+
+  const renderListState = () => {
+    if (isLoadingStudents) {
+      return <LoadingState label="Memuat siswa sesi..." />;
+    }
+    if (studentLoadError) {
+      return (
+        <InlineAlert
+          tone="error"
+          message={studentLoadError}
+          actionLabel={sessionId ? 'Coba lagi' : undefined}
+          onAction={sessionId ? () => setReloadToken(value => value + 1) : undefined}
+        />
+      );
+    }
+    if (students.length === 0) {
+      return (
+        <EmptyState
+          title="Belum ada siswa di kelas ini"
+          description={`Tambahkan siswa ke ${className} melalui menu Dashboard › Kelas.`}
+          icon="user"
+        />
+      );
+    }
+    if (filteredStudents.length === 0) {
+      return (
+        <EmptyState
+          compact
+          icon="search"
+          title="Siswa tidak ditemukan"
+          description={`Tidak ada siswa bernama “${searchKeyword.trim()}”.`}
+        />
+      );
+    }
+    return null;
+  };
+
+  const listState = renderListState();
 
   return (
     <View style={styles.container}>
-      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}>
-        <View style={styles.headerTopRow}>
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15 6l-6 6 6 6"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>{sessionName}</Text>
-            </View>
-          </Pressable>
-
-          <Pressable
-            accessibilityLabel="Upload data ke server"
-            accessibilityRole="button"
-            disabled={!hasPendingSync || isUploadingSync}
-            onPress={simulateUploadToServer}
-            style={({ pressed }) => [
-              styles.syncStatusButton,
-              (hasPendingSync || isUploadingSync) && styles.syncStatusButtonActive,
-              pressed &&
-                !(!hasPendingSync || isUploadingSync) &&
-                styles.syncStatusButtonPressed,
-            ]}>
-            {isUploadingSync ? (
-              <ActivityIndicator color={colors.brand.primary700} size="small" />
-            ) : (
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M20 16v2.5A2.5 2.5 0 0 1 17.5 21h-11A2.5 2.5 0 0 1 4 18.5V16"
-                  stroke={hasPendingSync ? colors.brand.primary700 : colors.text.muted}
-                  strokeWidth={1.8}
-                  strokeLinecap="round"
-                />
-                <Path
-                  d="M12 15V3m0 0-4 4m4-4 4 4"
-                  stroke={hasPendingSync ? colors.brand.primary700 : colors.text.muted}
-                  strokeWidth={1.8}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            )}
-            {hasPendingSync ? (
-              <View style={styles.syncStatusBadge}>
-                <Text style={styles.syncStatusBadgeLabel}>{pendingSyncCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
+      <ScreenHeader
+        title={sessionName}
+        subtitle={`${className} • ${formatSessionDate(sessionDate)}`}
+        onBack={onBack}
+        backAccessibilityLabel="Kembali ke daftar sesi"
+        bordered={false}
+      />
+      <View style={styles.searchWrap}>
+        <View style={styles.searchBar}>
+          <Icon name="search" size={18} color={colors.text.muted} />
+          <TextInput
+            accessibilityLabel="Cari siswa"
+            onChangeText={setSearchKeyword}
+            placeholder="Cari nama siswa"
+            placeholderTextColor={colors.text.muted}
+            returnKeyType="search"
+            style={styles.searchInput}
+            value={searchKeyword}
+          />
+          {searchKeyword ? (
+            <Pressable
+              accessibilityLabel="Hapus pencarian"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => setSearchKeyword('')}
+              style={styles.clearSearchButton}>
+              <Icon name="close" size={16} color={colors.text.muted} />
+            </Pressable>
+          ) : null}
         </View>
-
-        <Pressable onPress={onOpenStudentSearch} style={styles.searchBar}>
-          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="m21 21-4.35-4.35"
-              stroke={colors.text.muted}
-              strokeWidth={1.8}
-              strokeLinecap="round"
-            />
-            <Path
-              d="M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z"
-              stroke={colors.text.muted}
-              strokeWidth={1.8}
-            />
-          </Svg>
-          <Text style={styles.searchPlaceholder}>Cari nama atau nomor induk siswa</Text>
-        </Pressable>
       </View>
 
-      <Screen contentContainerStyle={styles.content}>
-        {isLoadingStudents ? (
-          <View style={styles.pendingInfoCard}>
-            <ActivityIndicator color={colors.brand.primary600} size="small" />
-            <Text style={styles.pendingInfoTitle}>Memuat siswa sesi...</Text>
-          </View>
-        ) : studentLoadError ? (
-          <View style={styles.errorCard}>
-            <Text style={styles.errorText}>{studentLoadError}</Text>
-          </View>
-        ) : isUploadingSync ? (
-          <View style={styles.pendingInfoCard}>
-            <Text style={styles.pendingInfoTitle}>Mengunggah data ke server...</Text>
-            <Text style={styles.pendingInfoDescription}>
-              Mengirim {lastUploadedCount} data pengukuran dari penyimpanan lokal.
-            </Text>
-          </View>
-        ) : hasPendingSync ? (
-          <View style={styles.pendingInfoCard}>
-            <Text style={styles.pendingInfoTitle}>Data belum tersimpan ke server</Text>
-            <Text style={styles.pendingInfoDescription}>
-              {pendingSyncCount} data pengukuran masih tersimpan lokal.
-            </Text>
-          </View>
-        ) : showSyncSuccess ? (
-          <View style={styles.syncSuccessInfoCard}>
-            <Text style={styles.syncSuccessTitle}>Upload server berhasil</Text>
-            <Text style={styles.syncSuccessDescription}>
-              {lastUploadedCount} data lokal sudah dipindahkan ke server.
-            </Text>
-          </View>
+      <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {lastSavedName ? (
+          <InlineAlert tone="success" message={`Data ${lastSavedName} tersimpan.`} />
         ) : null}
 
-        <View style={styles.sessionDetailCard}>
-          <View style={styles.sessionDetailTopRow}>
-            <Text style={styles.sessionDetailEyebrow}>Detail Session</Text>
-            <Text style={styles.sessionDetailDate}>{sessionDateLabel}</Text>
+        <View style={styles.sessionCard}>
+          <View style={styles.sessionCardTopRow}>
+            <Text style={styles.sessionEyebrow}>Progres sesi</Text>
+            <Text style={styles.sessionCount}>
+              {measuredStudentsCount}/{students.length} siswa
+            </Text>
           </View>
-          <Text style={styles.sessionDetailTitle}>{className}</Text>
-          <Text style={styles.sessionDetailMeta}>
-            {measuredStudentsCount}/{students.length} siswa sudah dicatat
-          </Text>
-          <View style={styles.sessionProgressTrack}>
-            <View style={[styles.sessionProgressFill, { width: sessionProgressWidth }]} />
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: progressWidth }]} />
           </View>
-
-          <View style={styles.sessionActionGroup}>
+          <PrimaryButton
+            disabled={students.length === 0 || isLoadingStudents}
+            label={
+              students.length > 0 && measuredStudentsCount === students.length
+                ? 'Semua siswa sudah diukur'
+                : 'Mulai Input Manual'
+            }
+            onPress={startMeasurement}
+          />
+          {CAN_USE_FACE_ID && onOpenFaceIdentification ? (
             <Pressable
-              onPress={startMeasurementFromSessionCard}
-              style={({ pressed }) => [
-                styles.sessionCtaButton,
-                pressed && styles.sessionCtaButtonPressed,
-              ]}>
-              <Text style={styles.sessionCtaButtonLabel}>Mulai Pengukuran</Text>
+              accessibilityRole="button"
+              onPress={onOpenFaceIdentification}
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryPressed]}>
+              <Text style={styles.secondaryButtonLabel}>Identifikasi Wajah</Text>
+              <View style={styles.deviceTag}>
+                <Text style={styles.deviceTagLabel}>Butuh kamera • uji coba</Text>
+              </View>
             </Pressable>
-
-            <Pressable
-              onPress={startFaceIdentificationMeasurement}
-              style={({ pressed }) => [
-                styles.faceIdButton,
-                pressed && styles.faceIdButtonPressed,
-              ]}>
-              <Text style={styles.faceIdButtonLabel}>Identifikasi Wajah</Text>
-            </Pressable>
-          </View>
+          ) : null}
         </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Daftar Siswa</Text>
           <Text style={styles.sectionDescription}>
-            Pilih siswa untuk masuk ke alur pengukuran manual.
+            Ketuk nama siswa untuk mengisi tinggi dan berat badan.
           </Text>
         </View>
 
-        <View style={styles.list}>
-          {students.map(student => (
-            <Pressable
-              key={student.id}
-              onPress={() => openMeasurementForm(student.id)}
-              style={({ pressed }) => [
-                styles.studentCard,
-                pressed && styles.studentCardPressed,
-              ]}>
-              <View style={styles.studentMain}>
-                <View style={styles.studentAvatar}>
-                  <Text style={styles.studentAvatarLabel}>
-                    {student.name.charAt(0)}
-                  </Text>
-                </View>
-
+        {listState ?? (
+          <View style={styles.list}>
+            {filteredStudents.map(student => (
+              <Pressable
+                accessibilityRole="button"
+                key={student.id}
+                onPress={() => openMeasurementForm(student.id)}
+                style={({ pressed }) => [styles.studentCard, pressed && styles.studentCardPressed]}>
+                <Avatar name={student.name} size={40} />
                 <View style={styles.studentTextBlock}>
-                  <Text style={styles.studentName}>{student.name}</Text>
+                  <Text numberOfLines={1} style={styles.studentName}>
+                    {student.name}
+                  </Text>
                   <Text style={styles.studentMeta}>{student.measurement}</Text>
                   <Text style={styles.studentTimestamp}>{student.timestamp}</Text>
                 </View>
-              </View>
-
-              <View style={styles.studentAside}>
-                <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"
-                    stroke={
-                      student.checked
-                        ? colors.status.device.connected
-                        : colors.border.strong
-                    }
-                    strokeWidth={1.8}
-                    fill={
-                      student.checked
-                        ? colors.feedback.successBackground
-                        : colors.surface.secondary
-                    }
-                  />
-                  <Path
-                    d="m8.5 12 2.3 2.3 4.7-4.8"
-                    stroke={
-                      student.checked
-                        ? colors.status.device.connected
-                        : colors.text.muted
-                    }
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-              </View>
-            </Pressable>
-          ))}
-        </View>
+                <StatusPill
+                  label={
+                    student.checked
+                      ? 'Lengkap'
+                      : student.heightCm || student.weightKg
+                        ? 'Sebagian'
+                        : 'Belum'
+                  }
+                  tone={
+                    student.checked
+                      ? 'success'
+                      : student.heightCm || student.weightKg
+                        ? 'warning'
+                        : 'neutral'
+                  }
+                />
+              </Pressable>
+            ))}
+          </View>
+        )}
       </Screen>
 
       <Modal
@@ -532,314 +467,162 @@ export function StudentMeasurementScreen({
         visible={selectedStudent !== null}
         onRequestClose={closeMeasurementForm}>
         <View style={styles.modalContainer}>
+          <ModalHeader
+            eyebrow={`Siswa ${selectedStudentIndex + 1} dari ${students.length}`}
+            progressWidth={progressWidth}
+            onClose={closeMeasurementForm}
+          />
+
           <Screen
-            contentContainerStyle={styles.modalScrollContent}
-            stickyHeaderIndices={[0]}
-            style={styles.modalScroll}>
-            <View
-              style={[
-                styles.modalStickyHeader,
-                { paddingTop: Math.max(insets.top + 2, 30) },
-              ]}>
-              <View style={styles.modalHeaderTopRow}>
-                <Pressable
-                  accessibilityRole="adjustable"
-                  accessibilityLabel="Pilih posisi siswa pada progres sesi"
-                  onLayout={handleProgressLayout}
-                  onPress={handleProgressPress}
-                  style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${progressValue * 100}%` },
-                    ]}
-                  />
-                  {selectedStudentIndex >= 0 && students.length > 0 ? (
-                    <View
-                      style={[
-                        styles.progressThumb,
-                        { left: `${((selectedStudentIndex + 0.5) / students.length) * 100}%` },
-                      ]}
-                    />
-                  ) : null}
-                </Pressable>
-                <Pressable
-                  accessibilityLabel="Tutup input data manual"
-                  onPress={closeMeasurementForm}
-                  style={({ pressed }) => [
-                    styles.closeButton,
-                    pressed && styles.closeButtonPressed,
-                  ]}>
-                  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                    <Path
-                      d="M6 6l12 12"
-                      stroke={colors.text.inverse}
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <Path
-                      d="M18 6 6 18"
-                      stroke={colors.text.inverse}
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </Svg>
-                </Pressable>
-              </View>
+            contentContainerStyle={styles.modalContent}
+            keyboardShouldPersistTaps="handled">
+            <View style={styles.modalHero}>
+              <Avatar name={selectedStudent?.name ?? ''} size={88} ring />
+              <Text style={styles.modalStudentName}>{selectedStudent?.name}</Text>
+              <Text style={styles.modalStudentMeta}>{className}</Text>
+              {selectedStudent?.checked ? (
+                <StatusPill label="Sudah diukur — simpan untuk memperbarui" tone="success" />
+              ) : null}
             </View>
 
-            <View style={styles.modalHeaderContent}>
-              <View style={styles.modalHero}>
-                <View style={styles.modalHeroPhotoFrame}>
-                  {selectedStudent?.photoUri ? (
-                    <Image
-                      source={{ uri: selectedStudent.photoUri }}
-                      style={styles.modalHeroPhoto}
-                    />
-                  ) : (
-                    <View style={styles.modalHeroPhotoPlaceholder}>
-                      <Svg width={42} height={42} viewBox="0 0 24 24" fill="none">
-                        <Path
-                          d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-                          stroke={colors.text.inverse}
-                          strokeWidth={1.8}
-                        />
-                        <Path
-                          d="M5 20a7 7 0 0 1 14 0"
-                          stroke={colors.text.inverse}
-                          strokeWidth={1.8}
-                          strokeLinecap="round"
-                        />
-                      </Svg>
-                      <View style={styles.modalHeroInitialBadge}>
-                        <Text style={styles.modalHeroInitialBadgeLabel}>
-                          {selectedStudent ? getStudentInitials(selectedStudent.name) : ''}
-                        </Text>
-                      </View>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.modalStudentName}>{selectedStudent?.name}</Text>
-                <View style={styles.controlCard}>
-                  <View style={styles.connectionStatusBlock}>
-                    <Text style={styles.connectionStatusLabel}>Koneksi alat</Text>
-                    <View style={styles.connectionStatusRow}>
-                      <View
-                        style={[
-                          styles.connectionStatusDot,
-                          hasAnyDeviceConnected
-                            ? styles.connectionStatusDotConnected
-                            : styles.connectionStatusDotWarning,
-                        ]}
-                      />
-                      <Text style={styles.connectionStatusText}>
-                        {connectedDevicesCount}/2 alat terhubung
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.modeToggle}>
-                    <Pressable
-                      onPress={() => setMeasurementMode('manual')}
-                      style={({ pressed }) => [
-                        styles.modeToggleButton,
-                        measurementMode === 'manual' && styles.modeToggleButtonActive,
-                        pressed && styles.modeToggleButtonPressed,
-                      ]}>
-                      <Text
-                        style={[
-                          styles.modeToggleLabel,
-                          measurementMode === 'manual' && styles.modeToggleLabelActive,
-                        ]}>
-                        Manual
-                      </Text>
-                    </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      setMeasurementMode('auto');
-                      if (latestWeightDisplay !== null) {
-                        setWeightValue(latestWeightDisplay);
-                      }
-                    }}
-                    style={({ pressed }) => [
-                      styles.modeToggleButton,
-                      measurementMode === 'auto' && styles.modeToggleButtonActive,
-                      pressed && styles.modeToggleButtonPressed,
-                    ]}>
-                    <Text
-                      style={[
-                        styles.modeToggleLabel,
-                        measurementMode === 'auto' && styles.modeToggleLabelActive,
-                      ]}>
-                      Auto
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
+            {CAN_USE_BLE ? (
+              <View style={styles.modeCard}>
+                <SegmentedControl
+                  options={MODE_OPTIONS}
+                  value={measurementMode}
+                  onChange={mode => {
+                    setMeasurementMode(mode);
+                    if (mode === 'auto' && latestWeightDisplay !== null) {
+                      setWeightValue(latestWeightDisplay);
+                    }
+                  }}
+                />
 
                 {measurementMode === 'auto' ? (
                   <View style={styles.autoDevicePanel}>
                     <View style={styles.autoDeviceTextBlock}>
                       <Text style={styles.autoDeviceTitle}>
-                        {deviceConnection.weightConnected
-                          ? 'Timbangan terhubung'
-                          : 'Timbangan belum terhubung'}
+                        {isScaleConnected ? 'Timbangan terhubung' : 'Timbangan belum terhubung'}
                       </Text>
                       <Text style={styles.autoDeviceDescription}>
                         {latestWeightDisplay
                           ? `Berat terakhir ${latestWeightDisplay} kg`
-                          : 'Hubungkan perangkat atau isi berat secara manual sementara.'}
+                          : 'Berat tetap bisa diketik manual tanpa alat.'}
                       </Text>
                     </View>
-                    <Pressable
-                      onPress={onOpenDeviceManager}
-                      style={({ pressed }) => [
-                        styles.autoDeviceButton,
-                        pressed && styles.autoDeviceButtonPressed,
-                      ]}>
-                      <Text style={styles.autoDeviceButtonLabel}>Perangkat</Text>
-                    </Pressable>
+                    {onOpenDeviceManager ? (
+                      <PrimaryButton
+                        label="Atur alat"
+                        onPress={onOpenDeviceManager}
+                        size="sm"
+                        variant="outline"
+                      />
+                    ) : null}
                   </View>
                 ) : null}
               </View>
+            ) : null}
+
+            <View style={styles.fieldGrid}>
+              <MeasurementField
+                label="Tinggi badan"
+                unit="cm"
+                value={heightValue}
+                onChangeText={value => setHeightValue(sanitizeDecimalInput(value))}
+              />
+              <MeasurementField
+                label="Berat badan"
+                unit="kg"
+                value={weightValue}
+                onChangeText={value => setWeightValue(sanitizeDecimalInput(value))}
+              />
             </View>
+            <Text style={styles.fieldHint}>
+              Gunakan titik atau koma untuk desimal, contoh 125,5 cm atau 24,8 kg.
+            </Text>
 
-            <View style={styles.modalContent}>
-              <View style={styles.modalMainContent}>
-                <View style={styles.fieldGrid}>
-                  <View style={styles.fieldColumn}>
-                    <View style={styles.fieldInputCard}>
-                      <Text style={styles.fieldCardLabel}>Tinggi badan</Text>
-                      <TextInput
-                        inputMode="numeric"
-                        keyboardType="number-pad"
-                        onChangeText={value => setHeightValue(keepDigitsOnly(value))}
-                        placeholder="00"
-                        placeholderTextColor={colors.text.muted}
-                        style={styles.fieldInput}
-                        value={heightValue}
-                      />
-                      <Text style={styles.fieldCardUnit}>cm</Text>
-                    </View>
-                  </View>
+            {saveError ? <InlineAlert tone="error" message={saveError} /> : null}
 
-                  <View style={styles.fieldColumn}>
-                    <View style={styles.fieldInputCard}>
-                      <Text style={styles.fieldCardLabel}>Berat badan</Text>
-                      <TextInput
-                        inputMode="numeric"
-                        keyboardType="number-pad"
-                        onChangeText={value => setWeightValue(keepDigitsOnly(value))}
-                        placeholder="00"
-                        placeholderTextColor={colors.text.muted}
-                        style={styles.fieldInput}
-                        value={weightValue}
-                      />
-                      <Text style={styles.fieldCardUnit}>kg</Text>
-                    </View>
-                  </View>
-                </View>
+            <PrimaryButton
+              label="Simpan dan Lanjutkan"
+              loading={isSavingMeasurement}
+              onPress={() => {
+                saveAndContinue().catch(() => undefined);
+              }}
+            />
 
-                {saveError ? (
-                  <View style={styles.modalErrorCard}>
-                    <Text style={styles.modalErrorText}>{saveError}</Text>
-                  </View>
-                ) : null}
-
-                <View style={styles.modalActions}>
-                  <Pressable
-                    disabled={isSavingMeasurement}
-                    onPress={saveAndContinueToNextStudent}
-                    style={({ pressed }) => [
-                      styles.primaryButton,
-                      isSavingMeasurement && styles.primaryButtonDisabled,
-                      pressed && styles.primaryButtonPressed,
-                    ]}>
-                    <Text style={styles.primaryButtonLabel}>
-                      {isSavingMeasurement ? 'Menyimpan...' : 'Simpan dan Lanjutkan'}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-
-              <View style={styles.modalFooter}>
-                <Text style={styles.nextStudentLabel}>Siswa berikutnya</Text>
-                <View style={styles.nextStudentCard}>
-                  <View style={styles.nextStudentMain}>
-                    <View style={styles.nextStudentPhotoFrame}>
-                      {nextStudent?.photoUri ? (
-                        <Image
-                          source={{ uri: nextStudent.photoUri }}
-                          style={styles.nextStudentPhoto}
-                        />
-                      ) : (
-                        <View style={styles.nextStudentPhotoPlaceholder}>
-                          <Text style={styles.nextStudentInitials}>
-                            {nextStudent ? getStudentInitials(nextStudent.name) : ''}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.nextStudentTextBlock}>
-                      <Text style={styles.nextStudentName}>{nextStudent?.name}</Text>
-                    </View>
-                    <View style={styles.nextStudentStatus}>
-                      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-                        <Path
-                          d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"
-                          stroke={
-                            nextStudent?.checked
-                              ? colors.status.device.connected
-                              : colors.border.strong
-                          }
-                          strokeWidth={1.8}
-                          fill={
-                            nextStudent?.checked
-                              ? colors.feedback.successBackground
-                              : colors.surface.secondary
-                          }
-                        />
-                        <Path
-                          d="m8.5 12 2.3 2.3 4.7-4.8"
-                          stroke={
-                            nextStudent?.checked
-                              ? colors.status.device.connected
-                              : colors.text.muted
-                          }
-                          strokeWidth={2}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </Svg>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.studentNavActions}>
-                  <Pressable
-                    onPress={() => moveStudentSelection(-1)}
-                    style={({ pressed }) => [
-                      styles.navButton,
-                      pressed && styles.navButtonPressed,
-                    ]}>
-                    <Text style={styles.navButtonLabel}>Prev</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => moveStudentSelection(1)}
-                    style={({ pressed }) => [
-                      styles.navButton,
-                      pressed && styles.navButtonPressed,
-                    ]}>
-                    <Text style={styles.navButtonLabel}>Next</Text>
-                  </Pressable>
-                </View>
-              </View>
+            <View style={styles.studentNavActions}>
+              <PrimaryButton
+                disabled={isSavingMeasurement}
+                label="‹ Sebelumnya"
+                onPress={() => moveStudentSelection(-1)}
+                size="md"
+                style={styles.navButton}
+                variant="outline"
+              />
+              <PrimaryButton
+                disabled={isSavingMeasurement}
+                label="Lewati ›"
+                onPress={() => moveStudentSelection(1)}
+                size="md"
+                style={styles.navButton}
+                variant="outline"
+              />
             </View>
           </Screen>
         </View>
       </Modal>
+    </View>
+  );
+}
+
+type MeasurementFieldProps = {
+  label: string;
+  unit: string;
+  value: string;
+  onChangeText: (value: string) => void;
+};
+
+function MeasurementField({ label, unit, value, onChangeText }: MeasurementFieldProps) {
+  return (
+    <View style={styles.fieldCard}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        accessibilityLabel={`${label} (${unit})`}
+        inputMode="decimal"
+        keyboardType="decimal-pad"
+        maxLength={5}
+        onChangeText={onChangeText}
+        placeholder="0"
+        placeholderTextColor={colors.text.muted}
+        selectTextOnFocus
+        style={styles.fieldInput}
+        value={value}
+      />
+      <Text style={styles.fieldUnit}>{unit}</Text>
+    </View>
+  );
+}
+
+type ModalHeaderProps = {
+  eyebrow: string;
+  progressWidth: `${number}%`;
+  onClose: () => void;
+};
+
+function ModalHeader({ eyebrow, progressWidth, onClose }: ModalHeaderProps) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.modalHeader, { paddingTop: insets.top + spacing[8] }]}>
+      <View style={styles.modalHeaderText}>
+        <Text style={styles.modalEyebrow}>{eyebrow}</Text>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: progressWidth }]} />
+        </View>
+      </View>
+      <IconButton accessibilityLabel="Tutup input pengukuran" onPress={onClose}>
+        <Icon name="close" color={colors.text.primary} />
+      </IconButton>
     </View>
   );
 }
@@ -849,435 +632,106 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.app,
   },
-  pageHeader: {
-    backgroundColor: colors.surface.app,
+  searchWrap: {
     paddingHorizontal: spacing[16],
-    paddingBottom: spacing[16],
-    gap: spacing[12],
+    paddingBottom: spacing[12],
     borderBottomWidth: 1,
     borderBottomColor: colors.border.subtle,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing[12],
-  },
-  headerIdentity: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  headerIdentityText: {
-    justifyContent: 'center',
-  },
-  pageTitle: {
-    ...typography.headingLg,
-    color: colors.text.primary,
-  },
-  syncStatusButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  syncStatusButtonActive: {
-    borderColor: colors.brand.primary300,
-    backgroundColor: colors.brand.primary100,
-  },
-  syncStatusButtonPressed: {
-    opacity: 0.9,
-  },
-  syncStatusBadge: {
-    position: 'absolute',
-    top: -6,
-    right: -6,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: spacing[4],
-    backgroundColor: colors.accent.red,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  syncStatusBadgeLabel: {
-    ...typography.caption,
-    color: colors.text.inverse,
+    backgroundColor: colors.surface.app,
   },
   searchBar: {
-    minHeight: 52,
-    borderRadius: radius.lg,
+    minHeight: 48,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border.strong,
     backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[16],
+    paddingLeft: spacing[16],
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[12],
+    gap: spacing[8],
   },
-  searchPlaceholder: {
+  searchInput: {
     ...typography.bodyMd,
-    color: colors.text.muted,
     flex: 1,
+    minHeight: 46,
+    color: colors.text.primary,
+  },
+  clearSearchButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     paddingTop: spacing[16],
     paddingHorizontal: spacing[16],
     gap: spacing[16],
   },
-  pendingInfoCard: {
-    backgroundColor: colors.feedback.warningBackground,
-    borderWidth: 1,
-    borderColor: colors.accent.amber,
-    borderRadius: radius.md,
-    padding: spacing[12],
-    gap: spacing[4],
-  },
-  pendingInfoTitle: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
-  pendingInfoDescription: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  syncSuccessInfoCard: {
-    backgroundColor: colors.feedback.successBackground,
-    borderWidth: 1,
-    borderColor: colors.status.device.connected,
-    borderRadius: radius.md,
-    padding: spacing[12],
-    gap: spacing[4],
-  },
-  syncSuccessTitle: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
-  syncSuccessDescription: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  errorCard: {
-    borderWidth: 1,
-    borderColor: colors.feedback.errorBorder,
-    borderRadius: radius.md,
-    backgroundColor: colors.feedback.errorBackground,
-    padding: spacing[12],
-  },
-  errorText: {
-    ...typography.bodySm,
-    color: colors.feedback.errorText,
-  },
-  sessionDetailCard: {
-    backgroundColor: colors.surface.primary,
+  sessionCard: {
+    backgroundColor: colors.surface.card,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border.subtle,
     padding: spacing[16],
     gap: spacing[12],
   },
-  sessionDetailTopRow: {
+  sessionCardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: spacing[12],
   },
-  sessionDetailEyebrow: {
+  sessionEyebrow: {
     ...typography.caption,
     color: colors.text.secondary,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  sessionDetailDate: {
-    ...typography.caption,
-    color: colors.text.muted,
-  },
-  sessionDetailTitle: {
-    ...typography.headingMd,
+  sessionCount: {
+    ...typography.labelMd,
     color: colors.text.primary,
   },
-  sessionDetailMeta: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  sessionProgressTrack: {
-    marginTop: spacing[2],
+  progressTrack: {
     height: 8,
     borderRadius: radius.pill,
     backgroundColor: colors.surface.secondary,
     overflow: 'hidden',
   },
-  sessionProgressFill: {
-    height: '100%',
-    borderRadius: radius.pill,
-    backgroundColor: colors.brand.primary500,
-  },
-  sessionActionGroup: {
-    marginTop: spacing[4],
-    gap: spacing[8],
-  },
-  sessionCtaButton: {
-    minHeight: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.brand.primary500,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[16],
-  },
-  sessionCtaButtonPressed: {
-    backgroundColor: colors.brand.primary700,
-  },
-  sessionCtaButtonLabel: {
-    ...typography.labelMd,
-    color: colors.text.inverse,
-  },
-  faceIdButton: {
-    minHeight: 44,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.brand.primary300,
-    backgroundColor: colors.surface.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[16],
-  },
-  faceIdButtonPressed: {
-    backgroundColor: colors.surface.secondary,
-  },
-  faceIdButtonLabel: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: colors.brand.primary700,
-  },
-  modalScroll: {
-    backgroundColor: colors.brand.primary700,
-  },
-  modalScrollContent: {
-    paddingTop: 0,
-    paddingBottom: spacing[32],
-  },
-  modalStickyHeader: {
-    backgroundColor: colors.brand.primary700,
-    paddingHorizontal: spacing[16],
-    paddingBottom: spacing[12],
-  },
-  modalHeaderContent: {
-    backgroundColor: colors.brand.primary700,
-    paddingHorizontal: spacing[16],
-    paddingBottom: spacing[20],
-    gap: spacing[20],
-  },
-  modalHeaderTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  progressTrack: {
-    flex: 1,
-    height: 8,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    overflow: 'visible',
-  },
   progressFill: {
     height: '100%',
     borderRadius: radius.pill,
-    backgroundColor: colors.text.inverse,
-  },
-  progressThumb: {
-    position: 'absolute',
-    top: -5,
-    width: 18,
-    height: 18,
-    marginLeft: -9,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: colors.brand.primary700,
-    backgroundColor: colors.text.inverse,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  closeButtonPressed: {
-    backgroundColor: 'rgba(255,255,255,0.24)',
-  },
-  modalHero: {
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing[8],
-  },
-  modalHeroPhotoFrame: {
-    width: 124,
-    height: 124,
-    borderRadius: radius.lg,
-    padding: spacing[4],
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  modalHeroPhoto: {
-    width: '100%',
-    height: '100%',
-    borderRadius: radius.lg,
-  },
-  modalHeroPhotoPlaceholder: {
-    flex: 1,
-    borderRadius: radius.lg,
     backgroundColor: colors.brand.primary500,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
   },
-  modalHeroInitialBadge: {
-    position: 'absolute',
-    bottom: spacing[8],
-    paddingHorizontal: spacing[8],
-    minHeight: 24,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(23, 64, 92, 0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalHeroInitialBadgeLabel: {
-    ...typography.caption,
-    color: colors.text.inverse,
-  },
-  modalStudentName: {
-    ...typography.headingXL,
-    color: colors.text.inverse,
-    textAlign: 'center',
-  },
-  controlCard: {
-    marginTop: spacing[4],
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
+  secondaryButton: {
+    minHeight: 48,
     borderRadius: radius.lg,
-    padding: spacing[12],
-    backgroundColor: 'rgba(255,255,255,0.14)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    gap: spacing[12],
-  },
-  connectionStatusBlock: {
-    flex: 1,
-    gap: spacing[4],
-  },
-  connectionStatusLabel: {
-    ...typography.caption,
-    color: colors.brand.primary100,
-  },
-  connectionStatusRow: {
-    flexDirection: 'row',
+    borderColor: colors.border.strong,
+    backgroundColor: colors.surface.card,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing[8],
-  },
-  connectionStatusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  connectionStatusDotConnected: {
-    backgroundColor: colors.status.device.connected,
-  },
-  connectionStatusDotWarning: {
-    backgroundColor: colors.status.device.connecting,
-  },
-  connectionStatusText: {
-    ...typography.labelMd,
-    color: colors.text.inverse,
-  },
-  modeToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing[4],
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(23, 64, 92, 0.35)',
-    gap: spacing[4],
-  },
-  modeToggleButton: {
-    minHeight: 34,
-    borderRadius: radius.pill,
     paddingHorizontal: spacing[16],
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingVertical: spacing[8],
   },
-  modeToggleButtonActive: {
-    backgroundColor: colors.text.inverse,
+  secondaryPressed: {
+    backgroundColor: colors.surface.secondary,
   },
-  modeToggleButtonDisabled: {
-    opacity: 0.5,
-  },
-  modeToggleButtonPressed: {
-    opacity: 0.9,
-  },
-  modeToggleLabel: {
+  secondaryButtonLabel: {
     ...typography.labelMd,
-    color: colors.text.inverse,
-  },
-  modeToggleLabelActive: {
     color: colors.brand.primary700,
   },
-  modeToggleLabelDisabled: {
-    color: colors.brand.primary100,
+  deviceTag: {
+    borderRadius: radius.pill,
+    backgroundColor: colors.feedback.warningBackground,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[2],
   },
-  autoDevicePanel: {
-    width: '100%',
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    padding: spacing[12],
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  autoDeviceTextBlock: {
-    flex: 1,
-    gap: spacing[2],
-  },
-  autoDeviceTitle: {
-    ...typography.labelMd,
-    color: colors.text.inverse,
-  },
-  autoDeviceDescription: {
+  deviceTagLabel: {
     ...typography.caption,
-    color: colors.brand.primary100,
-  },
-  autoDeviceButton: {
-    minHeight: 36,
-    borderRadius: radius.pill,
-    backgroundColor: colors.text.inverse,
-    paddingHorizontal: spacing[12],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  autoDeviceButtonPressed: {
-    opacity: 0.9,
-  },
-  autoDeviceButtonLabel: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
-  },
-  modalContent: {
-    paddingTop: spacing[24],
-    paddingHorizontal: spacing[16],
-    gap: spacing[20],
-  },
-  modalMainContent: {
-    gap: spacing[16],
+    color: colors.text.secondary,
   },
   sectionHeader: {
     gap: spacing[4],
@@ -1291,186 +745,141 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   list: {
-    gap: spacing[12],
+    gap: spacing[8],
   },
   studentCard: {
-    backgroundColor: colors.surface.primary,
-    borderRadius: radius.lg,
+    minHeight: 64,
+    backgroundColor: colors.surface.card,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border.subtle,
-    padding: spacing[16],
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[12],
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing[12],
   },
   studentCardPressed: {
     backgroundColor: colors.surface.secondary,
     borderColor: colors.brand.primary300,
   },
-  studentMain: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  studentAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.primary100,
-  },
-  studentAvatarLabel: {
-    ...typography.labelLg,
-    color: colors.brand.primary700,
-  },
   studentTextBlock: {
     flex: 1,
-    gap: spacing[4],
+    gap: spacing[2],
   },
   studentName: {
-    ...typography.headingMd,
+    ...typography.labelLg,
     color: colors.text.primary,
   },
   studentMeta: {
     ...typography.bodySm,
-    color: colors.text.primary,
+    color: colors.text.secondary,
   },
   studentTimestamp: {
     ...typography.caption,
+    color: colors.text.muted,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: colors.surface.app,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+    paddingHorizontal: spacing[16],
+    paddingBottom: spacing[12],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+    backgroundColor: colors.surface.app,
+  },
+  modalHeaderText: {
+    flex: 1,
+    gap: spacing[6],
+  },
+  modalEyebrow: {
+    ...typography.caption,
     color: colors.text.secondary,
   },
-  studentAside: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
+  modalContent: {
+    paddingTop: spacing[20],
+    paddingHorizontal: spacing[16],
+    gap: spacing[16],
+  },
+  modalHero: {
+    alignItems: 'center',
+    gap: spacing[6],
+  },
+  modalStudentName: {
+    ...typography.headingLg,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  modalStudentMeta: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  modeCard: {
+    gap: spacing[12],
+  },
+  autoDevicePanel: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.feedback.infoBackground,
+    padding: spacing[12],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+  },
+  autoDeviceTextBlock: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  autoDeviceTitle: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  autoDeviceDescription: {
+    ...typography.caption,
+    color: colors.text.secondary,
   },
   fieldGrid: {
     flexDirection: 'row',
     gap: spacing[12],
   },
-  fieldColumn: {
+  fieldCard: {
     flex: 1,
-  },
-  fieldInputCard: {
-    minHeight: 132,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    paddingHorizontal: spacing[16],
+    borderColor: colors.border.strong,
+    backgroundColor: colors.surface.card,
+    paddingHorizontal: spacing[12],
     paddingVertical: spacing[12],
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: spacing[4],
   },
-  fieldCardLabel: {
-    ...typography.labelLg,
-    color: colors.brand.primary100,
-    textAlign: 'center',
+  fieldLabel: {
+    ...typography.labelMd,
+    color: colors.text.secondary,
   },
   fieldInput: {
     width: '100%',
     minHeight: 56,
     textAlign: 'center',
-    fontSize: 36,
-    lineHeight: 42,
+    fontSize: 34,
+    lineHeight: 40,
     fontWeight: '700',
-    color: colors.text.inverse,
-  },
-  fieldCardUnit: {
-    ...typography.labelLg,
-    color: colors.brand.primary100,
-    textAlign: 'center',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: spacing[12],
-  },
-  modalErrorCard: {
-    borderWidth: 1,
-    borderColor: colors.feedback.errorBorder,
-    borderRadius: radius.md,
-    backgroundColor: colors.feedback.errorBackground,
-    padding: spacing[12],
-  },
-  modalErrorText: {
-    ...typography.bodySm,
-    color: colors.feedback.errorText,
-  },
-  primaryButton: {
-    flex: 1,
-    minHeight: 52,
-    borderRadius: radius.lg,
-    backgroundColor: colors.brand.primary500,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[16],
-  },
-  primaryButtonPressed: {
-    backgroundColor: colors.brand.primary700,
-  },
-  primaryButtonDisabled: {
-    opacity: 0.7,
-  },
-  primaryButtonLabel: {
-    ...typography.labelLg,
-    color: colors.text.inverse,
-  },
-  modalFooter: {
-    gap: spacing[12],
-  },
-  nextStudentCard: {
-    backgroundColor: colors.surface.primary,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    padding: spacing[12],
-    gap: spacing[8],
-  },
-  nextStudentLabel: {
-    ...typography.caption,
-    color: colors.text.inverse,
-    textAlign: 'center',
-    fontSize: 11,
-  },
-  nextStudentMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[16],
-  },
-  nextStudentTextBlock: {
-    flex: 1,
-    gap: spacing[4],
-  },
-  nextStudentPhotoFrame: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    overflow: 'hidden',
-    backgroundColor: colors.brand.primary100,
-  },
-  nextStudentPhoto: {
-    width: '100%',
-    height: '100%',
-  },
-  nextStudentPhotoPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.primary100,
-  },
-  nextStudentInitials: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
-  },
-  nextStudentName: {
-    ...typography.labelLg,
     color: colors.text.primary,
   },
-  nextStudentStatus: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  fieldUnit: {
+    ...typography.labelMd,
+    color: colors.text.muted,
+  },
+  fieldHint: {
+    ...typography.caption,
+    color: colors.text.muted,
+    textAlign: 'center',
   },
   studentNavActions: {
     flexDirection: 'row',
@@ -1478,19 +887,5 @@ const styles = StyleSheet.create({
   },
   navButton: {
     flex: 1,
-    minHeight: 48,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navButtonPressed: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  navButtonLabel: {
-    ...typography.labelLg,
-    color: colors.text.inverse,
   },
 });

@@ -1,17 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
 import { listImmunizationStudents, saveStudentImmunizationRecord } from '../../services';
-import { Screen } from '../../shared/components';
+import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
+import type { SaveStudentImmunizationRecordPayload } from '../../services';
+import {
+  Avatar,
+  EmptyState,
+  Icon,
+  IconButton,
+  InlineAlert,
+  LoadingState,
+  PrimaryButton,
+  Screen,
+  ScreenHeader,
+  StatusPill,
+  TextField,
+} from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { StudentMeasurementItem } from '../../types';
 
@@ -26,14 +38,14 @@ type StudentImmunizationScreenProps = {
   sessionDateIso: string;
 };
 
-const formatDateTimeLabel = (date: Date) =>
-  date.toLocaleString('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+type ImmunizationStatus = NonNullable<SaveStudentImmunizationRecordPayload['status']>;
+
+const STATUS_OPTIONS: Array<{ value: ImmunizationStatus; label: string }> = [
+  { value: 'given', label: 'Diberikan' },
+  { value: 'deferred', label: 'Ditunda' },
+  { value: 'refused', label: 'Ditolak' },
+  { value: 'absent', label: 'Tidak hadir' },
+];
 
 function formatSessionDateLabel(value: string) {
   const date = new Date(value);
@@ -48,6 +60,22 @@ function formatSessionDateLabel(value: string) {
   });
 }
 
+function getRecordTone(student: StudentMeasurementItem) {
+  if (!student.checked) {
+    return { label: 'Belum', tone: 'neutral' as const };
+  }
+  if (student.measurement.includes('Lengkap')) {
+    return { label: 'Diberikan', tone: 'success' as const };
+  }
+  if (student.measurement.includes('Ditunda')) {
+    return { label: 'Ditunda', tone: 'warning' as const };
+  }
+  if (student.measurement.includes('Ditolak')) {
+    return { label: 'Ditolak', tone: 'danger' as const };
+  }
+  return { label: 'Tidak hadir', tone: 'warning' as const };
+}
+
 export function StudentImmunizationScreen({
   onBack,
   sessionId = null,
@@ -60,30 +88,39 @@ export function StudentImmunizationScreen({
 }: StudentImmunizationScreenProps) {
   const insets = useSafeAreaInsets();
   const [students, setStudents] = useState<StudentMeasurementItem[]>([]);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  const [recordedAt, setRecordedAt] = useState(new Date());
+  const [recordStatus, setRecordStatus] = useState<ImmunizationStatus>('given');
+  const [notes, setNotes] = useState('');
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [studentLoadError, setStudentLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [isSavingRecord, setIsSavingRecord] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [lastSavedName, setLastSavedName] = useState<string | null>(null);
 
   const selectedStudentIndex = selectedStudentId
     ? students.findIndex(student => student.id === selectedStudentId)
     : -1;
   const selectedStudent = selectedStudentIndex >= 0 ? students[selectedStudentIndex] : null;
-  const nextStudent =
-    selectedStudentIndex >= 0 ? students[(selectedStudentIndex + 1) % students.length] : null;
   const recordedStudentsCount = students.filter(student => student.checked).length;
   const progressValue = students.length > 0 ? recordedStudentsCount / students.length : 0;
-  const sessionProgressWidth = `${progressValue * 100}%` as `${number}%`;
+  const progressWidth = `${Math.round(progressValue * 100)}%` as `${number}%`;
   const sessionDateLabel = formatSessionDateLabel(sessionDateIso);
   const officerName = sessionImmunizationOfficer ?? 'Petugas UKS';
+
+  const filteredStudents = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return students;
+    }
+    return students.filter(student => student.name.toLowerCase().includes(keyword));
+  }, [searchKeyword, students]);
 
   useEffect(() => {
     if (!sessionId) {
       setStudents([]);
-      setStudentLoadError('Sesi imunisasi belum dipilih.');
+      setStudentLoadError('Sesi imunisasi belum dipilih. Kembali lalu pilih atau buat sesi.');
       return;
     }
 
@@ -101,7 +138,7 @@ export function StudentImmunizationScreen({
         if (isMounted) {
           setStudents([]);
           setStudentLoadError(
-            error instanceof Error ? error.message : 'Gagal memuat siswa imunisasi.',
+            toRecordingErrorMessage(error, 'Gagal memuat siswa imunisasi.'),
           );
         }
       })
@@ -114,16 +151,24 @@ export function StudentImmunizationScreen({
     return () => {
       isMounted = false;
     };
-  }, [sessionId]);
+  }, [reloadToken, sessionId]);
+
+  useEffect(() => {
+    if (!lastSavedName) {
+      return;
+    }
+    const timer = setTimeout(() => setLastSavedName(null), 2600);
+    return () => clearTimeout(timer);
+  }, [lastSavedName]);
 
   const openImmunizationForm = (studentId: string) => {
     setSelectedStudentId(studentId);
-    setRecordedAt(new Date());
+    setRecordStatus('given');
+    setNotes('');
     setSaveError(null);
-    setShowSaveSuccess(false);
   };
 
-  const startImmunizationFromSessionCard = () => {
+  const startImmunization = () => {
     const targetStudent = students.find(student => !student.checked) ?? students[0] ?? null;
     if (targetStudent) {
       openImmunizationForm(targetStudent.id);
@@ -139,141 +184,187 @@ export function StudentImmunizationScreen({
     openImmunizationForm(students[nextIndex].id);
   };
 
+  const closeModal = () => {
+    setSelectedStudentId(null);
+    setSaveError(null);
+  };
+
   const saveAndContinue = async () => {
-    if (!sessionId || !selectedStudent || selectedStudentIndex < 0 || isSavingRecord) {
+    if (!sessionId || !selectedStudent || isSavingRecord) {
       return;
     }
 
+    const savedStudentId = selectedStudent.id;
+    const savedStudentName = selectedStudent.name;
     setIsSavingRecord(true);
     setSaveError(null);
-    setShowSaveSuccess(false);
 
     try {
       const savedRecord = await saveStudentImmunizationRecord({
         sessionId,
-        studentId: selectedStudent.id,
+        studentId: savedStudentId,
         studentEnrollmentId: selectedStudent.studentEnrollmentId,
         vaccineName: sessionImmunizationType,
         doseLabel: sessionImmunizationDose,
         officerName,
-        status: 'given',
+        status: recordStatus,
+        notes: notes.trim() || null,
       });
 
-      setStudents(currentStudents =>
-        currentStudents.map((student, index) =>
-          index === selectedStudentIndex
-            ? {
-                ...student,
-                recordId: savedRecord.recordId,
-                measurement: savedRecord.measurement,
-                timestamp: savedRecord.timestamp,
-                checked: true,
-                syncStatus: 'synced',
-              }
-            : student,
-        ),
+      const updatedStudents = students.map(student =>
+        student.id === savedStudentId
+          ? {
+              ...student,
+              recordId: savedRecord.recordId,
+              measurement: savedRecord.measurement,
+              timestamp: savedRecord.timestamp,
+              checked: true,
+              syncStatus: 'synced' as const,
+            }
+          : student,
       );
+      setStudents(updatedStudents);
+      setLastSavedName(savedStudentName);
 
-      setShowSaveSuccess(true);
-      setTimeout(() => setShowSaveSuccess(false), 1800);
-      const nextIndex = (selectedStudentIndex + 1) % students.length;
-      openImmunizationForm(students[nextIndex].id);
+      const currentIndex = updatedStudents.findIndex(student => student.id === savedStudentId);
+      const ordered = [
+        ...updatedStudents.slice(currentIndex + 1),
+        ...updatedStudents.slice(0, currentIndex),
+      ];
+      const nextPending = ordered.find(student => !student.checked);
+      if (nextPending) {
+        openImmunizationForm(nextPending.id);
+      } else {
+        closeModal();
+      }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Gagal menyimpan data imunisasi.');
+      setSaveError(toRecordingErrorMessage(error, 'Gagal menyimpan data imunisasi.'));
     } finally {
       setIsSavingRecord(false);
     }
   };
 
-  const closeModal = () => {
-    setSelectedStudentId(null);
-    setSaveError(null);
-    setShowSaveSuccess(false);
+  const renderListState = () => {
+    if (isLoadingStudents) {
+      return <LoadingState label="Memuat siswa sesi..." />;
+    }
+    if (studentLoadError) {
+      return (
+        <InlineAlert
+          tone="error"
+          message={studentLoadError}
+          actionLabel={sessionId ? 'Coba lagi' : undefined}
+          onAction={sessionId ? () => setReloadToken(value => value + 1) : undefined}
+        />
+      );
+    }
+    if (students.length === 0) {
+      return (
+        <EmptyState
+          title="Belum ada siswa di kelas ini"
+          description={`Tambahkan siswa ke ${className} melalui menu Dashboard › Kelas.`}
+          icon="user"
+        />
+      );
+    }
+    if (filteredStudents.length === 0) {
+      return (
+        <EmptyState
+          compact
+          icon="search"
+          title="Siswa tidak ditemukan"
+          description={`Tidak ada siswa bernama “${searchKeyword.trim()}”.`}
+        />
+      );
+    }
+    return null;
   };
+
+  const listState = renderListState();
 
   return (
     <View style={styles.container}>
-      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}>
-        <View style={styles.headerTopRow}>
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15 6l-6 6 6 6"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <Text numberOfLines={1} style={styles.pageTitle}>{sessionName}</Text>
-          </Pressable>
+      <ScreenHeader
+        title={sessionName}
+        subtitle={`${className} • ${sessionDateLabel}`}
+        onBack={onBack}
+        backAccessibilityLabel="Kembali ke daftar sesi"
+        bordered={false}
+      />
+      <View style={styles.searchWrap}>
+        <View style={styles.searchBar}>
+          <Icon name="search" size={18} color={colors.text.muted} />
+          <TextInput
+            accessibilityLabel="Cari siswa"
+            onChangeText={setSearchKeyword}
+            placeholder="Cari nama siswa"
+            placeholderTextColor={colors.text.muted}
+            style={styles.searchInput}
+            value={searchKeyword}
+          />
         </View>
       </View>
 
-      <Screen contentContainerStyle={styles.content}>
-        {isLoadingStudents ? (
-          <View style={styles.infoCard}>
-            <ActivityIndicator color={colors.brand.primary600} size="small" />
-            <Text style={styles.infoTitle}>Memuat siswa sesi...</Text>
-          </View>
-        ) : studentLoadError ? (
-          <View style={styles.errorCard}>
-            <Text style={styles.errorText}>{studentLoadError}</Text>
-          </View>
-        ) : showSaveSuccess ? (
-          <View style={[styles.infoCard, styles.infoCardSuccess]}>
-            <Text style={styles.infoTitle}>Data imunisasi tersimpan</Text>
-          </View>
+      <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {lastSavedName ? (
+          <InlineAlert tone="success" message={`Data imunisasi ${lastSavedName} tersimpan.`} />
         ) : null}
 
-        <View style={styles.sessionDetailCard}>
-          <Text style={styles.sessionDetailEyebrow}>Detail Session</Text>
-          <Text style={styles.sessionDetailTitle}>{className}</Text>
-          <Text style={styles.sessionDetailMeta}>Tanggal sesi: {sessionDateLabel}</Text>
-          <Text style={styles.sessionDetailMeta}>Jenis sesi: {sessionImmunizationType}</Text>
-          {sessionImmunizationDose ? (
-            <Text style={styles.sessionDetailMeta}>Dosis sesi: {sessionImmunizationDose}</Text>
-          ) : null}
-          <Text style={styles.sessionDetailMeta}>Petugas: {officerName}</Text>
-          <Text style={styles.sessionDetailMeta}>
-            {recordedStudentsCount}/{students.length} siswa sudah dicatat lengkap
-          </Text>
-          <View style={styles.sessionProgressTrack}>
-            <View style={[styles.sessionProgressFill, { width: sessionProgressWidth }]} />
+        <View style={styles.sessionCard}>
+          <View style={styles.chipRow}>
+            <StatusPill label={sessionImmunizationType} tone="info" />
+            {sessionImmunizationDose ? (
+              <StatusPill label={sessionImmunizationDose} tone="neutral" />
+            ) : null}
           </View>
-          <Pressable
-            onPress={startImmunizationFromSessionCard}
-            style={({ pressed }) => [styles.sessionCtaButton, pressed && styles.sessionCtaButtonPressed]}>
-            <Text style={styles.sessionCtaButtonLabel}>Mulai Pencatatan</Text>
-          </Pressable>
+          <Text style={styles.sessionMeta}>Petugas: {officerName}</Text>
+          <View style={styles.sessionCountRow}>
+            <Text style={styles.sessionEyebrow}>Progres sesi</Text>
+            <Text style={styles.sessionCount}>
+              {recordedStudentsCount}/{students.length} siswa
+            </Text>
+          </View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: progressWidth }]} />
+          </View>
+          <PrimaryButton
+            disabled={students.length === 0 || isLoadingStudents}
+            label={
+              students.length > 0 && recordedStudentsCount === students.length
+                ? 'Semua siswa sudah dicatat'
+                : 'Mulai Pencatatan'
+            }
+            onPress={startImmunization}
+          />
         </View>
 
-        <View style={styles.list}>
-          {students.map(student => (
-            <Pressable
-              key={student.id}
-              onPress={() => openImmunizationForm(student.id)}
-              style={({ pressed }) => [styles.studentCard, pressed && styles.studentCardPressed]}>
-              <View style={styles.studentMain}>
-                <View style={styles.studentAvatar}>
-                  <Text style={styles.studentAvatarLabel}>{student.name.charAt(0)}</Text>
-                </View>
-                <View style={styles.studentTextBlock}>
-                  <Text style={styles.studentName}>{student.name}</Text>
-                  <Text style={styles.studentMeta}>{student.measurement}</Text>
-                  <Text style={styles.studentTimestamp}>{student.timestamp}</Text>
-                </View>
-              </View>
-              <Text
-                style={[
-                  styles.statusLabel,
-                  student.checked ? styles.statusLabelSuccess : styles.statusLabelPending,
-                ]}>
-                {student.checked ? 'Lengkap' : 'Belum'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        {listState ?? (
+          <View style={styles.list}>
+            {filteredStudents.map(student => {
+              const status = getRecordTone(student);
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={student.id}
+                  onPress={() => openImmunizationForm(student.id)}
+                  style={({ pressed }) => [
+                    styles.studentCard,
+                    pressed && styles.studentCardPressed,
+                  ]}>
+                  <Avatar name={student.name} size={40} />
+                  <View style={styles.studentTextBlock}>
+                    <Text numberOfLines={1} style={styles.studentName}>
+                      {student.name}
+                    </Text>
+                    <Text style={styles.studentMeta}>{student.measurement}</Text>
+                    <Text style={styles.studentTimestamp}>{student.timestamp}</Text>
+                  </View>
+                  <StatusPill label={status.label} tone={status.tone} />
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </Screen>
 
       <Modal
@@ -282,106 +373,102 @@ export function StudentImmunizationScreen({
         visible={selectedStudent !== null}
         onRequestClose={closeModal}>
         <View style={styles.modalContainer}>
-          <Screen
-            style={styles.modalScroll}
-            contentContainerStyle={styles.modalScrollContent}
-            stickyHeaderIndices={[0]}>
-            <View style={[styles.modalStickyHeader, { paddingTop: Math.max(insets.top + 2, 30) }]}>
-              <View style={styles.modalHeaderTopRow}>
-                <View style={styles.progressTrack}>
-                  <View style={[styles.progressFill, { width: `${progressValue * 100}%` }]} />
-                </View>
-                <Pressable
-                  accessibilityLabel="Tutup detail pencatatan imunisasi"
-                  onPress={closeModal}
-                  style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}>
-                  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                    <Path d="M6 6l12 12" stroke={colors.text.inverse} strokeWidth={2} strokeLinecap="round" />
-                    <Path d="M18 6 6 18" stroke={colors.text.inverse} strokeWidth={2} strokeLinecap="round" />
-                  </Svg>
-                </Pressable>
+          <View style={[styles.modalHeader, { paddingTop: insets.top + spacing[8] }]}>
+            <View style={styles.modalHeaderText}>
+              <Text style={styles.modalEyebrow}>
+                Siswa {selectedStudentIndex + 1} dari {students.length}
+              </Text>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: progressWidth }]} />
               </View>
             </View>
+            <IconButton accessibilityLabel="Tutup pencatatan imunisasi" onPress={closeModal}>
+              <Icon name="close" color={colors.text.primary} />
+            </IconButton>
+          </View>
 
-            <View style={styles.modalHeaderContent}>
-              <View style={styles.modalHero}>
-                <View style={styles.modalHeroPhotoPlaceholder}>
-                  <Text style={styles.modalHeroInitialLabel}>
-                    {selectedStudent?.name.slice(0, 1).toUpperCase()}
-                  </Text>
-                </View>
-                <Text style={styles.modalStudentName}>{selectedStudent?.name}</Text>
-                <Text style={styles.modalStudentMeta}>{className}</Text>
-                {selectedStudent?.checked ? (
-                  <View style={styles.recordedBadge}>
-                    <Text style={styles.recordedBadgeLabel}>Sudah Dicatat</Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
-            <View style={styles.modalContent}>
-              <View style={styles.mainContentCard}>
-                <FieldRow label="Jenis Imunisasi" value={sessionImmunizationType} />
-                {sessionImmunizationDose ? (
-                  <FieldRow label="Dosis" value={sessionImmunizationDose} />
-                ) : null}
-                <FieldRow label="Petugas" value={officerName} />
-                <FieldRow label="Tanggal dan waktu" value={formatDateTimeLabel(recordedAt)} />
-              </View>
-
-              {saveError ? (
-                <View style={styles.modalErrorCard}>
-                  <Text style={styles.modalErrorText}>{saveError}</Text>
-                </View>
+          <Screen contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+            <View style={styles.modalHero}>
+              <Avatar name={selectedStudent?.name ?? ''} size={88} ring />
+              <Text style={styles.modalStudentName}>{selectedStudent?.name}</Text>
+              <Text style={styles.modalStudentMeta}>{className}</Text>
+              {selectedStudent?.checked ? (
+                <StatusPill label="Sudah dicatat — simpan untuk memperbarui" tone="success" />
               ) : null}
+            </View>
 
-              <View style={styles.footerSpacer} />
+            <View style={styles.detailCard}>
+              <FieldRow label="Jenis imunisasi" value={sessionImmunizationType} />
+              {sessionImmunizationDose ? (
+                <FieldRow label="Dosis" value={sessionImmunizationDose} />
+              ) : null}
+              <FieldRow label="Petugas" value={officerName} />
+            </View>
+
+            <View style={styles.statusSection}>
+              <Text style={styles.statusSectionLabel}>Status imunisasi</Text>
+              <View style={styles.statusOptions}>
+                {STATUS_OPTIONS.map(option => {
+                  const isActive = option.value === recordStatus;
+                  return (
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: isActive }}
+                      key={option.value}
+                      onPress={() => setRecordStatus(option.value)}
+                      style={[styles.statusOption, isActive && styles.statusOptionActive]}>
+                      <Text
+                        style={[
+                          styles.statusOptionLabel,
+                          isActive && styles.statusOptionLabelActive,
+                        ]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <TextField
+              label="Catatan (opsional)"
+              multiline
+              onChangeText={setNotes}
+              placeholder="Contoh: demam ringan, dijadwalkan ulang"
+              style={styles.notesInput}
+              textAlignVertical="top"
+              value={notes}
+            />
+
+            {saveError ? <InlineAlert tone="error" message={saveError} /> : null}
+
+            <PrimaryButton
+              label="Simpan dan Lanjutkan"
+              loading={isSavingRecord}
+              onPress={() => {
+                saveAndContinue().catch(() => undefined);
+              }}
+            />
+
+            <View style={styles.studentNavActions}>
+              <PrimaryButton
+                disabled={isSavingRecord}
+                label="‹ Sebelumnya"
+                onPress={() => moveStudentSelection(-1)}
+                size="md"
+                style={styles.navButton}
+                variant="outline"
+              />
+              <PrimaryButton
+                disabled={isSavingRecord}
+                label="Lewati ›"
+                onPress={() => moveStudentSelection(1)}
+                size="md"
+                style={styles.navButton}
+                variant="outline"
+              />
             </View>
           </Screen>
-
-          <View
-            style={[
-              styles.modalFooterFixed,
-              {
-                paddingBottom:
-                  Platform.OS === 'android'
-                    ? Math.max(insets.bottom + spacing[2], spacing[4])
-                    : Math.max(insets.bottom + spacing[8], spacing[12]),
-              },
-            ]}>
-            <Pressable
-              disabled={isSavingRecord}
-              onPress={saveAndContinue}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                isSavingRecord && styles.primaryButtonDisabled,
-                pressed && styles.primaryButtonPressed,
-              ]}>
-              <Text style={styles.primaryButtonLabel}>
-                {isSavingRecord ? 'Menyimpan...' : 'Lengkap dan Lanjutkan'}
-              </Text>
-            </Pressable>
-
-            <View style={styles.footerNavRow}>
-              <View style={styles.nextStudentCard}>
-                <Text style={styles.nextStudentLabel}>Siswa berikutnya</Text>
-                <Text numberOfLines={1} style={styles.nextStudentName}>{nextStudent?.name}</Text>
-              </View>
-              <View style={styles.studentNavActions}>
-                <Pressable
-                  onPress={() => moveStudentSelection(-1)}
-                  style={({ pressed }) => [styles.navButton, pressed && styles.navButtonPressed]}>
-                  <Text style={styles.navButtonLabel}>Prev</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => moveStudentSelection(1)}
-                  style={({ pressed }) => [styles.navButton, pressed && styles.navButtonPressed]}>
-                  <Text style={styles.navButtonLabel}>Next</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
         </View>
       </Modal>
     </View>
@@ -407,380 +494,219 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.app,
   },
-  pageHeader: {
-    backgroundColor: colors.surface.app,
+  searchWrap: {
     paddingHorizontal: spacing[16],
     paddingBottom: spacing[12],
     borderBottomWidth: 1,
     borderBottomColor: colors.border.subtle,
+    backgroundColor: colors.surface.app,
   },
-  headerTopRow: {
+  searchBar: {
+    minHeight: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    backgroundColor: colors.surface.primary,
+    paddingHorizontal: spacing[16],
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[8],
   },
-  headerIdentity: {
+  searchInput: {
+    ...typography.bodyMd,
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  pageTitle: {
-    ...typography.headingMd,
+    minHeight: 46,
     color: colors.text.primary,
-    flex: 1,
   },
   content: {
     paddingHorizontal: spacing[16],
     paddingTop: spacing[16],
     gap: spacing[16],
   },
-  infoCard: {
-    backgroundColor: colors.feedback.infoBackground,
-    borderWidth: 1,
-    borderColor: colors.brand.primary300,
-    borderRadius: radius.md,
-    padding: spacing[12],
-    gap: spacing[8],
-  },
-  infoCardSuccess: {
-    backgroundColor: colors.feedback.successBackground,
-    borderColor: colors.status.device.connected,
-  },
-  infoTitle: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
-  errorCard: {
-    borderWidth: 1,
-    borderColor: colors.feedback.errorBorder,
-    borderRadius: radius.md,
-    backgroundColor: colors.feedback.errorBackground,
-    padding: spacing[12],
-  },
-  errorText: {
-    ...typography.bodySm,
-    color: colors.feedback.errorText,
-  },
-  sessionDetailCard: {
-    backgroundColor: colors.surface.primary,
+  sessionCard: {
+    backgroundColor: colors.surface.card,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border.subtle,
     padding: spacing[16],
-    gap: spacing[10],
+    gap: spacing[12],
   },
-  sessionDetailEyebrow: {
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[8],
+  },
+  sessionMeta: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  sessionCountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sessionEyebrow: {
     ...typography.caption,
     color: colors.text.secondary,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  sessionDetailTitle: {
-    ...typography.headingMd,
+  sessionCount: {
+    ...typography.labelMd,
     color: colors.text.primary,
   },
-  sessionDetailMeta: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  sessionProgressTrack: {
+  progressTrack: {
     height: 8,
     borderRadius: radius.pill,
     backgroundColor: colors.surface.secondary,
     overflow: 'hidden',
   },
-  sessionProgressFill: {
+  progressFill: {
     height: '100%',
     borderRadius: radius.pill,
     backgroundColor: colors.brand.primary500,
   },
-  sessionCtaButton: {
-    minHeight: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.brand.primary500,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[16],
-  },
-  sessionCtaButtonPressed: {
-    backgroundColor: colors.brand.primary700,
-  },
-  sessionCtaButtonLabel: {
-    ...typography.labelMd,
-    color: colors.text.inverse,
-  },
   list: {
-    gap: spacing[12],
+    gap: spacing[8],
   },
   studentCard: {
-    backgroundColor: colors.surface.primary,
-    borderRadius: radius.lg,
+    minHeight: 64,
+    backgroundColor: colors.surface.card,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border.subtle,
-    padding: spacing[16],
+    padding: spacing[12],
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing[12],
   },
   studentCardPressed: {
     backgroundColor: colors.surface.secondary,
     borderColor: colors.brand.primary300,
   },
-  studentMain: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  studentAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.primary100,
-  },
-  studentAvatarLabel: {
-    ...typography.labelLg,
-    color: colors.brand.primary700,
-  },
   studentTextBlock: {
     flex: 1,
-    gap: spacing[4],
+    gap: spacing[2],
   },
   studentName: {
-    ...typography.headingMd,
+    ...typography.labelLg,
     color: colors.text.primary,
   },
   studentMeta: {
     ...typography.bodySm,
-    color: colors.text.primary,
+    color: colors.text.secondary,
   },
   studentTimestamp: {
     ...typography.caption,
-    color: colors.text.secondary,
-  },
-  statusLabel: {
-    ...typography.caption,
-    paddingHorizontal: spacing[12],
-    paddingVertical: spacing[4],
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  statusLabelSuccess: {
-    color: colors.status.device.connected,
-    borderColor: colors.status.device.connected,
-    backgroundColor: colors.feedback.successBackground,
-  },
-  statusLabelPending: {
-    color: colors.text.secondary,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.secondary,
+    color: colors.text.muted,
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: colors.brand.primary700,
+    backgroundColor: colors.surface.app,
   },
-  modalScroll: {
-    backgroundColor: colors.brand.primary700,
-  },
-  modalScrollContent: {
-    paddingTop: 0,
-    paddingBottom: spacing[32],
-  },
-  modalStickyHeader: {
-    backgroundColor: colors.brand.primary700,
-    paddingHorizontal: spacing[16],
-    paddingBottom: spacing[12],
-  },
-  modalHeaderTopRow: {
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[12],
-  },
-  progressTrack: {
-    flex: 1,
-    height: 8,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: radius.pill,
-    backgroundColor: colors.text.inverse,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  closeButtonPressed: {
-    backgroundColor: 'rgba(255,255,255,0.24)',
-  },
-  modalHeaderContent: {
-    backgroundColor: colors.brand.primary700,
     paddingHorizontal: spacing[16],
-    paddingBottom: spacing[20],
+    paddingBottom: spacing[12],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+    backgroundColor: colors.surface.app,
+  },
+  modalHeaderText: {
+    flex: 1,
+    gap: spacing[6],
+  },
+  modalEyebrow: {
+    ...typography.caption,
+    color: colors.text.secondary,
+  },
+  modalContent: {
+    paddingTop: spacing[20],
+    paddingHorizontal: spacing[16],
+    gap: spacing[16],
   },
   modalHero: {
     alignItems: 'center',
-    gap: spacing[8],
-  },
-  modalHeroPhotoPlaceholder: {
-    width: 112,
-    height: 112,
-    borderRadius: radius.lg,
-    backgroundColor: colors.brand.primary500,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalHeroInitialLabel: {
-    ...typography.headingXL,
-    color: colors.text.inverse,
+    gap: spacing[6],
   },
   modalStudentName: {
-    ...typography.headingXL,
-    color: colors.text.inverse,
+    ...typography.headingLg,
+    color: colors.text.primary,
     textAlign: 'center',
   },
   modalStudentMeta: {
     ...typography.bodySm,
-    color: colors.brand.primary100,
-    textAlign: 'center',
+    color: colors.text.secondary,
   },
-  recordedBadge: {
-    minHeight: 28,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.status.device.connected,
-    backgroundColor: colors.feedback.successBackground,
-    paddingHorizontal: spacing[12],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recordedBadgeLabel: {
-    ...typography.caption,
-    color: colors.status.device.connected,
-  },
-  modalContent: {
-    paddingTop: spacing[24],
-    paddingHorizontal: spacing[16],
-    gap: spacing[16],
-  },
-  mainContentCard: {
+  detailCard: {
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.card,
     padding: spacing[16],
     gap: spacing[12],
   },
   fieldRow: {
-    gap: spacing[4],
-    paddingBottom: spacing[8],
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.2)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing[12],
   },
   fieldLabel: {
-    ...typography.caption,
-    color: colors.brand.primary100,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
   fieldValue: {
     ...typography.labelMd,
-    color: colors.text.inverse,
+    color: colors.text.primary,
+    flexShrink: 1,
+    textAlign: 'right',
   },
-  modalErrorCard: {
-    borderWidth: 1,
-    borderColor: colors.feedback.errorBorder,
+  statusSection: {
+    gap: spacing[8],
+  },
+  statusSectionLabel: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  statusOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[8],
+  },
+  statusOption: {
+    minHeight: 44,
+    minWidth: '47%',
+    flexGrow: 1,
     borderRadius: radius.md,
-    backgroundColor: colors.feedback.errorBackground,
-    padding: spacing[12],
-  },
-  modalErrorText: {
-    ...typography.bodySm,
-    color: colors.feedback.errorText,
-  },
-  footerSpacer: {
-    height: 168,
-  },
-  modalFooterFixed: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: spacing[16],
-    paddingTop: spacing[8],
-    backgroundColor: colors.brand.primary700,
-    gap: spacing[12],
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-  },
-  primaryButton: {
-    minHeight: 52,
-    borderRadius: radius.lg,
-    backgroundColor: colors.brand.primary500,
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    backgroundColor: colors.surface.card,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing[16],
+    paddingHorizontal: spacing[12],
   },
-  primaryButtonPressed: {
-    backgroundColor: colors.brand.primary600,
+  statusOptionActive: {
+    borderColor: colors.brand.primary500,
+    backgroundColor: colors.brand.primary100,
   },
-  primaryButtonDisabled: {
-    opacity: 0.7,
-  },
-  primaryButtonLabel: {
+  statusOptionLabel: {
     ...typography.labelMd,
-    color: colors.text.inverse,
+    color: colors.text.secondary,
   },
-  footerNavRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: spacing[12],
+  statusOptionLabelActive: {
+    color: colors.brand.primary700,
   },
-  nextStudentCard: {
-    flex: 1,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    padding: spacing[12],
-    gap: spacing[4],
-  },
-  nextStudentLabel: {
-    ...typography.caption,
-    color: colors.brand.primary100,
-  },
-  nextStudentName: {
-    ...typography.labelMd,
-    color: colors.text.inverse,
+  notesInput: {
+    minHeight: 88,
+    paddingTop: spacing[12],
   },
   studentNavActions: {
     flexDirection: 'row',
-    gap: spacing[8],
+    gap: spacing[12],
   },
   navButton: {
-    width: 54,
-    minHeight: 46,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navButtonPressed: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  navButtonLabel: {
-    ...typography.caption,
-    color: colors.text.inverse,
+    flex: 1,
   },
 });

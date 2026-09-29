@@ -1,9 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import { InfoCard, PrimaryButton, Screen, TextField } from '../../shared/components';
-import { colors, radius, spacing, typography } from '../../theme';
+import { StyleSheet, Text, View } from 'react-native';
+import {
+  Icon,
+  InfoCard,
+  InlineAlert,
+  PrimaryButton,
+  Screen,
+  ScreenHeader,
+  TextField,
+} from '../../shared/components';
+import { colors, layout, radius, spacing, typography } from '../../theme';
 
 type EditEmailScreenProps = {
   onBack: () => void;
@@ -15,7 +21,6 @@ function isEmailValid(value: string) {
 }
 
 export function EditEmailScreen({ onBack, currentEmail }: EditEmailScreenProps) {
-  const insets = useSafeAreaInsets();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [confirmEmail, setConfirmEmail] = useState('');
@@ -52,88 +57,86 @@ export function EditEmailScreen({ onBack, currentEmail }: EditEmailScreenProps) 
 
   return (
     <View style={styles.container}>
-      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}>
-        <View style={styles.pageHeaderTopRow}>
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15 6l-6 6 6 6"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>Edit Email</Text>
-            </View>
-          </Pressable>
-        </View>
-      </View>
+      <ScreenHeader onBack={onBack} title="Ubah Email" />
 
-      <Screen keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <InfoCard eyebrow="Keamanan & Kontak">
-          <View style={styles.form}>
-            <View style={styles.currentEmailWrap}>
-              <Text style={styles.currentEmailLabel}>Email Saat Ini</Text>
+      <Screen avoidKeyboard contentContainerStyle={styles.content} withTopInset={false}>
+        <InfoCard
+          description="Email dipakai untuk login, notifikasi, dan pemulihan akun."
+          title="Email akun">
+          <View style={styles.currentEmailWrap}>
+            <Icon color={colors.brand.primary600} name="mail" size={18} />
+            <View style={styles.currentEmailText}>
+              <Text style={styles.currentEmailLabel}>Email saat ini</Text>
               <Text style={styles.currentEmailValue}>{currentEmail}</Text>
             </View>
-
-            <TextField
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              label="Email Baru"
-              onChangeText={setNewEmail}
-              placeholder="contoh@simoka.id"
-              value={newEmail}
-            />
-            <TextField
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              label="Konfirmasi Email Baru"
-              onChangeText={setConfirmEmail}
-              placeholder="Ulangi email baru"
-              value={confirmEmail}
-            />
-            <TextField
-              label="Password Saat Ini"
-              onChangeText={setCurrentPassword}
-              placeholder="Masukkan password akun"
-              secureTextEntry
-              value={currentPassword}
-            />
-            {isConfirmationMismatch ? (
-              <Text style={styles.errorText}>Konfirmasi email belum sama.</Text>
-            ) : null}
-
-            <View style={styles.noteWrap}>
-              <Text style={styles.noteText}>
-                Pastikan email aktif untuk menerima notifikasi dan pemulihan akun.
-              </Text>
-            </View>
           </View>
+
+          <TextField
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            label="Email Baru"
+            onChangeText={setNewEmail}
+            placeholder="contoh@simoka.id"
+            value={newEmail}
+          />
+          <TextField
+            autoCapitalize="none"
+            autoCorrect={false}
+            error={isConfirmationMismatch ? 'Konfirmasi email belum sama.' : null}
+            keyboardType="email-address"
+            label="Konfirmasi Email Baru"
+            onChangeText={setConfirmEmail}
+            placeholder="Ulangi email baru"
+            value={confirmEmail}
+          />
+          <TextField
+            helperText="Diperlukan untuk memastikan ini benar-benar kamu."
+            label="Password Saat Ini"
+            onChangeText={setCurrentPassword}
+            placeholder="Masukkan password akun"
+            secureTextEntry
+            value={currentPassword}
+          />
         </InfoCard>
 
         <PrimaryButton
           disabled={isSaveDisabled}
+          fullWidth
           label="Kirim Perubahan"
           onPress={handleSubmitChange}
         />
 
         {isRequestSent ? (
-          <InfoCard title="Perubahan Dikirim">
-            <View style={styles.flowWrap}>
-              <Text style={styles.flowText}>
-                Permintaan ubah email sudah dikirim ke {pendingEmail}.
-              </Text>
-              <Text style={styles.flowStep}>1. Cek inbox email baru kamu.</Text>
-              <Text style={styles.flowStep}>2. Klik link verifikasi dari SIMOKA.</Text>
-              <Text style={styles.flowStep}>3. Setelah link diklik, email akun otomatis diperbarui.</Text>
+          <InfoCard
+            icon={<Icon color={colors.feedback.successText} name="check" size={20} />}
+            title="Perubahan dikirim"
+            variant="tinted">
+            <Text style={styles.flowText}>
+              Permintaan ubah email sudah dikirim ke{' '}
+              <Text style={styles.flowEmphasis}>{pendingEmail}</Text>.
+            </Text>
+            <View style={styles.flowSteps}>
+              {[
+                'Cek inbox email baru kamu.',
+                'Klik link verifikasi dari SIMOKA.',
+                'Setelah link diklik, email akun otomatis diperbarui.',
+              ].map((step, index) => (
+                <View key={step} style={styles.flowStepRow}>
+                  <View style={styles.flowStepBadge}>
+                    <Text style={styles.flowStepBadgeText}>{index + 1}</Text>
+                  </View>
+                  <Text style={styles.flowStep}>{step}</Text>
+                </View>
+              ))}
             </View>
           </InfoCard>
-        ) : null}
+        ) : (
+          <InlineAlert
+            message="Pastikan email aktif untuk menerima notifikasi dan pemulihan akun."
+            tone="info"
+          />
+        )}
       </Screen>
     </View>
   );
@@ -144,79 +147,66 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.app,
   },
-  pageHeader: {
-    backgroundColor: colors.surface.app,
-    paddingHorizontal: spacing[24],
-    paddingBottom: spacing[16],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
+  content: {
+    paddingHorizontal: layout.screenPaddingX,
+    paddingTop: spacing[16],
+    gap: spacing[16],
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
   },
-  pageHeaderTopRow: {
-    alignItems: 'flex-start',
-  },
-  headerIdentity: {
+  currentEmailWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[12],
-  },
-  headerIdentityText: {
-    justifyContent: 'center',
-  },
-  pageTitle: {
-    ...typography.headingLg,
-    color: colors.text.primary,
-  },
-  content: {
-    paddingHorizontal: spacing[24],
-    paddingTop: spacing[16],
-    gap: spacing[16],
-  },
-  form: {
-    gap: spacing[16],
-  },
-  currentEmailWrap: {
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
     backgroundColor: colors.surface.secondary,
-    paddingHorizontal: spacing[12],
-    paddingVertical: spacing[8],
-    gap: spacing[4],
+    paddingHorizontal: spacing[14],
+    paddingVertical: spacing[12],
+  },
+  currentEmailText: {
+    flex: 1,
+    gap: spacing[2],
   },
   currentEmailLabel: {
     ...typography.caption,
     color: colors.text.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
   },
   currentEmailValue: {
-    ...typography.bodyMd,
+    ...typography.bodyMdStrong,
     color: colors.text.primary,
-  },
-  errorText: {
-    ...typography.bodySm,
-    color: colors.status.device.error,
-    marginTop: -spacing[8],
-  },
-  noteWrap: {
-    borderRadius: radius.md,
-    backgroundColor: colors.feedback.infoBackground,
-    paddingHorizontal: spacing[12],
-    paddingVertical: spacing[8],
-  },
-  noteText: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  flowWrap: {
-    gap: spacing[8],
   },
   flowText: {
     ...typography.bodyMd,
     color: colors.text.primary,
   },
+  flowEmphasis: {
+    fontWeight: '600',
+  },
+  flowSteps: {
+    gap: spacing[10],
+  },
+  flowStepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[10],
+  },
+  flowStepBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.brand.primary600,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flowStepBadgeText: {
+    ...typography.caption,
+    fontWeight: '700',
+    color: colors.text.inverse,
+  },
   flowStep: {
     ...typography.bodySm,
+    flex: 1,
     color: colors.text.secondary,
   },
 });

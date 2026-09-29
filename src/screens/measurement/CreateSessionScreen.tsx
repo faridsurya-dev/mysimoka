@@ -1,14 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   createImmunizationSession,
   createMeasurementSession,
   listClassroomsBySchool,
 } from '../../services';
 import type { ClassroomListItem } from '../../services';
-import { PrimaryButton, Screen, TextField } from '../../shared/components';
+import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
+import {
+  EmptyState,
+  Icon,
+  IconButton,
+  InlineAlert,
+  LoadingState,
+  PrimaryButton,
+  Screen,
+  ScreenHeader,
+  TextField,
+} from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { CreateSessionPayload } from '../../types';
 
@@ -17,6 +26,9 @@ type CreateSessionScreenProps = {
   onBack: () => void;
   mode?: 'measurement' | 'immunization';
   onCreateSession: (payload: CreateSessionPayload) => void;
+  /** Preselects a class, e.g. when starting from Dashboard › Kelas. */
+  initialClassId?: string | null;
+  initialClassName?: string | null;
 };
 
 const WEEKDAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
@@ -70,32 +82,32 @@ function changeMonth(baseDate: Date, delta: number) {
   return new Date(baseDate.getFullYear(), baseDate.getMonth() + delta, 1);
 }
 
+function buildDefaultSessionName(mode: 'measurement' | 'immunization', date: Date) {
+  return `${mode === 'measurement' ? 'Pengukuran' : 'Imunisasi'} ${formatDateLabel(date)}`;
+}
+
 export function CreateSessionScreen({
   schoolId = null,
   onBack,
   mode = 'measurement',
   onCreateSession,
+  initialClassId = null,
+  initialClassName = null,
 }: CreateSessionScreenProps) {
-  const insets = useSafeAreaInsets();
-  const headerHeight = insets.top + 84;
-
   const [sessionDate, setSessionDate] = useState<Date>(normalizeDate(new Date()));
   const [visibleMonth, setVisibleMonth] = useState<Date>(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
-  const [sessionName, setSessionName] = useState(
-    `${mode === 'measurement' ? 'Sesi Pengukuran' : 'Sesi Imunisasi'} ${formatDateLabel(new Date())}`,
-  );
-  const [className, setClassName] = useState('Kelas 3A');
-  const [note, setNote] = useState(
-    mode === 'measurement' ? 'Pengukuran rutin bulanan' : 'Pencatatan imunisasi berkala',
-  );
+  const [sessionName, setSessionName] = useState(buildDefaultSessionName(mode, new Date()));
+  const [isSessionNameEdited, setIsSessionNameEdited] = useState(false);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(initialClassId);
+  const [note, setNote] = useState('');
   const [immunizationType, setImmunizationType] = useState(IMMUNIZATION_TYPE_OPTIONS[2]);
   const [immunizationDose, setImmunizationDose] = useState('');
   const [immunizationOfficer, setImmunizationOfficer] = useState('Petugas UKS');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [isClassSuggestionOpen, setIsClassSuggestionOpen] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassroomListItem[]>([]);
+  const [isLoadingClasses, setIsLoadingClasses] = useState(false);
   const [classOptionsError, setClassOptionsError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -107,61 +119,80 @@ export function CreateSessionScreen({
       return;
     }
 
+    setIsLoadingClasses(true);
+    setClassOptionsError(null);
     try {
       const rows = await listClassroomsBySchool(schoolId);
       setClassOptions(rows);
-      setClassName(current => (current === 'Kelas 3A' && rows[0] ? rows[0].name : current));
-      setClassOptionsError(null);
+      setSelectedClassId(current => {
+        if (current && rows.some(row => row.id === current)) {
+          return current;
+        }
+        const byName = initialClassName
+          ? rows.find(row => row.name.trim().toLowerCase() === initialClassName.trim().toLowerCase())
+          : null;
+        if (byName) {
+          return byName.id;
+        }
+        return rows.length === 1 ? rows[0].id : null;
+      });
     } catch (error) {
       setClassOptions([]);
       setClassOptionsError(error instanceof Error ? error.message : 'Gagal memuat daftar kelas.');
+    } finally {
+      setIsLoadingClasses(false);
     }
-  }, [schoolId]);
+  }, [initialClassName, schoolId]);
 
   useEffect(() => {
-    loadClassOptions().catch(() => {
-      setClassOptions([]);
-      setClassOptionsError('Gagal memuat daftar kelas.');
-    });
+    loadClassOptions().catch(() => undefined);
   }, [loadClassOptions]);
 
-  const filteredClassOptions = useMemo(() => {
-    const keyword = className.trim().toLowerCase();
-
-    if (!keyword) {
-      return classOptions;
-    }
-
-    return classOptions.filter(option => option.name.toLowerCase().includes(keyword));
-  }, [className, classOptions]);
-
-  const selectedClass = useMemo(() => {
-    const normalizedName = className.trim().toLowerCase();
-    return classOptions.find(option => option.name.toLowerCase() === normalizedName) ?? null;
-  }, [className, classOptions]);
+  const selectedClass = useMemo(
+    () => classOptions.find(option => option.id === selectedClassId) ?? null,
+    [classOptions, selectedClassId],
+  );
 
   const calendarDays = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
 
-  const isSubmitDisabled = useMemo(() => {
-    return (
-      sessionName.trim().length === 0 ||
-      className.trim().length === 0 ||
-      (mode === 'measurement' && !selectedClass) ||
-      isSubmitting ||
-      (mode === 'immunization' &&
-        (immunizationType.trim().length === 0 || immunizationOfficer.trim().length === 0))
-    );
-  }, [className, immunizationOfficer, immunizationType, isSubmitting, mode, selectedClass, sessionName]);
+  const validationMessage = useMemo(() => {
+    if (!schoolId) {
+      return 'Sekolah aktif belum dipilih.';
+    }
+    if (!selectedClass) {
+      return 'Pilih kelas terlebih dahulu.';
+    }
+    if (sessionName.trim().length === 0) {
+      return 'Nama sesi wajib diisi.';
+    }
+    if (mode === 'immunization' && immunizationOfficer.trim().length === 0) {
+      return 'Nama petugas imunisasi wajib diisi.';
+    }
+    return null;
+  }, [immunizationOfficer, mode, schoolId, selectedClass, sessionName]);
+
+  const handleSelectDate = (date: Date) => {
+    const normalized = normalizeDate(date);
+    setSessionDate(normalized);
+    if (!isSessionNameEdited) {
+      setSessionName(buildDefaultSessionName(mode, normalized));
+    }
+    setIsDatePickerOpen(false);
+  };
 
   const handleCreateSession = async () => {
-    if (isSubmitDisabled) {
+    if (isSubmitting) {
+      return;
+    }
+    if (validationMessage || !schoolId || !selectedClass) {
+      setSubmitError(validationMessage ?? 'Sekolah dan kelas wajib dipilih sebelum membuat sesi.');
       return;
     }
 
     const basePayload = {
-      classId: selectedClass?.id,
+      classId: selectedClass.id,
       sessionName: sessionName.trim(),
-      className: selectedClass?.name ?? className.trim(),
+      className: selectedClass.name,
       note: note.trim(),
       sessionDate: sessionDate.toISOString(),
       immunizationType: mode === 'immunization' ? immunizationType : undefined,
@@ -169,68 +200,49 @@ export function CreateSessionScreen({
         mode === 'immunization' && immunizationDose.trim().length > 0
           ? immunizationDose.trim()
           : undefined,
-      immunizationOfficer:
-        mode === 'immunization' ? immunizationOfficer.trim() : undefined,
+      immunizationOfficer: mode === 'immunization' ? immunizationOfficer.trim() : undefined,
     };
-
-    if (mode === 'immunization') {
-      if (!schoolId || !selectedClass) {
-        setSubmitError('Sekolah dan kelas wajib dipilih sebelum membuat sesi.');
-        return;
-      }
-
-      setIsSubmitting(true);
-      setSubmitError(null);
-      try {
-        const createdSession = await createImmunizationSession({
-          schoolId,
-          classId: selectedClass.id,
-          name: basePayload.sessionName,
-          vaccineName: immunizationType,
-          doseLabel: immunizationDose,
-          officerName: immunizationOfficer,
-          note: basePayload.note,
-          sessionDate: basePayload.sessionDate,
-        });
-        onCreateSession({
-          ...basePayload,
-          sessionId: createdSession.id,
-          classId: createdSession.classId,
-          className: createdSession.className,
-          sessionDate: createdSession.sessionDate,
-        });
-      } catch (error) {
-        setSubmitError(error instanceof Error ? error.message : 'Gagal membuat sesi imunisasi.');
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-
-    if (!schoolId || !selectedClass) {
-      setSubmitError('Sekolah dan kelas wajib dipilih sebelum membuat sesi.');
-      return;
-    }
 
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const createdSession = await createMeasurementSession({
-        schoolId,
-        classId: selectedClass.id,
-        name: basePayload.sessionName,
-        note: basePayload.note,
-        sessionDate: basePayload.sessionDate,
-      });
+      const createdSession =
+        mode === 'immunization'
+          ? await createImmunizationSession({
+              schoolId,
+              classId: selectedClass.id,
+              name: basePayload.sessionName,
+              vaccineName: immunizationType,
+              doseLabel: basePayload.immunizationDose ?? null,
+              officerName: basePayload.immunizationOfficer ?? null,
+              note: basePayload.note || null,
+              sessionDate: basePayload.sessionDate,
+            })
+          : await createMeasurementSession({
+              schoolId,
+              classId: selectedClass.id,
+              name: basePayload.sessionName,
+              note: basePayload.note || null,
+              sessionDate: basePayload.sessionDate,
+            });
+
       onCreateSession({
         ...basePayload,
         sessionId: createdSession.id,
         classId: createdSession.classId,
-        className: createdSession.className,
+        className:
+          createdSession.className && createdSession.className !== 'Kelas belum diketahui'
+            ? createdSession.className
+            : selectedClass.name,
         sessionDate: createdSession.sessionDate,
       });
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : 'Gagal membuat sesi pengukuran.');
+      setSubmitError(
+        toRecordingErrorMessage(
+          error,
+          mode === 'immunization' ? 'Gagal membuat sesi imunisasi.' : 'Gagal membuat sesi pengukuran.',
+        ),
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -241,164 +253,174 @@ export function CreateSessionScreen({
     setIsDatePickerOpen(true);
   };
 
+  const renderClassPicker = () => {
+    if (isLoadingClasses) {
+      return <LoadingState inline label="Memuat daftar kelas..." />;
+    }
+    if (classOptionsError) {
+      return (
+        <InlineAlert
+          tone="error"
+          message={classOptionsError}
+          actionLabel={schoolId ? 'Coba lagi' : undefined}
+          onAction={
+            schoolId
+              ? () => {
+                  loadClassOptions().catch(() => undefined);
+                }
+              : undefined
+          }
+        />
+      );
+    }
+    if (classOptions.length === 0) {
+      return (
+        <EmptyState
+          compact
+          icon="school"
+          title="Belum ada kelas"
+          description="Tambahkan kelas dan siswa terlebih dahulu melalui Dashboard › Kelas."
+        />
+      );
+    }
+    return (
+      <View style={styles.chipWrap}>
+        {classOptions.map(option => {
+          const isSelected = option.id === selectedClassId;
+          return (
+            <Pressable
+              accessibilityRole="radio"
+              accessibilityState={{ checked: isSelected }}
+              key={option.id}
+              onPress={() => {
+                setSelectedClassId(option.id);
+                setSubmitError(null);
+              }}
+              style={({ pressed }) => [
+                styles.chip,
+                isSelected && styles.chipActive,
+                pressed && !isSelected && styles.chipPressed,
+              ]}>
+              <Text style={[styles.chipLabel, isSelected && styles.chipLabelActive]}>
+                {option.name}
+              </Text>
+              <Text style={[styles.chipCaption, isSelected && styles.chipLabelActive]}>
+                {option.total} siswa
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}> 
-        <View style={styles.pageHeaderTopRow}>
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15 6l-6 6 6 6"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>
-                {mode === 'measurement' ? 'Buat Sesi Pengukuran' : 'Buat Sesi Imunisasi'}
-              </Text>
-            </View>
-          </Pressable>
-        </View>
-      </View>
+      <ScreenHeader
+        title={mode === 'measurement' ? 'Buat Sesi Pengukuran' : 'Buat Sesi Imunisasi'}
+        onBack={onBack}
+      />
 
-      <Screen
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[styles.content, { paddingTop: headerHeight + spacing[16] }]}>
-        <View style={styles.formSection}>
+      <Screen keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+        <View style={styles.section}>
+          <Text style={styles.fieldLabel}>Kelas</Text>
+          {renderClassPicker()}
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.fieldLabel}>Tanggal sesi</Text>
           <Pressable
+            accessibilityRole="button"
             onPress={openDatePicker}
             style={({ pressed }) => [styles.dateInput, pressed && styles.dateInputPressed]}>
             <Text style={styles.dateInputValue}>{formatDateLabel(sessionDate)}</Text>
-            <Text style={styles.dateInputHint}>Pilih tanggal</Text>
+            <Icon name="calendar" color={colors.brand.primary600} />
           </Pressable>
-
-          <TextField
-            label="Nama sesi"
-            onChangeText={setSessionName}
-            placeholder="Contoh: Sesi 12 April 2026"
-            value={sessionName}
-          />
-
-          {mode === 'immunization' ? (
-            <View style={styles.immunizationTypeWrap}>
-              <Text style={styles.fieldLabel}>Jenis imunisasi sesi</Text>
-              <View style={styles.immunizationTypeOptions}>
-                {IMMUNIZATION_TYPE_OPTIONS.map(option => {
-                  const isSelected = option === immunizationType;
-
-                  return (
-                    <Pressable
-                      key={option}
-                      onPress={() => setImmunizationType(option)}
-                      style={[
-                        styles.immunizationTypeChip,
-                        isSelected && styles.immunizationTypeChipActive,
-                      ]}>
-                      <Text
-                        style={[
-                          styles.immunizationTypeChipLabel,
-                          isSelected && styles.immunizationTypeChipLabelActive,
-                        ]}>
-                        {option}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <TextField
-                label="Dosis (opsional)"
-                onChangeText={setImmunizationDose}
-                placeholder="Contoh: Dosis 1"
-                value={immunizationDose}
-              />
-
-              <TextField
-                label="Petugas Imunisasi"
-                onChangeText={setImmunizationOfficer}
-                placeholder="Contoh: Bu Rani"
-                value={immunizationOfficer}
-              />
-            </View>
-          ) : null}
-
-          <View style={styles.classFieldWrap}>
-            <Text style={styles.fieldLabel}>Kelas</Text>
-            <TextInput
-              onChangeText={text => {
-                setClassName(text);
-                setIsClassSuggestionOpen(true);
-              }}
-              onFocus={() => setIsClassSuggestionOpen(true)}
-              placeholder="Contoh: Kelas 3A"
-              placeholderTextColor={colors.text.muted}
-              style={styles.classInput}
-              value={className}
-            />
-
-            {isClassSuggestionOpen ? (
-              <View style={styles.suggestionWrap}>
-                {filteredClassOptions.length > 0 ? (
-                  filteredClassOptions.slice(0, 6).map(option => (
-                    <Pressable
-                      key={option.id}
-                      onPressIn={() => {
-                        setClassName(option.name);
-                        setIsClassSuggestionOpen(false);
-                      }}
-                      style={({ pressed }) => [
-                        styles.suggestionItem,
-                        pressed && styles.suggestionItemPressed,
-                      ]}>
-                      <Text style={styles.suggestionLabel}>{option.name}</Text>
-                    </Pressable>
-                  ))
-                ) : (
-                  <View style={styles.emptySuggestion}>
-                    <Text style={styles.emptySuggestionLabel}>
-                      {classOptionsError ?? 'Kelas tidak ditemukan'}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            ) : null}
-          </View>
-
-          <TextField
-            label="Catatan (opsional)"
-            multiline
-            numberOfLines={4}
-            onChangeText={setNote}
-            placeholder="Tambahkan catatan setup sesi"
-            style={styles.noteInput}
-            textAlignVertical="top"
-            value={note}
-          />
         </View>
 
-        {submitError ? (
-          <View style={styles.errorCard}>
-            <Text style={styles.errorText}>{submitError}</Text>
+        <TextField
+          label="Nama sesi"
+          onChangeText={value => {
+            setSessionName(value);
+            setIsSessionNameEdited(true);
+          }}
+          placeholder="Contoh: Pengukuran 12 April 2026"
+          value={sessionName}
+        />
+
+        {mode === 'immunization' ? (
+          <View style={styles.section}>
+            <Text style={styles.fieldLabel}>Jenis imunisasi</Text>
+            <View style={styles.chipWrap}>
+              {IMMUNIZATION_TYPE_OPTIONS.map(option => {
+                const isSelected = option === immunizationType;
+
+                return (
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: isSelected }}
+                    key={option}
+                    onPress={() => setImmunizationType(option)}
+                    style={[styles.chip, isSelected && styles.chipActive]}>
+                    <Text style={[styles.chipLabel, isSelected && styles.chipLabelActive]}>
+                      {option}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <TextField
+              label="Dosis (opsional)"
+              onChangeText={setImmunizationDose}
+              placeholder="Contoh: Dosis 1"
+              value={immunizationDose}
+            />
+
+            <TextField
+              label="Petugas imunisasi"
+              onChangeText={setImmunizationOfficer}
+              placeholder="Contoh: Bu Rani"
+              value={immunizationOfficer}
+            />
           </View>
         ) : null}
 
-        <View style={styles.footerActions}>
-          <PrimaryButton
-            disabled={isSubmitDisabled}
-            label={
-              isSubmitting
-                ? 'Membuat sesi...'
-                : mode === 'measurement'
-                  ? 'Buat dan Mulai Pengukuran'
-                  : 'Buat dan Mulai Imunisasi'
-            }
-            onPress={handleCreateSession}
+        <TextField
+          label="Catatan (opsional)"
+          multiline
+          numberOfLines={3}
+          onChangeText={setNote}
+          placeholder={
+            mode === 'measurement' ? 'Contoh: Pengukuran rutin bulanan' : 'Contoh: BIAS semester 1'
+          }
+          style={styles.noteInput}
+          textAlignVertical="top"
+          value={note}
+        />
+
+        {mode === 'measurement' ? (
+          <InlineAlert
+            tone="info"
+            message="Tinggi dan berat badan bisa diisi manual. Timbangan Bluetooth bersifat opsional."
           />
-        </View>
+        ) : null}
+
+        {submitError ? <InlineAlert tone="error" message={submitError} /> : null}
+
+        <PrimaryButton
+          disabled={isLoadingClasses || Boolean(validationMessage)}
+          label={
+            mode === 'measurement' ? 'Buat dan Mulai Pengukuran' : 'Buat dan Mulai Imunisasi'
+          }
+          loading={isSubmitting}
+          onPress={() => {
+            handleCreateSession().catch(() => undefined);
+          }}
+        />
+        {validationMessage && !isLoadingClasses ? (
+          <Text style={styles.validationHint}>{validationMessage}</Text>
+        ) : null}
       </Screen>
 
       <Modal
@@ -411,19 +433,19 @@ export function CreateSessionScreen({
             <Text style={styles.modalTitle}>Pilih tanggal sesi</Text>
 
             <View style={styles.monthHeaderRow}>
-              <Pressable
-                onPress={() => setVisibleMonth(current => changeMonth(current, -1))}
-                style={({ pressed }) => [styles.monthNavButton, pressed && styles.monthNavButtonPressed]}>
-                <Text style={styles.monthNavLabel}>Sebelumnya</Text>
-              </Pressable>
+              <IconButton
+                accessibilityLabel="Bulan sebelumnya"
+                onPress={() => setVisibleMonth(current => changeMonth(current, -1))}>
+                <Icon name="chevron-left" color={colors.brand.primary700} />
+              </IconButton>
 
               <Text style={styles.monthLabel}>{formatMonthLabel(visibleMonth)}</Text>
 
-              <Pressable
-                onPress={() => setVisibleMonth(current => changeMonth(current, 1))}
-                style={({ pressed }) => [styles.monthNavButton, pressed && styles.monthNavButtonPressed]}>
-                <Text style={styles.monthNavLabel}>Berikutnya</Text>
-              </Pressable>
+              <IconButton
+                accessibilityLabel="Bulan berikutnya"
+                onPress={() => setVisibleMonth(current => changeMonth(current, 1))}>
+                <Icon name="chevron-right" color={colors.brand.primary700} />
+              </IconButton>
             </View>
 
             <View style={styles.weekdayRow}>
@@ -442,10 +464,7 @@ export function CreateSessionScreen({
                 return (
                   <Pressable
                     key={day.toISOString()}
-                    onPress={() => {
-                      setSessionDate(normalizeDate(day));
-                      setIsDatePickerOpen(false);
-                    }}
+                    onPress={() => handleSelectDate(day)}
                     style={({ pressed }) => [
                       styles.dayCell,
                       isSelected && styles.dayCellSelected,
@@ -466,15 +485,20 @@ export function CreateSessionScreen({
 
             <View style={styles.modalActionRow}>
               <PrimaryButton
-                label="Pilih hari ini"
+                label="Tutup"
+                onPress={() => setIsDatePickerOpen(false)}
+                style={styles.modalPrimaryButton}
+                variant="outline"
+              />
+              <PrimaryButton
+                label="Hari ini"
                 onPress={() => {
                   const today = normalizeDate(new Date());
-                  setSessionDate(today);
                   setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1));
-                  setIsDatePickerOpen(false);
+                  handleSelectDate(today);
                 }}
+                style={styles.modalPrimaryButton}
               />
-              <PrimaryButton label="Tutup" onPress={() => setIsDatePickerOpen(false)} />
             </View>
           </Pressable>
         </Pressable>
@@ -488,43 +512,50 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.app,
   },
-  pageHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    backgroundColor: colors.surface.app,
-    paddingHorizontal: spacing[16],
-    paddingBottom: spacing[16],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
-  },
-  pageHeaderTopRow: {
-    alignItems: 'flex-start',
-  },
-  headerIdentity: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  headerIdentityText: {
-    justifyContent: 'center',
-  },
-  pageTitle: {
-    ...typography.headingLg,
-    color: colors.text.primary,
-  },
   content: {
+    paddingTop: spacing[16],
     paddingHorizontal: spacing[16],
     gap: spacing[16],
   },
-  formSection: {
-    gap: spacing[12],
+  section: {
+    gap: spacing[8],
   },
   fieldLabel: {
     ...typography.labelMd,
     color: colors.text.primary,
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[8],
+  },
+  chip: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface.card,
+    paddingHorizontal: spacing[14],
+    paddingVertical: spacing[8],
+    justifyContent: 'center',
+  },
+  chipActive: {
+    borderColor: colors.brand.primary500,
+    backgroundColor: colors.brand.primary100,
+  },
+  chipPressed: {
+    backgroundColor: colors.surface.secondary,
+  },
+  chipLabel: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  chipCaption: {
+    ...typography.caption,
+    color: colors.text.muted,
+  },
+  chipLabelActive: {
+    color: colors.brand.primary700,
   },
   dateInput: {
     minHeight: 52,
@@ -533,111 +564,31 @@ const styles = StyleSheet.create({
     borderColor: colors.border.strong,
     backgroundColor: colors.surface.primary,
     paddingHorizontal: spacing[16],
-    paddingVertical: spacing[12],
-    justifyContent: 'center',
-    gap: spacing[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[8],
   },
   dateInputPressed: {
     borderColor: colors.brand.primary600,
-    backgroundColor: colors.brand.primary100,
+    backgroundColor: colors.brand.primary50,
   },
   dateInputValue: {
     ...typography.bodyMd,
     color: colors.text.primary,
   },
   dateInputHint: {
-    ...typography.caption,
-    color: colors.text.secondary,
-  },
-  classFieldWrap: {
-    gap: spacing[8],
-    zIndex: 5,
-  },
-  immunizationTypeWrap: {
-    gap: spacing[8],
-  },
-  immunizationTypeOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[8],
-  },
-  immunizationTypeChip: {
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[12],
-    paddingVertical: spacing[4],
-  },
-  immunizationTypeChipActive: {
-    borderColor: colors.brand.primary500,
-    backgroundColor: colors.brand.primary100,
-  },
-  immunizationTypeChipLabel: {
-    ...typography.caption,
-    color: colors.text.secondary,
-  },
-  immunizationTypeChipLabelActive: {
-    color: colors.brand.primary700,
-  },
-  classInput: {
-    ...typography.bodyMd,
-    minHeight: 52,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border.strong,
-    backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[16],
-    color: colors.text.primary,
-  },
-  suggestionWrap: {
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface.primary,
-    overflow: 'hidden',
-  },
-  suggestionItem: {
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: spacing[16],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
-  },
-  suggestionItemPressed: {
-    backgroundColor: colors.brand.primary100,
-  },
-  suggestionLabel: {
-    ...typography.bodyMd,
-    color: colors.text.primary,
-  },
-  emptySuggestion: {
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: spacing[16],
-  },
-  emptySuggestionLabel: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
+    ...typography.labelMd,
+    color: colors.brand.primary600,
   },
   noteInput: {
-    minHeight: 100,
+    minHeight: 88,
     paddingTop: spacing[12],
   },
-  footerActions: {
-    marginTop: spacing[8],
-    marginBottom: spacing[8],
-  },
-  errorCard: {
-    borderWidth: 1,
-    borderColor: colors.feedback.errorBorder,
-    borderRadius: radius.md,
-    backgroundColor: colors.feedback.errorBackground,
-    padding: spacing[12],
-  },
-  errorText: {
-    ...typography.bodySm,
-    color: colors.feedback.errorText,
+  validationHint: {
+    ...typography.caption,
+    color: colors.text.muted,
+    textAlign: 'center',
   },
   modalBackdrop: {
     flex: 1,
@@ -660,22 +611,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing[8],
-  },
-  monthNavButton: {
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    borderRadius: radius.md,
-    paddingVertical: spacing[8],
-    paddingHorizontal: spacing[12],
-    backgroundColor: colors.surface.secondary,
-  },
-  monthNavButtonPressed: {
-    borderColor: colors.brand.primary600,
-    backgroundColor: colors.brand.primary100,
-  },
-  monthNavLabel: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
   },
   monthLabel: {
     ...typography.headingMd,
@@ -728,6 +663,10 @@ const styles = StyleSheet.create({
     color: colors.brand.primary700,
   },
   modalActionRow: {
+    flexDirection: 'row',
     gap: spacing[8],
+  },
+  modalPrimaryButton: {
+    flex: 1,
   },
 });

@@ -16,7 +16,6 @@ import { StudentProfileScreen } from '../screens/dashboard/StudentProfileScreen'
 import { StudentSearchResultsScreen } from '../screens/dashboard/StudentSearchResultsScreen';
 import { TeacherDetailScreen } from '../screens/dashboard/TeacherDetailScreen';
 import { TeacherListScreen } from '../screens/dashboard/TeacherListScreen';
-import { TEACHER_LIST_ITEMS } from '../features/dashboard';
 import { BatchMeasurementScreen } from '../screens/measurement/BatchMeasurementScreen';
 import { CreateSessionScreen } from '../screens/measurement/CreateSessionScreen';
 import { DeviceManagerScreen } from '../screens/measurement/DeviceManagerScreen';
@@ -26,7 +25,6 @@ import { HeightPoseScreen } from '../screens/measurement/HeightPoseScreen';
 import { SessionListScreen } from '../screens/measurement/SessionListScreen';
 import { StudentImmunizationScreen } from '../screens/measurement/StudentImmunizationScreen';
 import { StudentMeasurementScreen } from '../screens/measurement/StudentMeasurementScreen';
-import { StudentSearchScreen } from '../screens/measurement/StudentSearchScreen';
 import { AccountSettingsScreen } from '../screens/profile/AccountSettingsScreen';
 import { EditEmailScreen } from '../screens/profile/EditEmailScreen';
 import { EditPasswordScreen } from '../screens/profile/EditPasswordScreen';
@@ -77,6 +75,10 @@ const TAB_LABELS: Record<MainTab, string> = {
   'device-manager': 'Perangkat',
   profile: 'Pengaturan',
 };
+
+// The device manager is reachable from the measurement flow ("Atur alat") only;
+// manual input is the primary path, so it no longer occupies a bottom tab.
+const VISIBLE_TABS: MainTab[] = ['dashboard', 'measurement', 'profile'];
 
 const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
   dashboard: colors.brand.primary500,
@@ -275,6 +277,7 @@ function toRoleLabel(value: string): string {
 function buildProfileSettingsData(
   user: UnknownObject | null,
   memberships: Awaited<ReturnType<typeof listMemberships>>,
+  currentSchoolId: string | null = null,
 ): ProfileSettingsData {
   const fullName =
     readStringValue(user, ['full_name', 'fullName', 'name']) ?? 'Pengguna';
@@ -296,6 +299,9 @@ function buildProfileSettingsData(
     'user';
   const uniqueRoles = sortRolesByPriority([...normalizedAllowedRoles, fallbackRole]);
   const activeMembership =
+    (currentSchoolId
+      ? memberships.find(item => isMembershipConnected(item) && item.school_id === currentSchoolId)
+      : null) ??
     memberships.find(item => isMembershipConnected(item) && item.is_active) ??
     memberships.find(item => isMembershipConnected(item)) ??
     null;
@@ -348,7 +354,7 @@ export function RootNavigator() {
   const [dashboardRoute, setDashboardRoute] = useState<DashboardRoute>('dashboard');
   const [dashboardStudentSearchKeyword, setDashboardStudentSearchKeyword] =
     useState('');
-  const [teachers, setTeachers] = useState<TeacherListItem[]>(TEACHER_LIST_ITEMS);
+  const [teachers, setTeachers] = useState<TeacherListItem[]>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<DashboardStudentListItem | null>(null);
   const [selectedClassroom, setSelectedClassroom] = useState<ClassroomListItem | null>(null);
@@ -372,6 +378,10 @@ export function RootNavigator() {
   const [identifiedStudentName, setIdentifiedStudentName] = useState<string | null>(null);
   const [faceCropPreview, setFaceCropPreview] = useState<FaceCropPreviewPayload | null>(null);
   const [faceCameraFacing, setFaceCameraFacing] = useState<'back' | 'front'>('back');
+  const [createSessionClassPreset, setCreateSessionClassPreset] = useState<{
+    id: string | null;
+    name: string | null;
+  } | null>(null);
   const [profileRoute, setProfileRoute] =
     useState<ProfileRoute>('profile-overview');
   const [isRegeneratingJoinCode, setIsRegeneratingJoinCode] = useState(false);
@@ -385,7 +395,13 @@ export function RootNavigator() {
   const [isSavingAcademicYear, setIsSavingAcademicYear] = useState(false);
   const [academicYearActionError, setAcademicYearActionError] = useState<string | null>(null);
   const sessionUser = asObject(getAuthSession().user);
-  const profileData = buildProfileSettingsData(sessionUser, schoolMemberships);
+  const profileData = buildProfileSettingsData(sessionUser, schoolMemberships, currentSchoolId);
+  const activeSchoolRole = normalizeRoleKey(
+    profileData.activeSchoolRole ??
+      readStringValue(sessionUser, ['active_school_role', 'default_role', 'defaultRole']) ??
+      'teacher',
+  );
+  const isSchoolAdmin = activeSchoolRole === 'school_admin';
 
   const refreshSchoolMemberships = async (): Promise<Awaited<ReturnType<typeof listMemberships>>> => {
     const memberships = await listMemberships();
@@ -881,19 +897,34 @@ export function RootNavigator() {
     (activeTab === 'measurement' &&
       (measurementRoute === 'face-identification' ||
         measurementRoute === 'height-pose' ||
-        measurementRoute === 'face-crop-preview')) ||
+        measurementRoute === 'face-crop-preview' ||
+        measurementRoute === 'batch')) ||
     (activeTab === 'dashboard' && dashboardRoute === 'face-registration');
 
   return (
     <MainAppShell
       activeTab={activeTab}
       hideBottomBar={shouldHideBottomBar}
-      onChangeTab={tab => setActiveTab(tab)}>
+      onChangeTab={tab => {
+        // Re-tapping the active tab returns to that tab's root screen.
+        if (tab === activeTab) {
+          if (tab === 'dashboard') {
+            setDashboardRoute('dashboard');
+          } else if (tab === 'measurement') {
+            setMeasurementRoute('session-list');
+          } else if (tab === 'profile') {
+            setProfileRoute('profile-overview');
+          }
+          return;
+        }
+        setActiveTab(tab);
+      }}>
       {activeTab === 'dashboard'
         ? renderDashboardStack({
             currentSchool,
             currentSchoolId,
             dashboardRoute,
+            isSchoolAdmin,
             onBackToDashboard: () => setDashboardRoute('dashboard'),
             onOpenClassList: () => setDashboardRoute('class-list'),
             onOpenStudentList: () => setDashboardRoute('student-list'),
@@ -944,11 +975,21 @@ export function RootNavigator() {
               setMeasurementRoute('session-list');
             },
             onStartMeasurementFromClass: () => {
+              setCreateSessionClassPreset(
+                selectedClassroom
+                  ? { id: selectedClassroom.id, name: selectedClassroom.name }
+                  : null,
+              );
               setActiveTab('measurement');
               setMeasurementProgram('measurement');
               setMeasurementRoute('create-session');
             },
             onStartImmunizationFromStudentProfile: () => {
+              setCreateSessionClassPreset(
+                selectedStudent?.className
+                  ? { id: null, name: selectedStudent.className }
+                  : null,
+              );
               setActiveTab('measurement');
               setMeasurementProgram('immunization');
               setMeasurementRoute('create-session');
@@ -978,13 +1019,16 @@ export function RootNavigator() {
             faceCameraFacing,
             onFaceCameraFacingChange: setFaceCameraFacing,
             onBackToSessionList: () => setMeasurementRoute('session-list'),
+            createSessionClassPreset,
             onOpenCreateSession: () => {
+              setCreateSessionClassPreset(null);
               setActiveMeasurementSession(null);
               setActiveImmunizationSession(null);
               setMeasurementRoute('create-session');
             },
             onCreateSession: (payload: CreateSessionPayload) => {
               setActiveSessionDate(payload.sessionDate);
+              setCreateSessionClassPreset(null);
 
               if (measurementProgram === 'measurement') {
                 if (payload.sessionId && payload.classId) {
@@ -1050,7 +1094,6 @@ export function RootNavigator() {
               setMeasurementRoute('batch');
             },
             onOpenManual: () => setMeasurementRoute('manual'),
-            onOpenStudentSearch: () => setMeasurementRoute('student-search'),
             onOpenDeviceManager: () => setMeasurementRoute('device-manager'),
             onOpenImmunizationManual: () => setMeasurementRoute('immunization-manual'),
             activeImmunizationType,
@@ -1328,11 +1371,14 @@ function MainAppShell({
 
       {!hideBottomBar ? (
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing[8] }]}>
-          {(Object.keys(TAB_LABELS) as MainTab[]).map(tab => {
+          {VISIBLE_TABS.map(tab => {
             const isActive = tab === activeTab;
 
             return (
               <Pressable
+                accessibilityLabel={TAB_LABELS[tab]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive }}
                 key={tab}
                 onPress={() => onChangeTab(tab)}
                 style={[styles.tabButton, isActive && styles.tabButtonActive]}>
@@ -1356,6 +1402,7 @@ type DashboardStackOptions = {
   currentSchool: string;
   currentSchoolId: string | null;
   dashboardRoute: DashboardRoute;
+  isSchoolAdmin: boolean;
   onBackToDashboard: () => void;
   onOpenClassList: () => void;
   onOpenStudentList: () => void;
@@ -1385,6 +1432,7 @@ function renderDashboardStack({
   currentSchool,
   currentSchoolId,
   dashboardRoute,
+  isSchoolAdmin,
   onBackToDashboard,
   onOpenClassList,
   onOpenStudentList,
@@ -1409,6 +1457,16 @@ function renderDashboardStack({
   studentSearchKeyword,
   onBackFromStudentProfile,
 }: DashboardStackOptions) {
+  if (!isSchoolAdmin && (dashboardRoute === 'teacher-list' || dashboardRoute === 'teacher-detail')) {
+    return (
+      <RestrictedNotice
+        title="Khusus Admin Sekolah"
+        description="Daftar dan pengelolaan guru hanya dapat diakses oleh Admin Sekolah."
+        onBack={onBackToDashboard}
+      />
+    );
+  }
+
   switch (dashboardRoute) {
     case 'class-list':
       return (
@@ -1453,6 +1511,7 @@ function renderDashboardStack({
         <TeacherDetailScreen
           onBack={onOpenTeacherList}
           onSave={onSaveTeacher}
+          schoolId={currentSchoolId}
           teacher={selectedTeacher}
         />
       );
@@ -1480,6 +1539,7 @@ function renderDashboardStack({
           onBack={onBackFromStudentProfile}
           student={selectedStudent}
           onOpenImmunizationRecord={onStartImmunizationFromStudentProfile}
+          schoolId={currentSchoolId}
         />
       );
     case 'student-search-results':
@@ -1530,10 +1590,10 @@ type MeasurementStackOptions = {
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onFaceIdentificationMatched: (studentName: string) => void;
   onOpenManual: () => void;
-  onOpenStudentSearch: () => void;
   onOpenDeviceManager: () => void;
   onOpenImmunizationManual: () => void;
   faceCropPreview: FaceCropPreviewPayload | null;
+  createSessionClassPreset: { id: string | null; name: string | null } | null;
 };
 
 function renderMeasurementStack({
@@ -1559,10 +1619,10 @@ function renderMeasurementStack({
   onFaceCropReady,
   onFaceIdentificationMatched,
   onOpenManual,
-  onOpenStudentSearch,
   onOpenDeviceManager,
   onOpenImmunizationManual,
   faceCropPreview,
+  createSessionClassPreset,
 }: MeasurementStackOptions) {
   switch (measurementRoute) {
     case 'create-session':
@@ -1572,6 +1632,8 @@ function renderMeasurementStack({
           mode={measurementProgram}
           onBack={onBackToSessionList}
           onCreateSession={onCreateSession}
+          initialClassId={createSessionClassPreset?.id ?? null}
+          initialClassName={createSessionClassPreset?.name ?? null}
         />
       );
     case 'face-crop-preview':
@@ -1620,6 +1682,7 @@ function renderMeasurementStack({
           onOpenDeviceManager={onOpenDeviceManager}
         />
       );
+    case 'student-search':
     case 'manual':
       return (
         <StudentMeasurementScreen
@@ -1630,7 +1693,6 @@ function renderMeasurementStack({
           onBack={onBackToSessionList}
           onOpenDeviceManager={onOpenDeviceManager}
           onOpenFaceIdentification={onOpenFaceIdentification}
-          onOpenStudentSearch={onOpenStudentSearch}
         />
       );
     case 'immunization-manual':
@@ -1646,8 +1708,6 @@ function renderMeasurementStack({
           sessionDateIso={activeSessionDate}
         />
       );
-    case 'student-search':
-      return <StudentSearchScreen onBack={onOpenManual} />;
     case 'device-manager':
       return <DeviceManagerScreen onBack={onOpenManual} />;
     case 'session-list':
@@ -1799,6 +1859,32 @@ function renderProfileStack({
   }
 }
 
+type RestrictedNoticeProps = {
+  title: string;
+  description: string;
+  onBack: () => void;
+};
+
+function RestrictedNotice({ title, description, onBack }: RestrictedNoticeProps) {
+  return (
+    <View style={styles.restrictedContainer}>
+      <View style={styles.restrictedCard}>
+        <Text style={styles.restrictedTitle}>{title}</Text>
+        <Text style={styles.restrictedDescription}>{description}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onBack}
+          style={({ pressed }) => [
+            styles.bootstrapRetryButton,
+            pressed && styles.bootstrapRetryButtonPressed,
+          ]}>
+          <Text style={styles.bootstrapRetryLabel}>Kembali ke Dashboard</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 type TabIconProps = {
   color: string;
   tab: MainTab;
@@ -1882,6 +1968,8 @@ const styles = StyleSheet.create({
   },
   bootstrapRetryButton: {
     marginTop: spacing[6],
+    minHeight: 44,
+    justifyContent: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: colors.brand.primary500,
@@ -1900,7 +1988,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.app,
   },
-  topBar: {
+  restrictedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing[16],
+    backgroundColor: colors.surface.app,
+  },
+  restrictedCard: {
+    backgroundColor: colors.surface.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    padding: spacing[20],
+    gap: spacing[8],
+    alignItems: 'center',
+  },
+  restrictedTitle: {
+    ...typography.headingMd,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  restrictedDescription: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+    textAlign: 'center',
   },
   content: {
     flex: 1,

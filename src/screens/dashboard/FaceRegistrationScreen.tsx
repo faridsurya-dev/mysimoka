@@ -1723,11 +1723,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand.primary100,
   },
   iconUploadButtonDone: {
-    borderColor: '#8ED7B0',
-    backgroundColor: '#EAF8F0',
+    borderColor: colors.feedback.successBorder,
+    backgroundColor: colors.feedback.successBackground,
   },
   iconTrashButton: {
-    borderColor: '#F3B1B1',
+    borderColor: colors.feedback.errorBorder,
     backgroundColor: colors.feedback.errorBackground,
   },
   iconActionButtonDisabled: {

@@ -1,10 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import { InfoCard, PrimaryButton, Screen, TextField } from '../../shared/components';
+import { StyleSheet, View } from 'react-native';
+import {
+  Icon,
+  InfoCard,
+  InlineAlert,
+  PrimaryButton,
+  Screen,
+  ScreenHeader,
+  TextField,
+} from '../../shared/components';
 import { updateSchoolProfile } from '../../services';
-import { colors, spacing, typography } from '../../theme';
+import { colors, layout, spacing } from '../../theme';
 
 type EditSchoolProfileScreenProps = {
   onBack: () => void;
@@ -25,7 +31,6 @@ export function EditSchoolProfileScreen({
   schoolId,
   canEditSchoolProfile,
 }: EditSchoolProfileScreenProps) {
-  const insets = useSafeAreaInsets();
   const [name, setName] = useState(initialSchoolName);
   const [npsn, setNpsn] = useState(schoolNumber ?? '');
   const [address, setAddress] = useState(schoolAddress ?? '');
@@ -65,64 +70,60 @@ export function EditSchoolProfileScreen({
     }
   };
 
+  const isEditable = canEditSchoolProfile && !isSaving;
+
   return (
     <View style={styles.container}>
-      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}>
-        <View style={styles.pageHeaderTopRow}>
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15 6l-6 6 6 6"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>Edit Profil Sekolah</Text>
-            </View>
-          </Pressable>
-        </View>
-      </View>
+      <ScreenHeader onBack={onBack} title="Ubah Profil Sekolah" />
 
-      <Screen keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <InfoCard>
-          <View style={styles.form}>
-            {!canEditSchoolProfile ? (
-              <Text style={styles.errorText}>
-                Hanya admin_sekolah yang dapat memperbarui profil sekolah.
-              </Text>
-            ) : null}
-            <TextField
-              editable={canEditSchoolProfile && !isSaving}
-              label="Nama Sekolah"
-              onChangeText={setName}
-              placeholder="Masukkan nama sekolah"
-              value={name}
-            />
-            <TextField
-              editable={canEditSchoolProfile && !isSaving}
-              keyboardType="number-pad"
-              label="NPSN"
-              onChangeText={setNpsn}
-              placeholder="Masukkan NPSN"
-              value={npsn}
-            />
-            <TextField
-              editable={canEditSchoolProfile && !isSaving}
-              label="Address"
-              onChangeText={setAddress}
-              placeholder="Masukkan address sekolah"
-              value={address}
-            />
-            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-          </View>
+      <Screen avoidKeyboard contentContainerStyle={styles.content} withTopInset={false}>
+        {!canEditSchoolProfile ? (
+          <InlineAlert
+            message="Hanya admin sekolah yang dapat memperbarui profil sekolah."
+            tone="warning"
+          />
+        ) : null}
+
+        <InfoCard
+          icon={<Icon color={colors.brand.primary600} name="school" size={20} />}
+          description="Data ini tampil di laporan dan dipakai guru saat bergabung."
+          title="Informasi sekolah">
+          <TextField
+            editable={isEditable}
+            label="Nama Sekolah"
+            onChangeText={setName}
+            placeholder="Masukkan nama sekolah"
+            required
+            value={name}
+          />
+          <TextField
+            editable={isEditable}
+            keyboardType="number-pad"
+            label="NPSN"
+            onChangeText={setNpsn}
+            placeholder="Masukkan NPSN"
+            required
+            value={npsn}
+          />
+          <TextField
+            editable={isEditable}
+            label="Alamat"
+            multiline
+            numberOfLines={3}
+            onChangeText={setAddress}
+            placeholder="Masukkan alamat sekolah"
+            required
+            style={styles.addressInput}
+            value={address}
+          />
+          {errorMessage ? <InlineAlert message={errorMessage} tone="error" /> : null}
         </InfoCard>
 
         <PrimaryButton
-          disabled={isSaveDisabled}
-          label={isSaving ? 'Menyimpan...' : 'Simpan Profil Sekolah'}
+          disabled={isSaveDisabled && !isSaving}
+          fullWidth
+          label="Simpan Profil Sekolah"
+          loading={isSaving}
           onPress={handleSave}
         />
       </Screen>
@@ -135,38 +136,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface.app,
   },
-  pageHeader: {
-    backgroundColor: colors.surface.app,
-    paddingHorizontal: spacing[24],
-    paddingBottom: spacing[16],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
-  },
-  pageHeaderTopRow: {
-    alignItems: 'flex-start',
-  },
-  headerIdentity: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  headerIdentityText: {
-    justifyContent: 'center',
-  },
-  pageTitle: {
-    ...typography.headingLg,
-    color: colors.text.primary,
-  },
   content: {
-    paddingHorizontal: spacing[24],
+    paddingHorizontal: layout.screenPaddingX,
     paddingTop: spacing[16],
     gap: spacing[16],
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
   },
-  form: {
-    gap: spacing[16],
-  },
-  errorText: {
-    ...typography.bodySm,
-    color: colors.status.device.error,
+  addressInput: {
+    minHeight: 96,
   },
 });

@@ -1,10 +1,16 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PrimaryButton, TextField } from '../../../shared/components';
+import {
+  Icon,
+  InlineAlert,
+  PrimaryButton,
+  TextField,
+  TextLink,
+} from '../../../shared/components';
 import { register } from '../../../services';
-import { colors, spacing, typography } from '../../../theme';
+import { colors, typography } from '../../../theme';
+import { AuthLayout } from '../AuthLayout';
 import { getFriendlyAuthErrorMessage } from '../errorMessages';
 
 type RegisterScreenProps = {
@@ -16,7 +22,6 @@ export function RegisterScreen({
   onRegisterSuccess,
   onBackToLogin,
 }: RegisterScreenProps) {
-  const insets = useSafeAreaInsets();
   const scrollRef = useRef<KeyboardAwareScrollView | null>(null);
   const [fullName, setFullName] = useState('');
   const [imageUrl, setImageUrl] = useState('');
@@ -70,182 +75,95 @@ export function RegisterScreen({
     }, 120);
   };
 
+  const isPasswordMismatch = confirmPassword.length > 0 && password !== confirmPassword;
+
   return (
-    <KeyboardAwareScrollView
-      innerRef={ref => {
-        scrollRef.current = ref;
-      }}
-      enableOnAndroid
-      extraHeight={140}
-      extraScrollHeight={32}
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.content,
-        {
-          paddingTop: insets.top + spacing[8],
-          paddingBottom: insets.bottom + spacing[32],
-        },
-      ]}
-      keyboardDismissMode="on-drag"
-      keyboardShouldPersistTaps="handled">
-      <View style={styles.keyboardArea}>
-        <View style={styles.header}>
-          <View style={styles.logoWrapper}>
-            <Image
-              source={require('../../../../assets/mysimoka_logo.png')}
-              style={styles.logo}
-              resizeMode="cover"
-            />
-          </View>
-          <Text style={styles.eyebrow}>MySimoka</Text>
-          <Text style={styles.title}>Buat akun baru</Text>
-          <Text style={styles.subtitle}>
-            Daftarkan akun untuk mengakses sekolah dan mulai pengukuran.
-          </Text>
-        </View>
-
-        <View style={styles.form}>
-          <TextField
-            label="Nama Lengkap"
-            onChangeText={setFullName}
-            placeholder="Masukkan nama lengkap"
-            value={fullName}
-          />
-          <TextField
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            label="Email"
-            onChangeText={setEmail}
-            placeholder="Masukkan email"
-            value={email}
-          />
-          <TextField
-            autoCapitalize="none"
-            autoCorrect={false}
-            label="URL Foto (Opsional)"
-            onChangeText={setImageUrl}
-            placeholder="https://example.com/photo.jpg"
-            value={imageUrl}
-          />
-          <TextField
-            label="Password"
-            onChangeText={setPassword}
-            onFocus={scrollToFormBottom}
-            placeholder="Buat password"
-            secureTextEntry
-            value={password}
-          />
-          <TextField
-            label="Konfirmasi password"
-            onChangeText={setConfirmPassword}
-            onFocus={scrollToFormBottom}
-            placeholder="Ulangi password"
-            secureTextEntry
-            value={confirmPassword}
-          />
-        </View>
-
-        {confirmPassword.length > 0 && password !== confirmPassword ? (
-          <Text style={styles.errorText}>Konfirmasi password belum sama.</Text>
-        ) : null}
-
-        {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
-
-        <PrimaryButton
-          disabled={!canSubmit}
-          label="Daftar"
-          loading={isSubmitting}
-          onPress={handleSubmit}
-          style={styles.button}
-        />
-
-        <View style={styles.footer}>
+    <AuthLayout
+      logoSize={80}
+      scrollRef={scrollRef}
+      title="Buat akun baru"
+      subtitle="Daftarkan akun untuk mengakses sekolah dan mulai pengukuran."
+      footer={
+        <>
           <Text style={styles.footerText}>Sudah punya akun?</Text>
-          <Pressable onPress={onBackToLogin}>
-            <Text style={styles.footerLink}>Kembali ke login</Text>
-          </Pressable>
-        </View>
+          <TextLink label="Kembali ke login" onPress={onBackToLogin} />
+        </>
+      }>
+      <TextField
+        autoComplete="name"
+        label="Nama Lengkap"
+        leftIcon={<Icon color={colors.text.muted} name="user" size={18} />}
+        onChangeText={setFullName}
+        placeholder="Masukkan nama lengkap"
+        required
+        textContentType="name"
+        value={fullName}
+      />
+      <TextField
+        autoCapitalize="none"
+        autoComplete="email"
+        autoCorrect={false}
+        keyboardType="email-address"
+        label="Email"
+        leftIcon={<Icon color={colors.text.muted} name="mail" size={18} />}
+        onChangeText={setEmail}
+        placeholder="nama@sekolah.sch.id"
+        required
+        textContentType="emailAddress"
+        value={email}
+      />
+      <TextField
+        autoCapitalize="none"
+        autoCorrect={false}
+        helperText="Opsional. Tautan gambar untuk foto profil."
+        keyboardType="url"
+        label="URL Foto"
+        onChangeText={setImageUrl}
+        placeholder="https://example.com/photo.jpg"
+        value={imageUrl}
+      />
+      <TextField
+        autoComplete="new-password"
+        label="Password"
+        leftIcon={<Icon color={colors.text.muted} name="lock" size={18} />}
+        onChangeText={setPassword}
+        onFocus={scrollToFormBottom}
+        placeholder="Buat password"
+        required
+        secureTextEntry
+        textContentType="newPassword"
+        value={password}
+      />
+      <TextField
+        autoComplete="new-password"
+        error={isPasswordMismatch ? 'Konfirmasi password belum sama.' : null}
+        label="Konfirmasi Password"
+        leftIcon={<Icon color={colors.text.muted} name="lock" size={18} />}
+        onChangeText={setConfirmPassword}
+        onFocus={scrollToFormBottom}
+        placeholder="Ulangi password"
+        required
+        secureTextEntry
+        textContentType="newPassword"
+        value={confirmPassword}
+      />
 
-        <View style={styles.bottomSpacer} />
-      </View>
-    </KeyboardAwareScrollView>
+      {submitError ? <InlineAlert message={submitError} tone="error" /> : null}
+
+      <PrimaryButton
+        disabled={!canSubmit}
+        fullWidth
+        label="Daftar"
+        loading={isSubmitting}
+        onPress={handleSubmit}
+      />
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.surface.app,
-  },
-  content: {
-    flexGrow: 1,
-    paddingHorizontal: spacing[24],
-  },
-  keyboardArea: {
-    width: '100%',
-    gap: spacing[20],
-  },
-  header: {
-    alignItems: 'center',
-    gap: spacing[8],
-  },
-  logoWrapper: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    overflow: 'hidden',
-    marginBottom: spacing[8],
-    backgroundColor: colors.surface.primary,
-    borderWidth: 4,
-    borderColor: colors.neutral[0],
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    elevation: 8,
-  },
-  logo: {
-    width: '100%',
-    height: '100%',
-  },
-  eyebrow: {
-    ...typography.caption,
-    color: colors.brand.primary700,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  title: {
-    ...typography.headingXL,
-    color: colors.text.primary,
-  },
-  subtitle: {
-    ...typography.bodyMd,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  form: {
-    gap: spacing[12],
-  },
-  errorText: {
-    ...typography.bodySm,
-    color: colors.accent.red,
-  },
-  button: {
-    width: '100%',
-  },
-  footer: {
-    alignItems: 'center',
-    gap: spacing[8],
-  },
   footerText: {
     ...typography.bodySm,
     color: colors.text.secondary,
-  },
-  footerLink: {
-    ...typography.labelMd,
-    color: colors.brand.primary500,
-  },
-  bottomSpacer: {
-    height: spacing[40],
   },
 });

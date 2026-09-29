@@ -2,7 +2,13 @@ import { useSyncExternalStore } from 'react';
 import { ScanMode, State } from 'react-native-ble-plx';
 import type { Device, Subscription } from 'react-native-ble-plx';
 import { S400_BIND_KEY } from '../../services/environment';
-import { bleManager, ensureBlePoweredOn, getBleDeviceName, requestBlePermissions } from './ble';
+import {
+  BLE_UNAVAILABLE_MESSAGE,
+  ensureBlePoweredOn,
+  getBleDeviceName,
+  getBleManager,
+  requestBlePermissions,
+} from './ble';
 import { getDeviceSessionSnapshot, setConnectedBleDevice } from './deviceSession';
 import {
   handleS400Advertisement,
@@ -89,7 +95,12 @@ function ensureInitialized() {
 
   setS400BindKey(S400_BIND_KEY);
 
-  bleManager.onStateChange(bleState => {
+  const manager = getBleManager();
+  if (!manager) {
+    return;
+  }
+
+  manager.onStateChange(bleState => {
     if (bleState === State.PoweredOn) {
       return;
     }
@@ -114,7 +125,7 @@ function clearDiscoveryTimeout() {
 async function stopScan() {
   activeScan = null;
   try {
-    await bleManager.stopDeviceScan();
+    await getBleManager()?.stopDeviceScan();
   } catch {
     // no-op
   }
@@ -133,12 +144,13 @@ async function startListenScan() {
 
   await stopScan();
   const connectedId = getDeviceSessionSnapshot().connectedDeviceId;
-  if (!connectedId) {
+  const manager = getBleManager();
+  if (!connectedId || !manager) {
     return;
   }
 
   try {
-    await bleManager.startDeviceScan(
+    await manager.startDeviceScan(
       null,
       { allowDuplicates: true, scanMode: ScanMode.LowLatency },
       (error, scannedDevice) => {
@@ -193,7 +205,11 @@ function handleConnectionLost(message: string) {
 
 function watchDisconnect(deviceId: string, deviceName: string) {
   disconnectSubscription?.remove();
-  disconnectSubscription = bleManager.onDeviceDisconnected(deviceId, () => {
+  const manager = getBleManager();
+  if (!manager) {
+    return;
+  }
+  disconnectSubscription = manager.onDeviceDisconnected(deviceId, () => {
     disconnectSubscription?.remove();
     disconnectSubscription = null;
 
@@ -210,6 +226,12 @@ function watchDisconnect(deviceId: string, deviceName: string) {
 
 export async function scanDevices() {
   ensureInitialized();
+  const manager = getBleManager();
+  if (!manager) {
+    setState({ isScanning: false, message: BLE_UNAVAILABLE_MESSAGE });
+    return;
+  }
+
   clearDiscoveryTimeout();
   await stopScan();
 
@@ -237,7 +259,7 @@ export async function scanDevices() {
   const connectedId = getDeviceSessionSnapshot().connectedDeviceId;
 
   try {
-    await bleManager.startDeviceScan(null, { scanMode: ScanMode.LowLatency }, (error, device) => {
+    await manager.startDeviceScan(null, { scanMode: ScanMode.LowLatency }, (error, device) => {
       if (error) {
         clearDiscoveryTimeout();
         stopScan();
@@ -305,6 +327,12 @@ export async function connectDevice(deviceId: string) {
     return;
   }
 
+  const manager = getBleManager();
+  if (!manager) {
+    setState({ message: BLE_UNAVAILABLE_MESSAGE });
+    return;
+  }
+
   clearDiscoveryTimeout();
   setState({ busyAction: 'connect', busyDeviceId: deviceId, message: null });
 
@@ -316,10 +344,10 @@ export async function connectDevice(deviceId: string) {
     resetAdvertisementCache(deviceId);
 
     const device = isS400
-      ? await bleManager
+      ? await manager
           .connectToDevice(deviceId, { timeout: S400_CONNECT_TIMEOUT_MS })
           .catch(() => null)
-      : await bleManager.connectToDevice(deviceId, { timeout: GATT_CONNECT_TIMEOUT_MS });
+      : await manager.connectToDevice(deviceId, { timeout: GATT_CONNECT_TIMEOUT_MS });
 
     if (!device && isS400) {
       setConnectedBleDevice({ id: deviceId, name: fallbackName });
@@ -379,9 +407,12 @@ export async function disconnectDevice(deviceId: string) {
       await stopScan();
     }
 
-    const isGattConnected = await bleManager.isDeviceConnected(deviceId).catch(() => false);
-    if (isGattConnected) {
-      await bleManager.cancelDeviceConnection(deviceId);
+    const manager = getBleManager();
+    const isGattConnected = manager
+      ? await manager.isDeviceConnected(deviceId).catch(() => false)
+      : false;
+    if (manager && isGattConnected) {
+      await manager.cancelDeviceConnection(deviceId);
     }
 
     setConnectedBleDevice(null);

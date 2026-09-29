@@ -1,9 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { listImmunizationSessions, listMeasurementSessions } from '../../services';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PrimaryButton, Screen, StatusPill } from '../../shared/components';
+import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
+import {
+  EmptyState,
+  Icon,
+  IconButton,
+  InlineAlert,
+  LoadingState,
+  PrimaryButton,
+  Screen,
+  ScreenHeader,
+  SegmentedControl,
+  StatusPill,
+} from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type {
   ImmunizationSessionListItem,
@@ -12,6 +22,11 @@ import type {
 } from '../../types';
 
 type RecordingSessionListItem = MeasurementSessionListItem | ImmunizationSessionListItem;
+
+const PROGRAM_OPTIONS = [
+  { value: 'measurement' as const, label: 'Antropometri' },
+  { value: 'immunization' as const, label: 'Imunisasi' },
+];
 
 type SessionListScreenProps = {
   schoolId?: string | null;
@@ -34,46 +49,64 @@ function formatDateLabel(value: string) {
   }).format(date);
 }
 
-function mapMeasurementStatus(status: MeasurementSessionListItem['status']) {
+type SessionStatusLabel = 'Aktif' | 'Draf' | 'Selesai' | 'Dibatalkan';
+
+type SessionRow = Omit<SessionListItem, 'status'> & {
+  status: SessionStatusLabel;
+  progress: number;
+};
+
+function mapSessionStatus(
+  status: MeasurementSessionListItem['status'] | ImmunizationSessionListItem['status'],
+): SessionStatusLabel {
   if (status === 'completed') {
     return 'Selesai';
   }
   if (status === 'cancelled') {
-    return 'Belum Sync';
+    return 'Dibatalkan';
+  }
+  if (status === 'draft') {
+    return 'Draf';
   }
   return 'Aktif';
 }
 
-function mapImmunizationStatus(status: ImmunizationSessionListItem['status']) {
-  if (status === 'completed') {
-    return 'Selesai';
+const STATUS_TONE: Record<SessionStatusLabel, 'success' | 'neutral' | 'danger' | 'info'> = {
+  Aktif: 'success',
+  Draf: 'info',
+  Selesai: 'neutral',
+  Dibatalkan: 'danger',
+};
+
+function toProgress(recorded: number, total: number) {
+  if (total <= 0) {
+    return 0;
   }
-  if (status === 'cancelled') {
-    return 'Belum Sync';
-  }
-  return 'Aktif';
+  return Math.min(recorded / total, 1);
 }
 
 function buildMeasurementSessionRows(
   sessions: MeasurementSessionListItem[],
-): Array<SessionListItem & { source: MeasurementSessionListItem }> {
+): Array<SessionRow & { source: MeasurementSessionListItem }> {
   return sessions.map(session => ({
     id: session.id,
     name: session.name,
     meta: `${session.className} • ${formatDateLabel(session.sessionDate)} • ${session.recordedCount}/${session.totalStudents} siswa`,
-    status: mapMeasurementStatus(session.status),
+    status: mapSessionStatus(session.status),
+    progress: toProgress(session.recordedCount, session.totalStudents),
     source: session,
   }));
 }
 
 function buildImmunizationSessionRows(
   sessions: ImmunizationSessionListItem[],
-): Array<SessionListItem & { source: ImmunizationSessionListItem }> {
+): Array<SessionRow & { source: ImmunizationSessionListItem }> {
   return sessions.map(session => ({
     id: session.id,
     name: session.name,
     meta: `${session.className} • ${session.vaccineName}${session.doseLabel ? ` • ${session.doseLabel}` : ''} • ${formatDateLabel(session.sessionDate)} • ${session.recordedCount}/${session.totalStudents} siswa`,
-    status: mapImmunizationStatus(session.status),
+    status: mapSessionStatus(session.status),
+    progress: toProgress(session.recordedCount, session.totalStudents),
     source: session,
   }));
 }
@@ -85,12 +118,11 @@ export function SessionListScreen({
   mode,
   onSwitchMode,
 }: SessionListScreenProps) {
-  const insets = useSafeAreaInsets();
-  const headerHeight = insets.top + 72;
   const [measurementSessions, setMeasurementSessions] = useState<MeasurementSessionListItem[]>([]);
   const [immunizationSessions, setImmunizationSessions] = useState<ImmunizationSessionListItem[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     if (!schoolId) {
@@ -127,11 +159,12 @@ export function SessionListScreen({
             setImmunizationSessions([]);
           }
           setSessionLoadError(
-            error instanceof Error
-              ? error.message
-              : mode === 'measurement'
+            toRecordingErrorMessage(
+              error,
+              mode === 'measurement'
                 ? 'Gagal memuat sesi pengukuran.'
                 : 'Gagal memuat sesi imunisasi.',
+            ),
           );
         }
       })
@@ -144,7 +177,7 @@ export function SessionListScreen({
     return () => {
       isMounted = false;
     };
-  }, [mode, schoolId]);
+  }, [mode, reloadToken, schoolId]);
 
   const sessionRows =
     mode === 'measurement'
@@ -153,102 +186,80 @@ export function SessionListScreen({
 
   return (
     <View style={styles.container}>
-      <View style={[styles.fixedHeader, { paddingTop: insets.top + spacing[8] }]}>
-        <Text style={styles.headerTitle}>Pencatatan</Text>
-        <Pressable
-          accessibilityLabel="Urutkan data"
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.orderButton, pressed && styles.orderButtonPressed]}>
-          <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="M8 7h10M8 12h7M8 17h4M5 6l-1.5 1.5M5 6l1.5 1.5M5 6v12"
-              stroke={colors.text.primary}
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Pencatatan"
+        size="lg"
+        right={
+          <IconButton
+            accessibilityLabel="Muat ulang daftar sesi"
+            disabled={isLoadingSessions}
+            onPress={() => setReloadToken(value => value + 1)}>
+            <Icon name="refresh" color={colors.text.primary} />
+          </IconButton>
+        }
+      />
 
-      <Screen contentContainerStyle={[styles.content, { paddingTop: headerHeight + spacing[16] }]}>
-        <View style={styles.modeSwitcher}>
-          <Pressable
-            onPress={() => onSwitchMode('measurement')}
-            style={[
-              styles.modeSwitcherItem,
-              mode === 'measurement' && styles.modeSwitcherItemActive,
-            ]}>
-            <Text
-              style={[
-                styles.modeSwitcherLabel,
-                mode === 'measurement' && styles.modeSwitcherLabelActive,
-              ]}>
-              Antropometri
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => onSwitchMode('immunization')}
-            style={[
-              styles.modeSwitcherItem,
-              mode === 'immunization' && styles.modeSwitcherItemActive,
-            ]}>
-            <Text
-              style={[
-                styles.modeSwitcherLabel,
-                mode === 'immunization' && styles.modeSwitcherLabelActive,
-              ]}>
-              Imunisasi
-            </Text>
-          </Pressable>
-        </View>
+      <Screen contentContainerStyle={styles.content}>
+        <SegmentedControl
+          options={PROGRAM_OPTIONS}
+          value={mode}
+          onChange={onSwitchMode}
+        />
 
         <PrimaryButton
           label={mode === 'measurement' ? 'Buat Sesi Pengukuran' : 'Buat Sesi Imunisasi'}
+          leftIcon={<Icon name="plus" color={colors.text.inverse} />}
           onPress={onCreateSession}
         />
 
+        <Text style={styles.sectionTitle}>Riwayat sesi</Text>
+
         {isLoadingSessions ? (
-          <View style={styles.stateCard}>
-            <ActivityIndicator color={colors.brand.primary600} size="small" />
-            <Text style={styles.stateText}>
-              {mode === 'measurement' ? 'Memuat sesi pengukuran...' : 'Memuat sesi imunisasi...'}
-            </Text>
-          </View>
+          <LoadingState
+            label={mode === 'measurement' ? 'Memuat sesi pengukuran...' : 'Memuat sesi imunisasi...'}
+          />
         ) : sessionLoadError ? (
-          <View style={styles.errorCard}>
-            <Text style={styles.errorText}>{sessionLoadError}</Text>
-          </View>
+          <InlineAlert
+            tone="error"
+            message={sessionLoadError}
+            actionLabel={schoolId ? 'Coba lagi' : undefined}
+            onAction={schoolId ? () => setReloadToken(value => value + 1) : undefined}
+          />
         ) : sessionRows.length === 0 ? (
-          <View style={styles.stateCard}>
-            <Text style={styles.stateTitle}>Belum ada sesi</Text>
-            <Text style={styles.stateText}>
-              {mode === 'measurement'
-                ? 'Buat sesi pengukuran untuk mulai mencatat TB dan BB.'
-                : 'Buat sesi imunisasi untuk mulai mencatat status imunisasi siswa.'}
-            </Text>
-          </View>
+          <EmptyState
+            icon="calendar"
+            title={mode === 'measurement' ? 'Belum ada sesi pengukuran' : 'Belum ada sesi imunisasi'}
+            description={
+              mode === 'measurement'
+                ? 'Buat sesi, pilih kelas, lalu isi tinggi dan berat badan siswa secara manual. Tidak perlu alat.'
+                : 'Buat sesi imunisasi untuk mencatat status imunisasi siswa per kelas.'
+            }
+          />
         ) : (
           <View style={styles.list}>
             {sessionRows.map(session => (
               <Pressable
+                accessibilityRole="button"
                 key={session.id}
                 onPress={() => onOpenSessionDetail(session.source)}
                 style={({ pressed }) => [styles.rowCard, pressed && styles.rowCardPressed]}>
-                <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>{session.name}</Text>
-                  <Text style={styles.rowBody}>{session.meta}</Text>
+                <View style={styles.rowTopLine}>
+                  <View style={styles.rowText}>
+                    <Text numberOfLines={2} style={styles.rowTitle}>
+                      {session.name}
+                    </Text>
+                    <Text style={styles.rowBody}>{session.meta}</Text>
+                  </View>
+                  <StatusPill label={session.status} tone={STATUS_TONE[session.status]} />
                 </View>
-                <StatusPill
-                  label={session.status}
-                  tone={
-                    session.status === 'Aktif'
-                      ? 'success'
-                      : session.status === 'Belum Sync'
-                        ? 'warning'
-                        : 'neutral'
-                  }
-                />
+                <View style={styles.rowProgressTrack}>
+                  <View
+                    style={[
+                      styles.rowProgressFill,
+                      { width: `${Math.round(session.progress * 100)}%` },
+                    ]}
+                  />
+                </View>
               </Pressable>
             ))}
           </View>
@@ -264,124 +275,57 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface.app,
   },
   content: {
-    paddingHorizontal: spacing[24],
+    paddingTop: spacing[16],
+    paddingHorizontal: spacing[16],
     gap: spacing[16],
   },
-  fixedHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    minHeight: 72,
-    backgroundColor: colors.surface.app,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
-    paddingHorizontal: spacing[24],
-    paddingBottom: spacing[12],
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerTitle: {
-    ...typography.headingXL,
+  sectionTitle: {
+    ...typography.labelLg,
     color: colors.text.primary,
-  },
-  orderButton: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  orderButtonPressed: {
-    borderColor: colors.brand.primary500,
-    backgroundColor: colors.brand.primary100,
+    marginTop: spacing[4],
   },
   list: {
     gap: spacing[12],
   },
-  stateCard: {
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface.primary,
-    padding: spacing[16],
-    alignItems: 'center',
-    gap: spacing[8],
-  },
-  stateTitle: {
-    ...typography.headingMd,
-    color: colors.text.primary,
-  },
-  stateText: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  errorCard: {
-    borderWidth: 1,
-    borderColor: colors.feedback.errorBorder,
-    borderRadius: radius.md,
-    backgroundColor: colors.feedback.errorBackground,
-    padding: spacing[12],
-  },
-  errorText: {
-    ...typography.bodySm,
-    color: colors.feedback.errorText,
-  },
-  modeSwitcher: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface.secondary,
-    borderRadius: radius.pill,
-    padding: spacing[4],
-    gap: spacing[4],
-  },
-  modeSwitcherItem: {
-    flex: 1,
-    minHeight: 40,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[12],
-  },
-  modeSwitcherItemActive: {
-    backgroundColor: colors.surface.primary,
-  },
-  modeSwitcherLabel: {
-    ...typography.labelMd,
-    color: colors.text.secondary,
-  },
-  modeSwitcherLabelActive: {
-    color: colors.brand.primary500,
-  },
   rowCard: {
-    backgroundColor: colors.surface.primary,
+    backgroundColor: colors.surface.card,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border.subtle,
     padding: spacing[16],
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing[12],
   },
   rowCardPressed: {
-    borderColor: colors.brand.primary600,
+    borderColor: colors.brand.primary300,
+    backgroundColor: colors.surface.secondary,
+  },
+  rowTopLine: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing[12],
   },
   rowText: {
     flex: 1,
     gap: spacing[4],
   },
   rowTitle: {
-    ...typography.headingMd,
+    ...typography.labelLg,
     color: colors.text.primary,
   },
   rowBody: {
     ...typography.bodySm,
     color: colors.text.secondary,
+  },
+  rowProgressTrack: {
+    height: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface.secondary,
+    overflow: 'hidden',
+  },
+  rowProgressFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+    backgroundColor: colors.brand.primary500,
   },
 });

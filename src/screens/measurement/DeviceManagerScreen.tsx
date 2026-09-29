@@ -80,15 +80,15 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   }, []);
 
   const handleScanDevices = () => {
-    scanDevices();
+    scanDevices().catch(() => undefined);
   };
 
   const handleConnectDevice = (deviceId: string) => {
-    connectDevice(deviceId);
+    connectDevice(deviceId).catch(() => undefined);
   };
 
   const handleDisconnectDevice = (deviceId: string) => {
-    disconnectDevice(deviceId);
+    disconnectDevice(deviceId).catch(() => undefined);
   };
 
   return (
@@ -114,10 +114,10 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
 
       <Screen contentContainerStyle={[styles.content, { paddingTop: headerHeight + spacing[16] }]}>
         <View style={styles.intro}>
-          <Text style={styles.title}>Kelola perangkat tinggi dan berat</Text>
+          <Text style={styles.title}>Timbangan Bluetooth (opsional)</Text>
           <Text style={styles.subtitle}>
-            Satu HP hanya dapat terhubung ke satu perangkat BLT. Lakukan scan untuk
-            menampilkan perangkat yang terdeteksi di sekitar operator.
+            Alat tidak wajib. Tanpa alat, tinggi dan berat tetap bisa diisi manual di
+            sesi pengukuran. Satu HP hanya dapat terhubung ke satu timbangan.
           </Text>
           <Text style={styles.scanMessage}>
             {S400_BIND_KEY

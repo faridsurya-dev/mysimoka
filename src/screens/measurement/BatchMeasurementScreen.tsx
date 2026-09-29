@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { useDeviceSession } from '../../features/device';
+import { useDeviceSession } from '../../features/device/useDeviceSession';
 import { DEFAULT_BATCH_ACTIVE_STUDENT } from '../../features/measurement';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
@@ -42,20 +42,21 @@ export function BatchMeasurementScreen({
   };
 
   const deviceConnection = {
-    heightConnected: true,
+    // No BLE height device is integrated yet; height stays a manual step.
+    heightConnected: false,
     weightConnected: deviceSession.connectedDeviceId !== null,
   };
 
   const allDevicesConnected =
     deviceConnection.heightConnected && deviceConnection.weightConnected;
-  const progressValue = 0.68;
+  const progressValue = 0;
 
   const connectionMessage = useMemo(() => {
     if (allDevicesConnected) {
-      return 'Semua alat terhubung. Pengukuran otomatis siap dipakai.';
+      return 'Semua alat terhubung.';
     }
 
-    return 'Ada alat belum terhubung. Kolom pengisian dinonaktifkan sampai koneksi siap.';
+    return 'Pengukuran otomatis butuh alat dan masih tahap uji coba. Tutup layar ini untuk mengisi data secara manual.';
   }, [allDevicesConnected]);
 
   useEffect(() => {
@@ -161,7 +162,10 @@ export function BatchMeasurementScreen({
             </View>
           </View>
           <Text style={styles.connectionHint}>{connectionMessage}</Text>
-          <Pressable onPress={onOpenDeviceManager} style={styles.deviceManagerButton}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onOpenDeviceManager}
+            style={styles.deviceManagerButton}>
             <Text style={styles.deviceManagerButtonLabel}>Buka Perangkat</Text>
           </Pressable>
         </View>
@@ -207,7 +211,7 @@ export function BatchMeasurementScreen({
               !allDevicesConnected && styles.primaryButtonDisabled,
               pressed && allDevicesConnected && styles.primaryButtonPressed,
             ]}>
-            <Text style={styles.primaryButtonLabel}>Simpan Hasil Otomatis</Text>
+            <Text style={styles.primaryButtonLabel}>Simpan Otomatis (butuh alat)</Text>
           </Pressable>
         </View>
       </Screen>
@@ -243,9 +247,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.text.inverse,
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.14)',
@@ -346,7 +350,8 @@ const styles = StyleSheet.create({
   },
   deviceManagerButton: {
     alignSelf: 'flex-start',
-    paddingVertical: spacing[8],
+    minHeight: 44,
+    justifyContent: 'center',
   },
   deviceManagerButtonLabel: {
     ...typography.labelMd,

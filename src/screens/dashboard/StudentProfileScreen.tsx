@@ -1,568 +1,625 @@
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { LineChart } from 'react-native-gifted-charts';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import type { DashboardStudentListItem } from '../../services';
-import { InfoCard, PrimaryButton, Screen, StatusPill } from '../../shared/components';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { loadCurrentSchoolContext, type DashboardStudentListItem } from '../../services';
+import {
+  getErrorMessage,
+  getStudentDetail,
+  getStudentImmunizationHistory,
+  getStudentMeasurementHistory,
+  isPermissionError,
+  type StudentDetail,
+  type StudentImmunizationEntry,
+  type StudentMeasurementEntry,
+} from '../../services/schoolData';
 import { colors, radius, spacing, typography } from '../../theme';
+import { TrendChart } from './components/charts';
+import { StudentFormDialog } from './components/StudentFormDialog';
+import {
+  ActionButton,
+  Avatar,
+  Badge,
+  Card,
+  InfoRow,
+  InlineNotice,
+  PageLayout,
+  SectionHeader,
+  SegmentedTabs,
+  StatTile,
+  StateView,
+  TileGrid,
+  formatDate,
+  formatGender,
+  formatNumber,
+} from './components/ui';
+import { useSchoolRole } from './components/useSchoolRole';
 
 type StudentProfileScreenProps = {
   onBack: () => void;
   student?: DashboardStudentListItem | null;
   onOpenImmunizationRecord?: () => void;
+  /** Opsional; bila tidak diisi diambil dari konteks sekolah tersimpan. */
+  schoolId?: string | null;
 };
 
-type StudentDetailTab = 'statistics' | 'immunization';
+type StudentTab = 'biodata' | 'growth' | 'immunization';
 
-const DETAIL_TABS: Array<{ key: StudentDetailTab; label: string }> = [
-  { key: 'statistics', label: 'Statistik' },
+const TABS: Array<{ key: StudentTab; label: string }> = [
+  { key: 'biodata', label: 'Biodata' },
+  { key: 'growth', label: 'Pertumbuhan' },
   { key: 'immunization', label: 'Imunisasi' },
 ];
 
-const HEIGHT_BY_AGE = [
-  { value: 108, label: '5 th' },
-  { value: 115, label: '6 th' },
-  { value: 121, label: '7 th' },
-  { value: 128, label: '8 th' },
-];
-
-const WEIGHT_BY_AGE = [
-  { value: 20, label: '5 th' },
-  { value: 23, label: '6 th' },
-  { value: 26, label: '7 th' },
-  { value: 29, label: '8 th' },
-];
-
-const BMI_HISTORY = [
-  { value: 17.5, label: 'Jan' },
-  { value: 17.6, label: 'Feb' },
-  { value: 17.7, label: 'Apr' },
-];
-
-type ImmunizationDose = {
-  date: string;
-  isValid: boolean;
+type AsyncState<T> = {
+  data: T;
+  isLoading: boolean;
+  error: string | null;
+  isRestricted: boolean;
 };
 
-type ImmunizationSeries = {
-  vaccine: string;
-  target: string;
-  requiredDoses: number;
-  doses: ImmunizationDose[];
+function initialAsync<T>(data: T): AsyncState<T> {
+  return { data, isLoading: false, error: null, isRestricted: false };
+}
+
+const IMMUNIZATION_STATUS: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
+  given: { label: 'Diberikan', tone: 'success' },
+  deferred: { label: 'Ditunda', tone: 'warning' },
+  refused: { label: 'Menolak', tone: 'danger' },
+  absent: { label: 'Tidak hadir', tone: 'neutral' },
 };
 
-const IMMUNIZATION_SERIES: ImmunizationSeries[] = [
-  {
-    vaccine: 'Campak Rubela',
-    target: 'Kelas 1 SD (usia 7 tahun)',
-    requiredDoses: 1,
-    doses: [{ date: '12 Jan 2026', isValid: true }],
-  },
-  {
-    vaccine: 'DT',
-    target: 'Kelas 1 SD (usia 7 tahun)',
-    requiredDoses: 1,
-    doses: [{ date: '12 Nov 2025', isValid: true }],
-  },
-  {
-    vaccine: 'Td',
-    target: 'Kelas 2 & 5 SD (usia 8 & 11 tahun)',
-    requiredDoses: 2,
-    doses: [{ date: '20 Feb 2026', isValid: true }],
-  },
-  {
-    vaccine: 'HPV (Perempuan)',
-    target: 'Kelas 5 SD / 6 SD / 9 SMP',
-    requiredDoses: 1,
-    doses: [],
-  },
-];
-
-function resolveImmunizationStatus(series: ImmunizationSeries): {
-  date: string;
-  statusLabel: string;
-  tone: 'success' | 'neutral';
-} {
-  const validDoses = series.doses.filter(dose => dose.isValid).length;
-  const isComplete = validDoses >= series.requiredDoses;
-  const latestDoseDate =
-    series.doses.length > 0 ? series.doses[series.doses.length - 1].date : null;
-
-  return {
-    date: latestDoseDate
-      ? `${validDoses}/${series.requiredDoses} dosis valid - Terakhir ${latestDoseDate}`
-      : `${validDoses}/${series.requiredDoses} dosis valid - Belum ada catatan`,
-    statusLabel: isComplete ? 'Lengkap' : 'Belum',
-    tone: isComplete ? 'success' : 'neutral',
-  };
+function formatAge(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const birthDate = new Date(value);
+  if (Number.isNaN(birthDate.getTime())) {
+    return null;
+  }
+  const today = new Date();
+  let years = today.getFullYear() - birthDate.getFullYear();
+  let months = today.getMonth() - birthDate.getMonth();
+  if (today.getDate() < birthDate.getDate()) {
+    months -= 1;
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years < 0) {
+    return null;
+  }
+  return months > 0 ? `${years} tahun ${months} bulan` : `${years} tahun`;
 }
 
-function formatGenderLabel(value?: string | null): string {
-  if (value === 'male') {
-    return 'Laki-laki';
-  }
-  if (value === 'female') {
-    return 'Perempuan';
-  }
-  return '-';
-}
-
-function formatDateLabel(value?: string | null): string {
+function shortMonthLabel(value: string | null): string {
   if (!value) {
     return '-';
   }
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return '-';
   }
-
-  return new Intl.DateTimeFormat('id-ID', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  }).format(date);
-}
-
-function formatAgeLabel(value?: string | null): string {
-  if (!value) {
-    return 'Usia belum tersedia';
-  }
-
-  const birthDate = new Date(value);
-  if (Number.isNaN(birthDate.getTime())) {
-    return 'Usia belum tersedia';
-  }
-
-  const today = new Date();
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const hasBirthdayPassed =
-    today.getMonth() > birthDate.getMonth() ||
-    (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
-  if (!hasBirthdayPassed) {
-    age -= 1;
-  }
-
-  return age >= 0 ? `Usia ${age} tahun` : 'Usia belum tersedia';
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
-    </View>
-  );
+  return new Intl.DateTimeFormat('id-ID', { month: 'short', year: '2-digit' }).format(date);
 }
 
 export function StudentProfileScreen({
   onBack,
   student,
   onOpenImmunizationRecord,
+  schoolId: schoolIdProp,
 }: StudentProfileScreenProps) {
-  const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<StudentDetailTab>('statistics');
-  const studentName = student?.name ?? 'Data siswa belum dipilih';
-  const studentInitial = studentName.trim().charAt(0).toUpperCase() || '?';
-  const genderLabel = formatGenderLabel(student?.gender);
-  const birthDateLabel = formatDateLabel(student?.dateOfBirth);
+  const [schoolId, setSchoolId] = useState<string | null>(schoolIdProp ?? null);
+  const { isAdmin } = useSchoolRole(schoolId);
+  const [activeTab, setActiveTab] = useState<StudentTab>('biodata');
+  const [detail, setDetail] = useState<StudentDetail | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [measurements, setMeasurements] = useState<AsyncState<StudentMeasurementEntry[]>>(
+    initialAsync([]),
+  );
+  const [immunizations, setImmunizations] = useState<AsyncState<StudentImmunizationEntry[]>>(
+    initialAsync([]),
+  );
+  const [isEditVisible, setIsEditVisible] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const studentId = student?.id ?? null;
+
+  useEffect(() => {
+    if (schoolIdProp) {
+      setSchoolId(schoolIdProp);
+      return;
+    }
+    loadCurrentSchoolContext()
+      .then(context => setSchoolId(context?.schoolId ?? null))
+      .catch(() => undefined);
+  }, [schoolIdProp]);
+
+  const loadDetail = useCallback(async () => {
+    if (!studentId) {
+      return;
+    }
+    setIsLoadingDetail(true);
+    setDetailError(null);
+    try {
+      setDetail(await getStudentDetail(studentId));
+    } catch (error) {
+      setDetailError(getErrorMessage(error, 'Gagal memuat detail siswa.'));
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  }, [studentId]);
+
+  const loadMeasurements = useCallback(async () => {
+    if (!studentId) {
+      return;
+    }
+    setMeasurements(previous => ({ ...previous, isLoading: true, error: null }));
+    try {
+      const data = await getStudentMeasurementHistory(studentId);
+      setMeasurements({ data, isLoading: false, error: null, isRestricted: false });
+    } catch (error) {
+      setMeasurements({
+        data: [],
+        isLoading: false,
+        error: getErrorMessage(error, 'Gagal memuat riwayat pengukuran.'),
+        isRestricted: isPermissionError(error),
+      });
+    }
+  }, [studentId]);
+
+  const loadImmunizations = useCallback(async () => {
+    if (!studentId) {
+      return;
+    }
+    setImmunizations(previous => ({ ...previous, isLoading: true, error: null }));
+    try {
+      const data = await getStudentImmunizationHistory(studentId);
+      setImmunizations({ data, isLoading: false, error: null, isRestricted: false });
+    } catch (error) {
+      setImmunizations({
+        data: [],
+        isLoading: false,
+        error: getErrorMessage(error, 'Gagal memuat riwayat imunisasi.'),
+        isRestricted: isPermissionError(error),
+      });
+    }
+  }, [studentId]);
+
+  useEffect(() => {
+    setDetail(null);
+    setNotice(null);
+    loadDetail().catch(() => undefined);
+    loadMeasurements().catch(() => undefined);
+    loadImmunizations().catch(() => undefined);
+  }, [loadDetail, loadImmunizations, loadMeasurements]);
+
+  // Gabungkan data dari navigasi dengan detail terbaru dari server.
+  const profile: StudentDetail | null = useMemo(() => {
+    if (!student) {
+      return null;
+    }
+    const base: StudentDetail = { ...student, classId: null, enrollmentId: null };
+    if (!detail) {
+      return base;
+    }
+    return {
+      ...base,
+      ...detail,
+      className: detail.className !== '-' ? detail.className : student.className,
+    };
+  }, [detail, student]);
+
+  const latest = measurements.data.length > 0 ? measurements.data[measurements.data.length - 1] : null;
+  const heightTrend = measurements.data
+    .filter(entry => entry.heightCm !== null)
+    .map(entry => ({ value: entry.heightCm ?? 0, label: shortMonthLabel(entry.measuredAt) }));
+  const weightTrend = measurements.data
+    .filter(entry => entry.weightKg !== null)
+    .map(entry => ({ value: entry.weightKg ?? 0, label: shortMonthLabel(entry.measuredAt) }));
+
+  if (!student || !profile) {
+    return (
+      <PageLayout onBack={onBack} title="Profil Siswa">
+        <StateView
+          actionLabel="Kembali"
+          description="Pilih siswa dari daftar untuk melihat profilnya."
+          kind="empty"
+          icon="student"
+          onAction={onBack}
+          title="Siswa belum dipilih"
+        />
+      </PageLayout>
+    );
+  }
+
+  const age = formatAge(profile.dateOfBirth);
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}>
-        <View style={styles.pageHeaderTopRow}>
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15 6l-6 6 6 6"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <View style={styles.headerIdentityText}>
-              <Text style={styles.pageTitle}>{studentName}</Text>
-            </View>
-          </Pressable>
-        </View>
+    <PageLayout
+      headerBottom={<SegmentedTabs onChange={setActiveTab} tabs={TABS} value={activeTab} />}
+      headerRight={
+        isAdmin ? (
+          <ActionButton
+            compact
+            icon="edit"
+            label="Edit"
+            onPress={() => {
+              setNotice(null);
+              setIsEditVisible(true);
+            }}
+            variant="ghost"
+          />
+        ) : null
+      }
+      onBack={onBack}
+      onRefresh={() => {
+        loadDetail().catch(() => undefined);
+        loadMeasurements().catch(() => undefined);
+        loadImmunizations().catch(() => undefined);
+      }}
+      refreshing={isLoadingDetail}
+      subtitle={`${profile.className} • NISN ${profile.nisn}`}
+      title={profile.name}>
+      {notice ? <InlineNotice message={notice} tone="success" /> : null}
 
-      </View>
-
-      <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[1]}>
-        <InfoCard style={styles.profileCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarLabel}>{studentInitial}</Text>
-          </View>
-          <Text style={styles.studentName}>{studentName}</Text>
-          <Text style={styles.studentAge}>{formatAgeLabel(student?.dateOfBirth)}</Text>
-          <Text style={styles.studentMetrics}>
-            {student?.className ?? 'Kelas belum tersedia'} - No. {student?.nisn ?? '-'}
+      <Card style={styles.hero}>
+        <Avatar name={profile.name} size={64} />
+        <View style={styles.heroCopy}>
+          <Text style={styles.heroName}>{profile.name}</Text>
+          <Text style={styles.heroMeta}>
+            {[formatGender(profile.gender) !== '-' ? formatGender(profile.gender) : null, age]
+              .filter(Boolean)
+              .join(' • ') || 'Biodata belum lengkap'}
           </Text>
-          <Text style={styles.studentBmi}>{genderLabel}</Text>
-          <View style={styles.profilePills}>
-            <StatusPill
-              label={student?.isActive === false ? 'Tidak aktif' : 'Aktif'}
-              tone={student?.isActive === false ? 'neutral' : 'success'}
+          <View style={styles.heroBadges}>
+            <Badge label={profile.className} tone="primary" />
+            <Badge
+              label={profile.isActive === false ? 'Tidak aktif' : 'Aktif'}
+              tone={profile.isActive === false ? 'neutral' : 'success'}
             />
           </View>
-        </InfoCard>
-
-        <View style={styles.stickyTabWrap}>
-          <View style={styles.switcher}>
-            {DETAIL_TABS.map(tab => {
-              const isActive = tab.key === activeTab;
-
-              return (
-                <Pressable
-                  key={tab.key}
-                  onPress={() => setActiveTab(tab.key)}
-                  style={[styles.switcherItem, isActive && styles.switcherItemActive]}>
-                  <Text style={[styles.switcherLabel, isActive && styles.switcherLabelActive]}>
-                    {tab.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
         </View>
+      </Card>
 
-        {activeTab === 'statistics' ? (
-          <View style={styles.section}>
-            <InfoCard title="Biodata Siswa">
-              <View style={styles.infoList}>
-                <InfoRow label="Nama lengkap" value={studentName} />
-                <InfoRow label="Nomor siswa" value={student?.nisn ?? '-'} />
-                <InfoRow label="Kelas" value={student?.className ?? '-'} />
-                <InfoRow label="Jenis kelamin" value={genderLabel} />
-                <InfoRow label="Tanggal lahir" value={birthDateLabel} />
-                <InfoRow label="Orang tua/wali" value={student?.parentName ?? '-'} />
-                <InfoRow label="No. HP wali" value={student?.parentPhone ?? '-'} />
-                <InfoRow label="Alamat" value={student?.address ?? '-'} />
-                <InfoRow label="Catatan" value={student?.notes ?? '-'} />
-              </View>
-            </InfoCard>
+      {detailError ? (
+        <InlineNotice
+          message={`Detail terbaru belum termuat: ${detailError}. Menampilkan data terakhir.`}
+          tone="warning"
+        />
+      ) : null}
 
-            <InfoCard>
-              <Text style={styles.chartCardTitle}>Tren Tinggi badan</Text>
-              <View style={styles.chartWrapper}>
-                <LineChart
-                  areaChart
-                  adjustToWidth
-                  color1={colors.brand.primary500}
-                  data={HEIGHT_BY_AGE}
-                  dataPointsColor1={colors.brand.primary500}
-                  endFillColor1="rgba(45, 156, 219, 0.06)"
-                  endOpacity={0.1}
-                  height={180}
-                  hideDataPoints={false}
-                  hideRules={false}
-                  initialSpacing={8}
-                  isAnimated
-                  maxValue={135}
-                  noOfSections={4}
-                  rulesColor={colors.border.subtle}
-                  showVerticalLines={false}
-                  spacing={64}
-                  startFillColor1="rgba(45, 156, 219, 0.18)"
-                  startOpacity={0.35}
-                  textColor1={colors.text.secondary}
-                  thickness1={3}
-                  xAxisColor={colors.border.subtle}
-                  xAxisLabelTextStyle={styles.chartAxisLabel}
-                  xAxisThickness={1}
-                  yAxisColor={colors.border.subtle}
-                  yAxisLabelTexts={['108', '115', '122', '129', '135']}
-                  yAxisTextStyle={styles.chartAxisLabel}
-                  yAxisThickness={0}
-                />
-              </View>
-            </InfoCard>
-
-            <InfoCard>
-              <Text style={styles.chartCardTitle}>Tren Berat badan</Text>
-              <View style={styles.chartWrapper}>
-                <LineChart
-                  areaChart
-                  adjustToWidth
-                  color1={colors.accent.teal}
-                  data={WEIGHT_BY_AGE}
-                  dataPointsColor1={colors.accent.teal}
-                  endFillColor1="rgba(39, 174, 96, 0.06)"
-                  endOpacity={0.1}
-                  height={180}
-                  hideDataPoints={false}
-                  hideRules={false}
-                  initialSpacing={8}
-                  isAnimated
-                  maxValue={32}
-                  noOfSections={4}
-                  rulesColor={colors.border.subtle}
-                  showVerticalLines={false}
-                  spacing={64}
-                  startFillColor1="rgba(39, 174, 96, 0.16)"
-                  startOpacity={0.32}
-                  textColor1={colors.text.secondary}
-                  thickness1={3}
-                  xAxisColor={colors.border.subtle}
-                  xAxisLabelTextStyle={styles.chartAxisLabel}
-                  xAxisThickness={1}
-                  yAxisColor={colors.border.subtle}
-                  yAxisLabelTexts={['20', '23', '26', '29', '32']}
-                  yAxisTextStyle={styles.chartAxisLabel}
-                  yAxisThickness={0}
-                />
-              </View>
-            </InfoCard>
-
-            <InfoCard eyebrow="Growth History" title="Tren BMI">
-              <View style={styles.chartWrapper}>
-                <LineChart
-                  areaChart
-                  adjustToWidth
-                  color1={colors.brand.primary500}
-                  data={BMI_HISTORY}
-                  dataPointsColor1={colors.brand.primary500}
-                  endFillColor1="rgba(45, 156, 219, 0.07)"
-                  endOpacity={0.1}
-                  height={180}
-                  hideDataPoints={false}
-                  hideRules={false}
-                  initialSpacing={8}
-                  isAnimated
-                  maxValue={18.2}
-                  noOfSections={4}
-                  rulesColor={colors.border.subtle}
-                  showVerticalLines={false}
-                  spacing={84}
-                  startFillColor1="rgba(45, 156, 219, 0.2)"
-                  startOpacity={0.35}
-                  textColor1={colors.text.secondary}
-                  thickness1={3}
-                  xAxisColor={colors.border.subtle}
-                  xAxisLabelTextStyle={styles.chartAxisLabel}
-                  xAxisThickness={1}
-                  yAxisColor={colors.border.subtle}
-                  yAxisLabelTexts={['17.4', '17.6', '17.8', '18.0', '18.2']}
-                  yAxisTextStyle={styles.chartAxisLabel}
-                  yAxisThickness={0}
-                />
-              </View>
-            </InfoCard>
+      {activeTab === 'biodata' ? (
+        <Card>
+          <SectionHeader title="Biodata siswa" />
+          <View>
+            <InfoRow label="Nama lengkap" value={profile.name} />
+            <InfoRow label="NISN" value={profile.nisn} />
+            <InfoRow label="Kelas" value={profile.className} />
+            <InfoRow label="Jenis kelamin" value={formatGender(profile.gender)} />
+            <InfoRow
+              label="Tanggal lahir"
+              value={
+                profile.dateOfBirth
+                  ? `${formatDate(profile.dateOfBirth, 'long')}${age ? ` (${age})` : ''}`
+                  : null
+              }
+            />
+            <InfoRow label="Orang tua/wali" value={profile.parentName} />
+            <InfoRow label="No. HP orang tua/wali" value={profile.parentPhone} />
+            <InfoRow label="Alamat" value={profile.address} />
+            <InfoRow label="Catatan" value={profile.notes} />
           </View>
-        ) : (
-          <View style={styles.section}>
-            <InfoCard
-              eyebrow="Imunisasi Berikutnya"
-              title="Booster DPT"
-              titleStyle={styles.immunizationReminderTitle}
-              style={styles.immunizationReminderCard}
-              description="Disarankan pada 25 Mei 2026 agar perlindungan tetap optimal.">
-              <PrimaryButton
+          {isAdmin ? null : (
+            <Text style={styles.footnote}>Perubahan biodata dilakukan oleh Admin Sekolah.</Text>
+          )}
+        </Card>
+      ) : null}
+
+      {activeTab === 'growth' ? (
+        <GrowthSection
+          heightTrend={heightTrend}
+          latest={latest}
+          onRetry={() => {
+            loadMeasurements().catch(() => undefined);
+          }}
+          state={measurements}
+          weightTrend={weightTrend}
+        />
+      ) : null}
+
+      {activeTab === 'immunization' ? (
+        <View style={styles.section}>
+          {onOpenImmunizationRecord ? (
+            <Card style={styles.ctaCard}>
+              <View style={styles.ctaCopy}>
+                <Text style={styles.ctaTitle}>Catat imunisasi</Text>
+                <Text style={styles.ctaDescription}>
+                  Buat atau lanjutkan sesi imunisasi kelas untuk mencatat vaksin siswa ini.
+                </Text>
+              </View>
+              <ActionButton
+                icon="syringe"
                 label="Catat Imunisasi"
-                onPress={onOpenImmunizationRecord ?? (() => {})}
-                style={styles.immunizationRecordButton}
+                onPress={onOpenImmunizationRecord}
               />
-            </InfoCard>
+            </Card>
+          ) : null}
 
-            <InfoCard title="Riwayat Imunisasi">
-              <View style={styles.immunizationList}>
-                {IMMUNIZATION_SERIES.map(series => {
-                  const status = resolveImmunizationStatus(series);
-
-                  return (
-                    <View key={series.vaccine} style={styles.immunizationRow}>
-                    <View style={styles.immunizationMeta}>
-                        <Text style={styles.immunizationName}>{series.vaccine}</Text>
-                        <Text style={styles.immunizationTarget}>{series.target}</Text>
-                        <Text style={styles.immunizationDate}>{status.date}</Text>
+          <SectionHeader
+            description="Seluruh catatan imunisasi dari sesi sekolah."
+            title="Riwayat imunisasi"
+          />
+          {immunizations.isLoading ? (
+            <StateView compact kind="loading" title="Memuat riwayat imunisasi..." />
+          ) : immunizations.error ? (
+            <StateView
+              actionLabel={immunizations.isRestricted ? undefined : 'Coba lagi'}
+              description={immunizations.error}
+              kind={immunizations.isRestricted ? 'info' : 'error'}
+              onAction={() => {
+                loadImmunizations().catch(() => undefined);
+              }}
+              title={
+                immunizations.isRestricted
+                  ? 'Riwayat imunisasi tidak tersedia'
+                  : 'Riwayat imunisasi gagal dimuat'
+              }
+            />
+          ) : immunizations.data.length === 0 ? (
+            <StateView
+              compact
+              description="Catatan akan muncul setelah imunisasi dicatat pada sesi imunisasi."
+              icon="syringe"
+              kind="empty"
+              title="Belum ada catatan imunisasi"
+            />
+          ) : (
+            <View style={styles.list}>
+              {immunizations.data.map(entry => {
+                const status = entry.status ? IMMUNIZATION_STATUS[entry.status] : null;
+                return (
+                  <Card key={entry.id} style={styles.recordCard}>
+                    <View style={styles.recordHeader}>
+                      <View style={styles.recordCopy}>
+                        <Text style={styles.recordTitle}>
+                          {entry.vaccineName}
+                          {entry.doseLabel ? ` • ${entry.doseLabel}` : ''}
+                        </Text>
+                        <Text style={styles.recordMeta}>
+                          {formatDate(entry.administeredAt, 'long')}
+                          {entry.officerName ? ` • ${entry.officerName}` : ''}
+                        </Text>
+                      </View>
+                      <Badge
+                        label={status?.label ?? entry.status ?? 'Tercatat'}
+                        tone={status?.tone ?? 'neutral'}
+                      />
                     </View>
-                      <StatusPill label={status.statusLabel} tone={status.tone} />
-                  </View>
-                  );
-                })}
+                    {entry.batchNumber || entry.notes ? (
+                      <Text style={styles.recordNotes}>
+                        {[entry.batchNumber ? `Batch ${entry.batchNumber}` : null, entry.notes]
+                          .filter(Boolean)
+                          .join(' • ')}
+                      </Text>
+                    ) : null}
+                  </Card>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {isAdmin ? (
+        <StudentFormDialog
+          mode="edit"
+          onClose={() => setIsEditVisible(false)}
+          onSaved={(_, message) => {
+            setIsEditVisible(false);
+            setNotice(message);
+            loadDetail().catch(() => undefined);
+          }}
+          schoolId={schoolId}
+          student={profile}
+          visible={isEditVisible}
+        />
+      ) : null}
+    </PageLayout>
+  );
+}
+
+type GrowthSectionProps = {
+  state: AsyncState<StudentMeasurementEntry[]>;
+  latest: StudentMeasurementEntry | null;
+  heightTrend: Array<{ value: number; label: string }>;
+  weightTrend: Array<{ value: number; label: string }>;
+  onRetry: () => void;
+};
+
+function GrowthSection({ state, latest, heightTrend, weightTrend, onRetry }: GrowthSectionProps) {
+  if (state.isLoading) {
+    return <StateView kind="loading" title="Memuat riwayat pengukuran..." />;
+  }
+  if (state.error) {
+    return (
+      <StateView
+        actionLabel={state.isRestricted ? undefined : 'Coba lagi'}
+        description={state.error}
+        kind={state.isRestricted ? 'info' : 'error'}
+        onAction={onRetry}
+        title={
+          state.isRestricted ? 'Riwayat pengukuran tidak tersedia' : 'Riwayat pengukuran gagal dimuat'
+        }
+      />
+    );
+  }
+  if (state.data.length === 0) {
+    return (
+      <StateView
+        description="Data tinggi dan berat badan akan tampil setelah siswa diukur pada sesi pengukuran."
+        icon="ruler"
+        kind="empty"
+        title="Belum ada data pengukuran"
+      />
+    );
+  }
+
+  const history = [...state.data].reverse();
+
+  return (
+    <View style={styles.section}>
+      <SectionHeader
+        description={latest ? `Pengukuran terakhir ${formatDate(latest.measuredAt, 'long')}` : null}
+        title="Pengukuran terakhir"
+      />
+      <TileGrid>
+        <StatTile icon="ruler" label="Tinggi" unit="cm" value={formatNumber(latest?.heightCm)} />
+        <StatTile
+          accent={colors.accent.teal}
+          icon="student"
+          label="Berat"
+          unit="kg"
+          value={formatNumber(latest?.weightKg)}
+        />
+        <StatTile
+          accent={colors.accent.amber}
+          label="BMI"
+          note={latest?.bmiCategory ?? null}
+          value={formatNumber(latest?.bmi)}
+        />
+      </TileGrid>
+
+      <Card>
+        <SectionHeader title="Tren tinggi badan" />
+        <TrendChart
+          data={heightTrend}
+          emptyMessage="Belum ada data tinggi badan."
+          unit="cm"
+        />
+      </Card>
+      <Card>
+        <SectionHeader title="Tren berat badan" />
+        <TrendChart
+          color={colors.accent.teal}
+          data={weightTrend}
+          emptyMessage="Belum ada data berat badan."
+          unit="kg"
+        />
+      </Card>
+
+      <Card>
+        <SectionHeader description={`${history.length} catatan`} title="Riwayat pengukuran" />
+        <View>
+          {history.map(entry => (
+            <View key={entry.id} style={styles.historyRow}>
+              <View style={styles.recordCopy}>
+                <Text style={styles.historyDate}>{formatDate(entry.measuredAt, 'long')}</Text>
+                <Text style={styles.recordMeta}>
+                  TB {formatNumber(entry.heightCm)} cm • BB {formatNumber(entry.weightKg)} kg • BMI{' '}
+                  {formatNumber(entry.bmi)}
+                </Text>
               </View>
-            </InfoCard>
-          </View>
-        )}
-      </Screen>
+              {entry.bmiCategory ? (
+                <Badge
+                  label={entry.bmiCategory}
+                  tone={entry.bmiCategory === 'Normal' ? 'success' : 'warning'}
+                />
+              ) : null}
+            </View>
+          ))}
+        </View>
+      </Card>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.surface.app,
-  },
-  content: {
-    paddingHorizontal: spacing[16],
-    paddingTop: spacing[16],
-    gap: spacing[16],
-  },
-  pageHeader: {
-    backgroundColor: colors.surface.app,
-    paddingHorizontal: spacing[16],
-    paddingBottom: spacing[16],
-    gap: spacing[16],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
-  },
-  pageHeaderTopRow: {
-    alignItems: 'flex-start',
-  },
-  headerIdentity: {
+  hero: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[12],
+    gap: spacing[16],
   },
-  headerIdentityText: {
-    justifyContent: 'center',
-  },
-  pageTitle: {
-    ...typography.headingLg,
-    color: colors.text.primary,
-  },
-  switcher: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface.secondary,
-    borderRadius: radius.pill,
-    padding: spacing[4],
+  heroCopy: {
+    flex: 1,
     gap: spacing[4],
   },
-  switcherItem: {
-    flex: 1,
-    minHeight: 42,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[12],
+  heroName: {
+    ...typography.headingMd,
+    color: colors.text.primary,
   },
-  switcherItemActive: {
-    backgroundColor: colors.surface.primary,
-  },
-  switcherLabel: {
-    ...typography.labelMd,
+  heroMeta: {
+    ...typography.bodySm,
     color: colors.text.secondary,
   },
-  switcherLabelActive: {
-    color: colors.brand.primary500,
-  },
-  profileCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing[24],
-    gap: spacing[12],
-  },
-  stickyTabWrap: {
-    backgroundColor: colors.surface.app,
-    paddingVertical: spacing[4],
+  heroBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[6],
+    marginTop: spacing[4],
   },
   section: {
     gap: spacing[16],
   },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand.primary100,
-  },
-  avatarLabel: {
-    ...typography.headingLg,
-    color: colors.brand.primary700,
-  },
-  studentName: {
-    ...typography.headingMd,
-    color: colors.text.primary,
-    textAlign: 'center',
-  },
-  studentMetrics: {
-    ...typography.bodyMd,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  studentAge: {
-    ...typography.bodyMd,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  studentBmi: {
-    ...typography.labelLg,
-    color: colors.brand.primary500,
-    textAlign: 'center',
-  },
-  profilePills: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    gap: spacing[8],
-  },
-  infoList: {
+  list: {
     gap: spacing[10],
   },
-  infoRow: {
-    gap: spacing[2],
-    paddingBottom: spacing[8],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.subtle,
-  },
-  infoLabel: {
+  footnote: {
     ...typography.caption,
     color: colors.text.muted,
   },
-  infoValue: {
-    ...typography.bodyMd,
-    color: colors.text.primary,
+  ctaCard: {
+    backgroundColor: colors.brand.primary50,
+    borderColor: colors.brand.primary100,
   },
-  chartCardTitle: {
+  ctaCopy: {
+    gap: spacing[4],
+  },
+  ctaTitle: {
     ...typography.labelLg,
-    color: colors.text.primary,
+    color: colors.brand.primary900,
   },
-  chartWrapper: {
-    marginLeft: -8,
-    paddingTop: spacing[8],
-  },
-  chartAxisLabel: {
-    ...typography.caption,
-    color: colors.text.muted,
-  },
-  immunizationList: {
-    gap: spacing[12],
-  },
-  immunizationReminderCard: {
-    backgroundColor: colors.feedback.infoBackground,
-    borderColor: colors.brand.primary300,
-  },
-  immunizationReminderTitle: {
-    color: colors.status.sync.syncing,
-  },
-  immunizationRecordButton: {
-    marginTop: spacing[4],
-  },
-  immunizationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing[12],
-  },
-  immunizationMeta: {
-    flex: 1,
-    gap: spacing[2],
-  },
-  immunizationName: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
-  immunizationTarget: {
-    ...typography.caption,
-    color: colors.text.muted,
-  },
-  immunizationDate: {
+  ctaDescription: {
     ...typography.bodySm,
     color: colors.text.secondary,
   },
+  recordCard: {
+    gap: spacing[8],
+    padding: spacing[14],
+  },
+  recordHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[12],
+  },
+  recordCopy: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  recordTitle: {
+    ...typography.labelLg,
+    color: colors.text.primary,
+  },
+  recordMeta: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
+  },
+  recordNotes: {
+    ...typography.caption,
+    color: colors.text.muted,
+    backgroundColor: colors.surface.secondary,
+    borderRadius: radius.xs,
+    padding: spacing[8],
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+    paddingVertical: spacing[10],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  historyDate: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
 });
-

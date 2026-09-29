@@ -1,16 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
-  ActivityIndicator,
   Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
 import { FaceCropPreviewPayload } from '../../navigation/types';
 import { colors, radius, spacing, typography } from '../../theme';
 
@@ -20,7 +17,6 @@ type FaceCropPreviewScreenProps = {
   onBack: () => void;
 };
 
-const keepDigitsOnly = (value: string) => value.replace(/\D+/g, '');
 
 export function FaceCropPreviewScreen({
   preview,
@@ -28,86 +24,6 @@ export function FaceCropPreviewScreen({
   onBack,
 }: FaceCropPreviewScreenProps) {
   const insets = useSafeAreaInsets();
-  const deviceConnection = {
-    heightConnected: true,
-    weightConnected: false,
-  };
-  const [isCheckingResult, setIsCheckingResult] = useState(true);
-  const [isMeasurementDetected, setIsMeasurementDetected] = useState(false);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [heightValue, setHeightValue] = useState('');
-  const [weightValue, setWeightValue] = useState('');
-
-  useEffect(() => {
-    setIsCheckingResult(true);
-    setIsMeasurementDetected(false);
-    setSaveState('idle');
-    setHeightValue('');
-    setWeightValue('');
-
-    const timer = setTimeout(() => {
-      setIsCheckingResult(false);
-    }, 2000);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [preview.imageUri]);
-
-  useEffect(() => {
-    if (isCheckingResult) {
-      return;
-    }
-
-    const heightSteps = ['108', '116', '123', '128'];
-    const weightSteps = ['21', '24', '27', '29'];
-    let stepIndex = 0;
-
-    const simulation = setInterval(() => {
-      setHeightValue(heightSteps[stepIndex] ?? heightSteps[heightSteps.length - 1]);
-      setWeightValue(weightSteps[stepIndex] ?? weightSteps[weightSteps.length - 1]);
-      stepIndex += 1;
-
-      if (stepIndex >= heightSteps.length) {
-        clearInterval(simulation);
-        setIsMeasurementDetected(true);
-      }
-    }, 320);
-
-    return () => {
-      clearInterval(simulation);
-    };
-  }, [isCheckingResult, preview.imageUri]);
-
-  useEffect(() => {
-    if (!isMeasurementDetected) {
-      return;
-    }
-
-    setSaveState('saving');
-    const savingTimer = setTimeout(() => {
-      setSaveState('saved');
-    }, 1800);
-
-    return () => {
-      clearTimeout(savingTimer);
-    };
-  }, [isMeasurementDetected]);
-
-  useEffect(() => {
-    if (saveState !== 'saved') {
-      return;
-    }
-
-    const closeTimer = setTimeout(() => {
-      onRetake();
-    }, 2200);
-
-    return () => {
-      clearTimeout(closeTimer);
-    };
-  }, [onRetake, saveState]);
-
   const cropLayout = useMemo(() => {
     const safePreviewWidth = Math.max(preview.previewWidth, 1);
     const safePreviewHeight = Math.max(preview.previewHeight, 1);
@@ -158,90 +74,14 @@ export function FaceCropPreviewScreen({
         </View>
 
         <View style={styles.statusCard}>
-          {isCheckingResult ? (
-            <View style={styles.loadingBlock}>
-              <ActivityIndicator color={colors.accent.teal} />
-              <Text style={styles.statusText}>Mengecek data ke server...</Text>
-            </View>
-          ) : (
-            <View style={styles.resultBlock}>
-              <Text style={styles.resultName}>Budi Santoso</Text>
-              <Text style={styles.resultClass}>Kelas 3A</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.measurementSection}>
-          <View style={styles.fieldGrid}>
-            <View style={styles.fieldColumn}>
-              <View style={styles.fieldInputCard}>
-                <Text style={styles.fieldCardLabel}>Tinggi badan</Text>
-                <TextInput
-                  inputMode="numeric"
-                  keyboardType="number-pad"
-                  onChangeText={value => setHeightValue(keepDigitsOnly(value))}
-                  placeholder="00"
-                  placeholderTextColor={colors.text.muted}
-                  style={styles.fieldInput}
-                  value={heightValue}
-                />
-                <Text style={styles.fieldCardUnit}>cm</Text>
-              </View>
-              <View style={styles.connectionBadge}>
-                <ConnectionStatusIcon connected={deviceConnection.heightConnected} />
-                <Text
-                  style={[
-                    styles.connectionBadgeText,
-                    deviceConnection.heightConnected
-                      ? styles.connectionValueConnected
-                      : styles.connectionValueDisconnected,
-                  ]}>
-                  {deviceConnection.heightConnected ? 'Terhubung' : 'Terputus'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.fieldColumn}>
-              <View style={styles.fieldInputCard}>
-                <Text style={styles.fieldCardLabel}>Berat badan</Text>
-                <TextInput
-                  inputMode="numeric"
-                  keyboardType="number-pad"
-                  onChangeText={value => setWeightValue(keepDigitsOnly(value))}
-                  placeholder="00"
-                  placeholderTextColor={colors.text.muted}
-                  style={styles.fieldInput}
-                  value={weightValue}
-                />
-                <Text style={styles.fieldCardUnit}>kg</Text>
-              </View>
-              <View style={styles.connectionBadge}>
-                <ConnectionStatusIcon connected={deviceConnection.weightConnected} />
-                <Text
-                  style={[
-                    styles.connectionBadgeText,
-                    deviceConnection.weightConnected
-                      ? styles.connectionValueConnected
-                      : styles.connectionValueDisconnected,
-                  ]}>
-                  {deviceConnection.weightConnected ? 'Terhubung' : 'Terputus'}
-                </Text>
-              </View>
-            </View>
+          <View style={styles.resultBlock}>
+            <Text style={styles.resultName}>Wajah berhasil diambil</Text>
+            <Text style={styles.resultClass}>
+              Pencocokan wajah otomatis masih tahap uji coba dan belum menyimpan data.
+              Tekan "Tutup Pengukuran" lalu pilih siswa dari daftar untuk mengisi tinggi dan
+              berat secara manual.
+            </Text>
           </View>
-
-          {saveState === 'saving' ? (
-            <View style={styles.saveStatusRow}>
-              <ActivityIndicator color={colors.accent.teal} />
-              <Text style={styles.saveStatusText}>Menyimpan data ke server...</Text>
-            </View>
-          ) : null}
-
-          {saveState === 'saved' ? (
-            <View style={styles.savedNotice}>
-              <Text style={styles.savedNoticeText}>Data berhasil tersimpan.</Text>
-            </View>
-          ) : null}
         </View>
       </ScrollView>
 
@@ -260,49 +100,6 @@ export function FaceCropPreviewScreen({
         </View>
       </View>
     </View>
-  );
-}
-
-type ConnectionStatusIconProps = {
-  connected: boolean;
-};
-
-function ConnectionStatusIcon({ connected }: ConnectionStatusIconProps) {
-  const fillColor = connected
-    ? colors.feedback.successBackground
-    : colors.feedback.errorBackground;
-  const strokeColor = connected
-    ? colors.status.device.connected
-    : colors.status.device.disconnected;
-
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={12} r={10} fill={fillColor} stroke={strokeColor} strokeWidth={1.8} />
-      {connected ? (
-        <Path
-          d="m8 12.4 2.4 2.4L16 9.3"
-          stroke={strokeColor}
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ) : (
-        <>
-          <Path
-            d="M9 9l6 6"
-            stroke={strokeColor}
-            strokeWidth={2}
-            strokeLinecap="round"
-          />
-          <Path
-            d="M15 9 9 15"
-            stroke={strokeColor}
-            strokeWidth={2}
-            strokeLinecap="round"
-          />
-        </>
-      )}
-    </Svg>
   );
 }
 
@@ -359,7 +156,7 @@ const styles = StyleSheet.create({
     gap: spacing[4],
   },
   resultClass: {
-    ...typography.labelLg,
+    ...typography.bodyMd,
     color: colors.brand.primary100,
     textAlign: 'center',
   },

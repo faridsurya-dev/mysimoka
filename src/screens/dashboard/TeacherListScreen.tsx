@@ -1,621 +1,381 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import { PrimaryButton, Screen } from '../../shared/components';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { createTeacherForSchool, listTeachersBySchool } from '../../services';
+import { getErrorMessage } from '../../services/schoolData';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { TeacherListItem } from '../../types';
+import { FormDialog, InputField } from './components/forms';
+import {
+  ActionButton,
+  Avatar,
+  InlineNotice,
+  ListItem,
+  PageLayout,
+  SearchField,
+  StateView,
+} from './components/ui';
+import { useSchoolRole } from './components/useSchoolRole';
 
 type TeacherListScreenProps = {
   schoolId?: string | null;
   onBack: () => void;
   onOpenTeacherDetail: (teacherId: string) => void;
   onAddTeacher: (teacher: TeacherListItem) => void;
+  /** Cache guru di navigator; dipakai agar detail guru dapat dibuka. */
   teachers: TeacherListItem[];
 };
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function generatePassword() {
+  const letters = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ';
+  const digits = '23456789';
+  const all = letters + digits;
+  const chars = [
+    letters[Math.floor(Math.random() * letters.length)],
+    digits[Math.floor(Math.random() * digits.length)],
+  ];
+  while (chars.length < 10) {
+    chars.push(all[Math.floor(Math.random() * all.length)]);
+  }
+  for (let index = chars.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [chars[index], chars[swap]] = [chars[swap], chars[index]];
+  }
+  return chars.join('');
+}
 
 export function TeacherListScreen({
   schoolId = null,
   onBack,
   onOpenTeacherDetail,
   onAddTeacher,
-  teachers,
+  teachers: cachedTeachers,
 }: TeacherListScreenProps) {
-  const insets = useSafeAreaInsets();
+  const { isAdmin } = useSchoolRole(schoolId);
   const [query, setQuery] = useState('');
-  const [isAddTeacherDialogVisible, setIsAddTeacherDialogVisible] = useState(false);
+  const [teachers, setTeachers] = useState<TeacherListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [isDialogVisible, setIsDialogVisible] = useState(false);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
-  const [serverTeachers, setServerTeachers] = useState<TeacherListItem[]>([]);
-  const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
-  const [loadTeachersError, setLoadTeachersError] = useState<string | null>(null);
-  const [saveTeacherError, setSaveTeacherError] = useState<string | null>(null);
-  const [isSavingTeacher, setIsSavingTeacher] = useState(false);
-  const displayedTeachers = serverTeachers.length > 0 ? serverTeachers : teachers;
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    name: string;
+    email: string;
+    password: string;
+  } | null>(null);
 
-  const loadTeachers = useCallback(async () => {
-    if (!schoolId) {
-      setServerTeachers([]);
-      return;
-    }
-
-    setIsLoadingTeachers(true);
-    setLoadTeachersError(null);
-
-    try {
-      const rows = await listTeachersBySchool(schoolId);
-      setServerTeachers(rows);
-    } catch (error) {
-      setServerTeachers([]);
-      setLoadTeachersError(error instanceof Error ? error.message : 'Gagal memuat daftar guru.');
-    } finally {
-      setIsLoadingTeachers(false);
-    }
-  }, [schoolId]);
+  const loadTeachers = useCallback(
+    async (mode: 'initial' | 'refresh' = 'initial') => {
+      if (!schoolId) {
+        setTeachers([]);
+        setLoadError('Sekolah aktif belum dipilih. Pilih sekolah dari menu Profil.');
+        return;
+      }
+      if (mode === 'refresh') {
+        setIsRefreshing(true);
+      } else {
+        setIsLoading(true);
+      }
+      setLoadError(null);
+      try {
+        setTeachers(await listTeachersBySchool(schoolId));
+      } catch (error) {
+        setLoadError(getErrorMessage(error, 'Gagal memuat daftar guru.'));
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    },
+    [schoolId],
+  );
 
   useEffect(() => {
-    loadTeachers().catch(() => {
-      setServerTeachers([]);
-      setLoadTeachersError('Gagal memuat daftar guru.');
-      setIsLoadingTeachers(false);
-    });
+    loadTeachers('initial').catch(() => undefined);
   }, [loadTeachers]);
 
   const filteredTeachers = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) {
-      return displayedTeachers;
+      return teachers;
     }
+    return teachers.filter(item => `${item.name} ${item.email}`.toLowerCase().includes(keyword));
+  }, [query, teachers]);
 
-    return displayedTeachers.filter(item =>
-      `${item.name} ${item.homeroom} ${item.handledClasses}`
-        .toLowerCase()
-        .includes(keyword)
-    );
-  }, [displayedTeachers, query]);
+  const emailError =
+    email.trim().length > 0 && !EMAIL_PATTERN.test(email.trim()) ? 'Format email tidak valid.' : null;
+  const passwordError =
+    password.length > 0 && password.length < 8 ? 'Password minimal 8 karakter.' : null;
+  const isFormValid =
+    fullName.trim().length > 0 &&
+    EMAIL_PATTERN.test(email.trim()) &&
+    password.length >= 8;
 
-  const isSaveDisabled = useMemo(() => {
-    return email.trim().length === 0 || fullName.trim().length === 0 || password.length === 0;
-  }, [email, fullName, password]);
-
-  function generatePassword() {
-    const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const digits = '0123456789';
-    const allChars = letters + digits;
-    const chars = [
-      letters[Math.floor(Math.random() * letters.length)],
-      digits[Math.floor(Math.random() * digits.length)],
-    ];
-
-    for (let index = chars.length; index < 8; index += 1) {
-      chars.push(allChars[Math.floor(Math.random() * allChars.length)]);
-    }
-
-    for (let index = chars.length - 1; index > 0; index -= 1) {
-      const randomIndex = Math.floor(Math.random() * (index + 1));
-      [chars[index], chars[randomIndex]] = [chars[randomIndex], chars[index]];
-    }
-
-    return chars.join('');
-  }
-
-  function handleCloseDialog() {
-    setIsAddTeacherDialogVisible(false);
-    setIsPasswordVisible(false);
-  }
-
-  function handleOpenDialog() {
+  function openDialog() {
     setEmail('');
     setFullName('');
-    setPassword('');
-    setIsPasswordVisible(false);
-    setSaveTeacherError(null);
-    setIsAddTeacherDialogVisible(true);
+    setPassword(generatePassword());
+    setIsPasswordVisible(true);
+    setSaveError(null);
+    setCreatedCredentials(null);
+    setIsDialogVisible(true);
   }
 
-  async function handleSaveTeacher() {
-    if (isSaveDisabled || isSavingTeacher) {
-      return;
+  function openDetail(teacher: TeacherListItem) {
+    // Navigator mencari detail dari cache guru; pastikan guru dari server tersedia di sana.
+    if (!cachedTeachers.some(item => item.id === teacher.id)) {
+      onAddTeacher(teacher);
     }
+    onOpenTeacherDetail(teacher.id);
+  }
 
+  async function handleSave() {
     if (!schoolId) {
-      setSaveTeacherError('Sekolah aktif belum dipilih.');
+      setSaveError('Sekolah aktif belum dipilih.');
       return;
     }
-
-    setIsSavingTeacher(true);
-    setSaveTeacherError(null);
-
+    if (!isFormValid) {
+      setSaveError('Lengkapi nama, email yang valid, dan password minimal 8 karakter.');
+      return;
+    }
+    setIsSaving(true);
+    setSaveError(null);
     try {
-      const newTeacher = await createTeacherForSchool({
+      const created = await createTeacherForSchool({
         schoolId,
-        email,
-        fullName,
+        email: email.trim(),
+        fullName: fullName.trim(),
         password,
       });
-      onAddTeacher(newTeacher);
-      setServerTeachers(previous => [newTeacher, ...previous.filter(item => item.id !== newTeacher.id)]);
-      handleCloseDialog();
-      await loadTeachers();
+      onAddTeacher(created);
+      setTeachers(previous => [created, ...previous.filter(item => item.id !== created.id)]);
+      setCreatedCredentials({ name: created.name, email: created.email, password });
+      loadTeachers('refresh').catch(() => undefined);
     } catch (error) {
-      setSaveTeacherError(error instanceof Error ? error.message : 'Gagal menyimpan guru.');
+      setSaveError(getErrorMessage(error, 'Gagal menambahkan guru.'));
     } finally {
-      setIsSavingTeacher(false);
+      setIsSaving(false);
     }
   }
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.pageHeader, { paddingTop: insets.top + spacing[12] }]}>
-        <View style={styles.headerRow}>
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15 6l-6 6 6 6"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <Text style={styles.pageTitle}>Daftar Guru</Text>
-          </Pressable>
+    <PageLayout
+      headerBottom={
+        teachers.length > 0 ? (
+          <SearchField
+            autoCapitalize="words"
+            onChangeText={setQuery}
+            placeholder="Cari nama atau email guru"
+            value={query}
+          />
+        ) : null
+      }
+      headerRight={
+        isAdmin ? <ActionButton compact icon="plus" label="Tambah" onPress={openDialog} /> : null
+      }
+      onBack={onBack}
+      onRefresh={() => {
+        loadTeachers('refresh').catch(() => undefined);
+      }}
+      refreshing={isRefreshing}
+      subtitle={isLoading ? 'Memuat data...' : `${teachers.length} guru aktif`}
+      title="Daftar Guru">
+      {!isAdmin && teachers.length > 0 ? (
+        <InlineNotice message="Hanya Admin Sekolah yang dapat menambah guru." />
+      ) : null}
 
-          <Pressable
-            accessibilityLabel="Tambah guru"
-            accessibilityRole="button"
-            onPress={handleOpenDialog}
-            style={({ pressed }) => [
-              styles.headerActionButton,
-              pressed && styles.headerActionButtonPressed,
-            ]}>
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M12 5v14M5 12h14"
-                stroke={colors.brand.primary500}
-                strokeWidth={2}
-                strokeLinecap="round"
-              />
-            </Svg>
-          </Pressable>
-        </View>
-      </View>
-
-      <Screen contentContainerStyle={styles.content} stickyHeaderIndices={[0]}>
-        <View style={styles.stickySearchWrap}>
-          <View style={styles.searchCard}>
-            <TextInput
-              autoCapitalize="words"
-              onChangeText={setQuery}
-              placeholder="Cari nama guru atau kelas"
-              placeholderTextColor={colors.text.muted}
-              style={styles.searchInput}
-              value={query}
-            />
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M15.5 15.5L20 20M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13z"
-                stroke={colors.text.secondary}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-              />
-            </Svg>
-          </View>
-        </View>
-
+      {isLoading && teachers.length === 0 ? (
+        <StateView kind="loading" title="Memuat daftar guru..." />
+      ) : loadError && teachers.length === 0 ? (
+        <StateView
+          actionLabel="Coba lagi"
+          description={loadError}
+          kind="error"
+          onAction={() => {
+            loadTeachers('initial').catch(() => undefined);
+          }}
+          title="Daftar guru gagal dimuat"
+        />
+      ) : teachers.length === 0 ? (
+        <StateView
+          actionLabel={isAdmin ? 'Tambah guru' : undefined}
+          description={
+            isAdmin
+              ? 'Buat akun guru agar dapat login dan mencatat pengukuran. Guru juga bisa bergabung memakai kode sekolah.'
+              : 'Belum ada guru lain yang terdaftar di sekolah ini.'
+          }
+          icon="teacher"
+          kind="empty"
+          onAction={isAdmin ? openDialog : undefined}
+          title="Belum ada guru"
+        />
+      ) : filteredTeachers.length === 0 ? (
+        <StateView
+          actionLabel="Reset pencarian"
+          kind="empty"
+          onAction={() => setQuery('')}
+          title="Guru tidak ditemukan"
+        />
+      ) : (
         <View style={styles.list}>
-          {isLoadingTeachers ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Memuat guru...</Text>
-            </View>
-          ) : null}
-
-          {loadTeachersError ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Daftar guru belum bisa dimuat</Text>
-              <Text style={styles.emptyDescription}>{loadTeachersError}</Text>
-            </View>
-          ) : null}
-
           {filteredTeachers.map(item => (
-            <Pressable
+            <ListItem
               key={item.id}
-              onPress={() => onOpenTeacherDetail(item.id)}
-              style={({ pressed }) => [styles.teacherCard, pressed && styles.teacherCardPressed]}>
-              <View style={styles.teacherTopRow}>
-                <View style={styles.teacherBadge}>
-                  <Text style={styles.teacherBadgeLabel}>{item.code}</Text>
-                </View>
-                <View style={styles.teacherCopy}>
-                  <Text style={styles.teacherName}>{item.name}</Text>
-                  <Text style={styles.teacherRole}>{item.homeroom}</Text>
-                </View>
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M9 6l6 6-6 6"
-                    stroke={colors.brand.primary500}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-              </View>
-            </Pressable>
+              leading={<Avatar name={item.name} />}
+              onPress={() => openDetail(item)}
+              subtitle={item.email !== '-' ? item.email : 'Email belum tersedia'}
+              title={item.name}
+            />
           ))}
-
-          {filteredTeachers.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Guru tidak ditemukan</Text>
-              <Text style={styles.emptyDescription}>
-                Coba gunakan kata kunci lain seperti nama guru atau nama kelas.
-              </Text>
-            </View>
-          ) : null}
         </View>
-      </Screen>
+      )}
 
-      <Modal
-        animationType="fade"
-        transparent
-        visible={isAddTeacherDialogVisible}
-        onRequestClose={handleCloseDialog}>
-        <View style={styles.dialogBackdrop}>
-          <Pressable style={styles.dialogBackdropPressable} onPress={handleCloseDialog} />
-          <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Tambah Guru</Text>
-            <Text style={styles.dialogDescription}>
-              Tambahkan akun guru baru untuk mulai mengelola kelas dan pengukuran.
-            </Text>
-
-            <View style={styles.dialogFieldGroup}>
-              <Text style={styles.dialogFieldLabel}>Email</Text>
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                onChangeText={setEmail}
-                placeholder="Contoh: guru@sekolah.id"
-                placeholderTextColor={colors.text.muted}
-                style={styles.dialogInput}
-                value={email}
-              />
-            </View>
-
-            <View style={styles.dialogFieldGroup}>
-              <Text style={styles.dialogFieldLabel}>Nama lengkap</Text>
-              <TextInput
-                autoCapitalize="words"
-                onChangeText={setFullName}
-                placeholder="Masukkan nama lengkap guru"
-                placeholderTextColor={colors.text.muted}
-                style={styles.dialogInput}
-                value={fullName}
-              />
-            </View>
-
-            <View style={styles.dialogFieldGroup}>
-              <Text style={styles.dialogFieldLabel}>Password</Text>
-              <View style={styles.passwordInputWrap}>
-                <TextInput
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setPassword}
-                  placeholder="Masukkan password"
-                  placeholderTextColor={colors.text.muted}
-                  secureTextEntry={!isPasswordVisible}
-                  style={styles.passwordInput}
-                  value={password}
-                />
+      <FormDialog
+        description={
+          createdCredentials
+            ? undefined
+            : 'Buat akun guru baru. Bagikan email dan password kepada guru agar dapat login.'
+        }
+        error={saveError}
+        footer={
+          createdCredentials ? (
+            <ActionButton
+              label="Selesai"
+              onPress={() => setIsDialogVisible(false)}
+              style={styles.fullWidth}
+            />
+          ) : undefined
+        }
+        onClose={() => setIsDialogVisible(false)}
+        onSubmit={handleSave}
+        submitDisabled={!isFormValid}
+        submitLabel="Tambah Guru"
+        submitting={isSaving}
+        title={createdCredentials ? 'Guru berhasil ditambahkan' : 'Tambah Guru'}
+        visible={isDialogVisible}>
+        {createdCredentials ? (
+          <View style={styles.credentials}>
+            <InlineNotice
+              message="Simpan informasi login berikut. Password tidak dapat dilihat lagi setelah dialog ditutup."
+              tone="success"
+            />
+            <CredentialRow label="Nama" value={createdCredentials.name} />
+            <CredentialRow label="Email" value={createdCredentials.email} />
+            <CredentialRow label="Password" value={createdCredentials.password} />
+          </View>
+        ) : (
+          <>
+            <InputField
+              autoCapitalize="words"
+              label="Nama lengkap"
+              onChangeText={setFullName}
+              placeholder="Contoh: Rina Kartika, S.Pd."
+              required
+              value={fullName}
+            />
+            <InputField
+              autoCapitalize="none"
+              autoCorrect={false}
+              error={emailError}
+              keyboardType="email-address"
+              label="Email"
+              onChangeText={setEmail}
+              placeholder="guru@sekolah.id"
+              required
+              value={email}
+            />
+            <InputField
+              autoCapitalize="none"
+              autoCorrect={false}
+              error={passwordError}
+              hint="Min. 8 karakter"
+              label="Password awal"
+              onChangeText={setPassword}
+              required
+              secureTextEntry={!isPasswordVisible}
+              trailing={
                 <Pressable
                   accessibilityLabel={isPasswordVisible ? 'Sembunyikan password' : 'Tampilkan password'}
                   accessibilityRole="button"
+                  hitSlop={8}
                   onPress={() => setIsPasswordVisible(previous => !previous)}
-                  style={({ pressed }) => [
-                    styles.passwordToggleButton,
-                    pressed && styles.passwordToggleButtonPressed,
-                  ]}>
-                  <Text style={styles.passwordToggleLabel}>
-                    {isPasswordVisible ? 'Hide' : 'Show'}
+                  style={styles.inlineAction}>
+                  <Text style={styles.inlineActionLabel}>
+                    {isPasswordVisible ? 'Sembunyikan' : 'Tampilkan'}
                   </Text>
                 </Pressable>
-              </View>
-              <Pressable
-                onPress={() => setPassword(generatePassword())}
-                style={({ pressed }) => [
-                  styles.generatePasswordButton,
-                  pressed && styles.generatePasswordButtonPressed,
-                ]}>
-                <Text style={styles.generatePasswordButtonLabel}>Generate Password</Text>
-              </Pressable>
-            </View>
+              }
+              value={password}
+            />
+            <ActionButton
+              compact
+              icon="refresh"
+              label="Buat password acak"
+              onPress={() => {
+                setPassword(generatePassword());
+                setIsPasswordVisible(true);
+              }}
+              variant="ghost"
+            />
+          </>
+        )}
+      </FormDialog>
+    </PageLayout>
+  );
+}
 
-            {saveTeacherError ? (
-              <Text style={styles.dialogErrorText}>{saveTeacherError}</Text>
-            ) : null}
-
-            <View style={styles.dialogActions}>
-              <Pressable
-                onPress={handleCloseDialog}
-                style={({ pressed }) => [
-                  styles.dialogSecondaryButton,
-                  pressed && styles.dialogSecondaryButtonPressed,
-                ]}>
-                <Text style={styles.dialogSecondaryButtonLabel}>Batal</Text>
-              </Pressable>
-              <PrimaryButton
-                disabled={isSaveDisabled || isSavingTeacher}
-                label={isSavingTeacher ? 'Menyimpan...' : 'Simpan'}
-                onPress={handleSaveTeacher}
-                style={styles.dialogPrimaryButton}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
+function CredentialRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.credentialRow}>
+      <Text style={styles.credentialLabel}>{label}</Text>
+      <Text selectable style={styles.credentialValue}>
+        {value}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.surface.app,
-  },
-  pageHeader: {
-    paddingHorizontal: spacing[20],
-    paddingBottom: spacing[12],
-    backgroundColor: colors.surface.app,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerIdentity: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[8],
-  },
-  pageTitle: {
-    ...typography.headingLg,
-    color: colors.text.primary,
-  },
-  headerActionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerActionButtonPressed: {
-    borderColor: colors.brand.primary500,
-    backgroundColor: colors.brand.primary100,
-  },
-  content: {
-    paddingHorizontal: spacing[16],
-    paddingTop: spacing[16],
-    gap: spacing[16],
-  },
-  stickySearchWrap: {
-    marginHorizontal: -spacing[16],
-    backgroundColor: colors.surface.app,
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[8],
-  },
-  searchCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[16],
-    minHeight: 56,
-  },
-  searchInput: {
-    flex: 1,
-    color: colors.text.primary,
-    ...typography.bodyMd,
-  },
   list: {
-    gap: spacing[12],
+    gap: spacing[10],
   },
-  teacherCard: {
-    backgroundColor: colors.surface.primary,
-    borderRadius: radius.lg,
+  fullWidth: {
+    flex: 1,
+  },
+  credentials: {
+    gap: spacing[10],
+  },
+  credentialRow: {
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border.subtle,
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[16],
-    gap: spacing[12],
-  },
-  teacherCardPressed: {
-    borderColor: colors.brand.primary500,
     backgroundColor: colors.surface.secondary,
-  },
-  teacherTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[12],
-  },
-  teacherBadge: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brand.primary100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  teacherBadgeLabel: {
-    ...typography.bodySmStrong,
-    color: colors.brand.primary600,
-  },
-  teacherCopy: {
-    flex: 1,
+    paddingHorizontal: spacing[14],
+    paddingVertical: spacing[10],
     gap: spacing[2],
   },
-  teacherName: {
-    ...typography.bodyMdStrong,
+  credentialLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+  },
+  credentialValue: {
+    ...typography.labelLg,
     color: colors.text.primary,
   },
-  teacherRole: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  emptyState: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.border.subtle,
-    padding: spacing[16],
-    gap: spacing[4],
-    backgroundColor: colors.surface.primary,
-  },
-  emptyTitle: {
-    ...typography.bodyMdStrong,
-    color: colors.text.primary,
-  },
-  emptyDescription: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  dialogBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(17, 41, 55, 0.36)',
+  inlineAction: {
+    minHeight: 36,
     justifyContent: 'center',
-    paddingHorizontal: spacing[20],
+    paddingHorizontal: spacing[4],
   },
-  dialogBackdropPressable: {
-    ...StyleSheet.absoluteFill,
-  },
-  dialogCard: {
-    backgroundColor: colors.surface.primary,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    padding: spacing[20],
-    gap: spacing[16],
-    shadowColor: '#1F2D3D',
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 4,
-  },
-  dialogTitle: {
-    ...typography.headingLg,
-    color: colors.text.primary,
-  },
-  dialogDescription: {
-    ...typography.bodySm,
-    color: colors.text.secondary,
-  },
-  dialogErrorText: {
-    ...typography.bodySm,
-    color: colors.status.device.error,
-  },
-  dialogFieldGroup: {
-    gap: spacing[8],
-  },
-  dialogFieldLabel: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
-  dialogInput: {
-    minHeight: 48,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.secondary,
-    paddingHorizontal: spacing[16],
-    color: colors.text.primary,
-    ...typography.bodyMd,
-  },
-  passwordInputWrap: {
-    minHeight: 48,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.secondary,
-    paddingLeft: spacing[16],
-    paddingRight: spacing[8],
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[8],
-  },
-  passwordInput: {
-    flex: 1,
-    minHeight: 48,
-    color: colors.text.primary,
-    ...typography.bodyMd,
-  },
-  passwordToggleButton: {
-    minHeight: 32,
-    minWidth: 52,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[8],
-  },
-  passwordToggleButtonPressed: {
-    backgroundColor: colors.surface.secondary,
-    borderColor: colors.brand.primary500,
-  },
-  passwordToggleLabel: {
+  inlineActionLabel: {
     ...typography.labelMd,
     color: colors.brand.primary600,
-  },
-  generatePasswordButton: {
-    minHeight: 40,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.brand.primary300,
-    backgroundColor: colors.brand.primary100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing[12],
-  },
-  generatePasswordButtonPressed: {
-    opacity: 0.8,
-  },
-  generatePasswordButtonLabel: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
-  },
-  dialogActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing[12],
-    marginTop: spacing[4],
-  },
-  dialogSecondaryButton: {
-    minHeight: 44,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    backgroundColor: colors.surface.primary,
-    paddingHorizontal: spacing[16],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dialogSecondaryButtonPressed: {
-    backgroundColor: colors.surface.secondary,
-  },
-  dialogSecondaryButtonLabel: {
-    ...typography.labelMd,
-    color: colors.text.primary,
-  },
-  dialogPrimaryButton: {
-    minWidth: 120,
   },
 });
