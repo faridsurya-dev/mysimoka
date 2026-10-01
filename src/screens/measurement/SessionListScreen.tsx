@@ -15,6 +15,7 @@ import {
   StatusPill,
 } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
+import { DeviceStatusCard } from './DeviceStatusCard';
 import type {
   ImmunizationSessionListItem,
   MeasurementSessionListItem,
@@ -205,6 +206,8 @@ export function SessionListScreen({
           value={mode}
           onChange={onSwitchMode}
         />
+
+        {mode === 'measurement' ? <DeviceStatusCard /> : null}
 
         <PrimaryButton
           label={mode === 'measurement' ? 'Buat Sesi Pengukuran' : 'Buat Sesi Imunisasi'}

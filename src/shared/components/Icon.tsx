@@ -25,7 +25,9 @@ export type IconName =
   | 'calendar'
   | 'search'
   | 'switch'
-  | 'shield';
+  | 'shield'
+  | 'bluetooth'
+  | 'device';
 
 type IconProps = {
   name: IconName;
@@ -177,6 +179,16 @@ export function Icon({
           <>
             <Path d="M12 3l7.5 3v5.5c0 4.5-3.2 8.3-7.5 9.5-4.3-1.2-7.5-5-7.5-9.5V6L12 3z" {...common} />
             <Path d="M9 12l2 2 4-4" {...common} />
+          </>
+        );
+      case 'bluetooth':
+        return <Path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9" {...common} />;
+      case 'device':
+        return (
+          <>
+            <Rect x={4} y={4} width={16} height={16} rx={3} {...common} />
+            <Path d="M8.5 9.5a5 5 0 0 1 7 0M12 9.5l1.5-1.8" {...common} />
+            <Path d="M8 16h8" {...common} />
           </>
         );
       default:

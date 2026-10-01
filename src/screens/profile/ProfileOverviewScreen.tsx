@@ -26,6 +26,9 @@ import {
   TextField,
 } from '../../shared/components';
 import { colors, layout, radius, shadows, spacing, typography } from '../../theme';
+import { describeDeviceStatus } from '../../features/device/deviceStatus';
+import { useDeviceSession } from '../../features/device/useDeviceSession';
+import { DeviceManagerSheet } from '../measurement/DeviceManagerSheet';
 
 type ProfileOverviewScreenProps = {
   onEditProfile: () => void;
@@ -106,6 +109,9 @@ export function ProfileOverviewScreen({
   onDeleteAcademicYear,
 }: ProfileOverviewScreenProps) {
   const shouldShowWhatsApp = false;
+  const deviceSession = useDeviceSession();
+  const [isDeviceSheetOpen, setIsDeviceSheetOpen] = useState(false);
+  const canUseBle = Platform.OS === 'android' || Platform.OS === 'ios';
   const [persistentSchoolError, setPersistentSchoolError] = useState<string | null>(null);
   const [isAcademicYearModalVisible, setIsAcademicYearModalVisible] = useState(false);
   const [newAcademicYearName, setNewAcademicYearName] = useState('');
@@ -273,6 +279,33 @@ export function ProfileOverviewScreen({
             ) : null}
           </View>
         </InfoCard>
+
+        {/* Optional measuring devices (BLE) */}
+        <InfoCard>
+          <SectionHeader title="Perangkat" variant="overline" />
+          <ListRow
+            accessibilityLabel="Perangkat (timbangan & alat ukur)"
+            icon="bluetooth"
+            label="Perangkat (timbangan & alat ukur)"
+            onPress={() => setIsDeviceSheetOpen(true)}
+            trailing={
+              <View style={styles.deviceTrailing}>
+                <StatusPill
+                  label={deviceSession.connectedDeviceId ? 'Terhubung' : 'Opsional'}
+                  size="sm"
+                  tone={deviceSession.connectedDeviceId ? 'success' : 'neutral'}
+                />
+                <Icon color={colors.text.muted} name="chevron-right" size={20} />
+              </View>
+            }
+            value={
+              canUseBle
+                ? describeDeviceStatus(deviceSession)
+                : 'Hanya di aplikasi Android/iOS. Di web, isi data secara manual.'
+            }
+          />
+        </InfoCard>
+        <DeviceManagerSheet visible={isDeviceSheetOpen} onClose={() => setIsDeviceSheetOpen(false)} />
 
         {/* School info */}
         <InfoCard>
@@ -600,6 +633,11 @@ export function ProfileOverviewScreen({
 }
 
 const styles = StyleSheet.create({
+  deviceTrailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[4],
+  },
   container: {
     flex: 1,
     backgroundColor: colors.surface.app,

@@ -3,16 +3,21 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { PrimaryButton, Screen } from '../../shared/components';
-import { S400_BIND_KEY } from '../../services/environment';
 import {
+  SMARTGROWTH_COMMANDS,
   connectDevice,
   disconnectDevice,
+  getSmartGrowthDeviceInfo,
+  isLikelyS400Device,
+  isSmartGrowthName,
   scanDevices,
+  sendSmartGrowthControl,
   subscribeWeightScaleDebugLog,
   useDeviceManager,
   useDeviceSession,
 } from '../../features/device';
 import { colors, radius, spacing, typography } from '../../theme';
+import { S400BindKeyPanel } from './S400BindKeyPanel';
 
 type DeviceManagerScreenProps = {
   onBack?: () => void;
@@ -49,6 +54,7 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     busyDeviceId,
     busyAction,
     message: scanMessage,
+    deviceKind,
   } = useDeviceManager();
   const formattedLatestWeight =
     deviceSession.latestWeightKg !== null
@@ -60,6 +66,16 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   const latestWeightDisplay = formattedLatestWeightAt
     ? `${formattedLatestWeight} • ${formattedLatestWeightAt}`
     : formattedLatestWeight;
+  const latestHeightDisplay =
+    deviceSession.latestHeightCm !== null
+      ? `${deviceSession.latestHeightCm.toFixed(1)} cm${
+          deviceSession.latestHeightAt
+            ? ` • ${formatTimestamp(deviceSession.latestHeightAt) ?? ''}`
+            : ''
+        }`
+      : null;
+  const smartGrowthInfo =
+    deviceKind === 'smartgrowth' ? getSmartGrowthDeviceInfo(deviceSession.connectedDeviceId ?? '') : null;
   const [measurementLogs, setMeasurementLogs] = useState<string[]>([]);
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
 
@@ -114,15 +130,11 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
 
       <Screen contentContainerStyle={[styles.content, { paddingTop: headerHeight + spacing[16] }]}>
         <View style={styles.intro}>
-          <Text style={styles.title}>Timbangan Bluetooth (opsional)</Text>
+          <Text style={styles.title}>Timbangan & alat ukur Bluetooth (opsional)</Text>
           <Text style={styles.subtitle}>
             Alat tidak wajib. Tanpa alat, tinggi dan berat tetap bisa diisi manual di
-            sesi pengukuran. Satu HP hanya dapat terhubung ke satu timbangan.
-          </Text>
-          <Text style={styles.scanMessage}>
-            {S400_BIND_KEY
-              ? 'S400 bind key aktif dari ENV.'
-              : 'S400 bind key ENV belum terisi (`MYSIMOKA_S400_BLE_KEY`).'}
+            sesi pengukuran. Satu HP hanya dapat terhubung ke satu alat. Didukung:
+            SmartGrowth (tinggi + berat), timbangan BLE standar, dan Xiaomi S400.
           </Text>
           <PrimaryButton
             label={isScanning ? 'Memindai perangkat...' : 'Scan Perangkat'}
@@ -214,10 +226,64 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                 </View>
 
                 {device.isConnected && device.id === deviceSession.connectedDeviceId ? (
-                  <View style={styles.latestWeightRow}>
-                    <Text style={styles.latestWeightLabel}>Berat terakhir</Text>
-                    <Text style={styles.latestWeightValue}>{latestWeightDisplay}</Text>
-                  </View>
+                  <>
+                    <View style={styles.latestWeightRow}>
+                      <Text style={styles.latestWeightLabel}>Berat terakhir</Text>
+                      <Text style={styles.latestWeightValue}>{latestWeightDisplay}</Text>
+                    </View>
+                    {latestHeightDisplay ? (
+                      <View style={styles.latestWeightRow}>
+                        <Text style={styles.latestWeightLabel}>Tinggi terakhir</Text>
+                        <Text style={styles.latestWeightValue}>{latestHeightDisplay}</Text>
+                      </View>
+                    ) : null}
+                    {deviceSession.latestReadingAt ? (
+                      <Text style={styles.latestWeightLabel}>
+                        {deviceSession.latestReadingStable
+                          ? 'Data stabil (siap dipakai).'
+                          : 'Sedang mengukur, tunggu stabil…'}
+                        {deviceSession.latestBatteryPct !== null
+                          ? ` Baterai ${deviceSession.latestBatteryPct}%.`
+                          : ''}
+                      </Text>
+                    ) : null}
+                    {deviceKind === 'smartgrowth' ? (
+                      <View style={styles.controlRow}>
+                        {smartGrowthInfo ? (
+                          <Text style={styles.latestWeightLabel}>
+                            Firmware {smartGrowthInfo.firmwareVersion}
+                            {smartGrowthInfo.serial ? ` • SN ${smartGrowthInfo.serial}` : ''}
+                          </Text>
+                        ) : null}
+                        <View style={styles.controlButtons}>
+                          <PrimaryButton
+                            label="Tare (nol-kan)"
+                            onPress={() => {
+                              sendSmartGrowthControl(SMARTGROWTH_COMMANDS.tare).catch(
+                                () => undefined,
+                              );
+                            }}
+                            size="sm"
+                            variant="outline"
+                          />
+                          <PrimaryButton
+                            label="Mulai ukur"
+                            onPress={() => {
+                              sendSmartGrowthControl(SMARTGROWTH_COMMANDS.startMeasurement).catch(
+                                () => undefined,
+                              );
+                            }}
+                            size="sm"
+                            variant="outline"
+                          />
+                        </View>
+                      </View>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {isLikelyS400Device(device.name) && !isSmartGrowthName(device.name) ? (
+                  <S400BindKeyPanel deviceId={device.id} />
                 ) : null}
               </View>
             ))
@@ -372,6 +438,14 @@ const styles = StyleSheet.create({
   latestWeightValue: {
     ...typography.labelMd,
     color: colors.text.primary,
+  },
+  controlRow: {
+    gap: spacing[8],
+  },
+  controlButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[8],
   },
   connectAction: {
     minHeight: 36,

@@ -29,6 +29,8 @@ import {
 } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { StudentMeasurementItem } from '../../types';
+import { DeviceManagerSheet } from './DeviceManagerSheet';
+import { DeviceStatusCard } from './DeviceStatusCard';
 
 type StudentMeasurementScreenProps = {
   sessionId?: string | null;
@@ -36,7 +38,6 @@ type StudentMeasurementScreenProps = {
   sessionDate?: string;
   className?: string;
   onBack: () => void;
-  onOpenDeviceManager?: () => void;
   onOpenFaceIdentification?: () => void;
 };
 
@@ -48,7 +49,7 @@ const WEIGHT_RANGE = { min: 2, max: 200 };
 
 const MODE_OPTIONS = [
   { value: 'manual' as const, label: 'Manual' },
-  { value: 'auto' as const, label: 'Timbangan (opsional)' },
+  { value: 'auto' as const, label: 'Alat ukur (opsional)' },
 ];
 
 // Accepts "25,5" or "25.5"; keeps a single decimal separator and one decimal digit.
@@ -72,6 +73,10 @@ function parseMeasurementNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function formatReading(value: number | null) {
+  return value === null ? null : value.toFixed(1).replace(/\.0$/, '');
+}
+
 function formatSessionDate(value?: string) {
   const date = value ? new Date(value) : new Date();
   if (Number.isNaN(date.getTime())) {
@@ -86,7 +91,6 @@ export function StudentMeasurementScreen({
   sessionDate,
   className = 'Kelas',
   onBack,
-  onOpenDeviceManager,
   onOpenFaceIdentification,
 }: StudentMeasurementScreenProps) {
   const deviceSession = useDeviceSession();
@@ -102,6 +106,9 @@ export function StudentMeasurementScreen({
   const [isSavingMeasurement, setIsSavingMeasurement] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
+  const [isDeviceSheetOpen, setIsDeviceSheetOpen] = useState(false);
+  // Reading already saved for a previous student: never pre-fill it again.
+  const [consumedReadingAt, setConsumedReadingAt] = useState<string | null>(null);
 
   const selectedStudentIndex = selectedStudentId
     ? students.findIndex(student => student.id === selectedStudentId)
@@ -111,10 +118,24 @@ export function StudentMeasurementScreen({
   const progressValue = students.length > 0 ? measuredStudentsCount / students.length : 0;
   const progressWidth = `${Math.round(progressValue * 100)}%` as `${number}%`;
   const isScaleConnected = deviceSession.connectedDeviceId !== null;
-  const latestWeightDisplay =
-    deviceSession.latestWeightKg === null
-      ? null
-      : deviceSession.latestWeightKg.toFixed(1).replace(/\.0$/, '');
+  // Auto-fill only uses final (stable) readings; the operator can always type over them.
+  const hasFreshStableReading =
+    isScaleConnected &&
+    deviceSession.latestReadingStable &&
+    deviceSession.latestReadingAt !== null &&
+    deviceSession.latestReadingAt !== consumedReadingAt;
+  const latestWeightDisplay = hasFreshStableReading
+    ? formatReading(deviceSession.latestWeightKg)
+    : null;
+  const latestHeightDisplay = hasFreshStableReading
+    ? formatReading(deviceSession.latestHeightCm)
+    : null;
+  const liveReadingText = [
+    deviceSession.latestWeightKg !== null ? `${formatReading(deviceSession.latestWeightKg)} kg` : null,
+    deviceSession.latestHeightCm !== null ? `${formatReading(deviceSession.latestHeightCm)} cm` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const filteredStudents = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
@@ -168,6 +189,13 @@ export function StudentMeasurementScreen({
   }, [latestWeightDisplay, measurementMode]);
 
   useEffect(() => {
+    if (measurementMode !== 'auto' || latestHeightDisplay === null) {
+      return;
+    }
+    setHeightValue(latestHeightDisplay);
+  }, [latestHeightDisplay, measurementMode]);
+
+  useEffect(() => {
     if (!lastSavedName) {
       return;
     }
@@ -180,14 +208,18 @@ export function StudentMeasurementScreen({
       const student = students.find(item => item.id === studentId);
       setSelectedStudentId(studentId);
       setSaveError(null);
-      setHeightValue(student?.heightCm ?? '');
+      setHeightValue(
+        measurementMode === 'auto' && latestHeightDisplay !== null
+          ? latestHeightDisplay
+          : student?.heightCm ?? '',
+      );
       setWeightValue(
         measurementMode === 'auto' && latestWeightDisplay !== null
           ? latestWeightDisplay
           : student?.weightKg ?? '',
       );
     },
-    [latestWeightDisplay, measurementMode, students],
+    [latestHeightDisplay, latestWeightDisplay, measurementMode, students],
   );
 
   const startMeasurement = () => {
@@ -259,11 +291,22 @@ export function StudentMeasurementScreen({
         deviceName: isAuto ? deviceSession.connectedDeviceName : null,
         devicePayload: isAuto
           ? {
+              source: deviceSession.latestReadingSource,
               latestWeightKg: deviceSession.latestWeightKg,
               latestWeightAt: deviceSession.latestWeightAt,
+              latestHeightCm: deviceSession.latestHeightCm,
+              latestHeightAt: deviceSession.latestHeightAt,
+              stable: deviceSession.latestReadingStable,
+              readingAt: deviceSession.latestReadingAt,
+              sequence: deviceSession.latestSequence,
+              batteryPct: deviceSession.latestBatteryPct,
+              rawHex: deviceSession.latestRawHex,
             }
           : null,
       });
+      if (isAuto && deviceSession.latestReadingAt) {
+        setConsumedReadingAt(deviceSession.latestReadingAt);
+      }
 
       const updatedStudents = students.map(student =>
         student.id === savedStudentId
@@ -290,13 +333,11 @@ export function StudentMeasurementScreen({
       ];
       const nextPending = ordered.find(student => !student.checked);
       if (nextPending) {
+        // The device reading belonged to the student just saved, so the next
+        // student starts from their own stored values until a new reading arrives.
         setSelectedStudentId(nextPending.id);
         setHeightValue(nextPending.heightCm ?? '');
-        setWeightValue(
-          measurementMode === 'auto' && latestWeightDisplay !== null
-            ? latestWeightDisplay
-            : nextPending.weightKg ?? '',
-        );
+        setWeightValue(nextPending.weightKg ?? '');
       } else {
         closeMeasurementForm();
       }
@@ -380,6 +421,7 @@ export function StudentMeasurementScreen({
       </View>
 
       <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <DeviceStatusCard />
         {lastSavedName ? (
           <InlineAlert tone="success" message={`Data ${lastSavedName} tersimpan.`} />
         ) : null}
@@ -476,6 +518,8 @@ export function StudentMeasurementScreen({
           <Screen
             contentContainerStyle={styles.modalContent}
             keyboardShouldPersistTaps="handled">
+            {/* In auto mode the panel below already shows status + "Atur alat". */}
+            {measurementMode === 'manual' ? <DeviceStatusCard /> : null}
             <View style={styles.modalHero}>
               <Avatar name={selectedStudent?.name ?? ''} size={88} ring />
               <Text style={styles.modalStudentName}>{selectedStudent?.name}</Text>
@@ -495,6 +539,9 @@ export function StudentMeasurementScreen({
                     if (mode === 'auto' && latestWeightDisplay !== null) {
                       setWeightValue(latestWeightDisplay);
                     }
+                    if (mode === 'auto' && latestHeightDisplay !== null) {
+                      setHeightValue(latestHeightDisplay);
+                    }
                   }}
                 />
 
@@ -502,22 +549,26 @@ export function StudentMeasurementScreen({
                   <View style={styles.autoDevicePanel}>
                     <View style={styles.autoDeviceTextBlock}>
                       <Text style={styles.autoDeviceTitle}>
-                        {isScaleConnected ? 'Timbangan terhubung' : 'Timbangan belum terhubung'}
+                        {isScaleConnected
+                          ? `Terhubung: ${deviceSession.connectedDeviceName ?? 'alat ukur'}`
+                          : 'Alat ukur belum terhubung'}
                       </Text>
                       <Text style={styles.autoDeviceDescription}>
-                        {latestWeightDisplay
-                          ? `Berat terakhir ${latestWeightDisplay} kg`
-                          : 'Berat tetap bisa diketik manual tanpa alat.'}
+                        {!isScaleConnected
+                          ? 'Tinggi dan berat tetap bisa diketik manual tanpa alat.'
+                          : !liveReadingText
+                            ? 'Menunggu data dari alat. Angka tetap bisa diketik manual.'
+                            : deviceSession.latestReadingStable
+                              ? `Data stabil ${liveReadingText}, terisi otomatis dan tetap bisa diubah.`
+                              : `Mengukur ${liveReadingText}, tunggu sampai stabil.`}
                       </Text>
                     </View>
-                    {onOpenDeviceManager ? (
-                      <PrimaryButton
-                        label="Atur alat"
-                        onPress={onOpenDeviceManager}
-                        size="sm"
-                        variant="outline"
-                      />
-                    ) : null}
+                    <PrimaryButton
+                      label="Atur alat"
+                      onPress={() => setIsDeviceSheetOpen(true)}
+                      size="sm"
+                      variant="outline"
+                    />
                   </View>
                 ) : null}
               </View>
@@ -570,6 +621,11 @@ export function StudentMeasurementScreen({
               />
             </View>
           </Screen>
+          {/* Inside the measurement modal so it stacks on top of it (iOS). */}
+          <DeviceManagerSheet
+            visible={isDeviceSheetOpen}
+            onClose={() => setIsDeviceSheetOpen(false)}
+          />
         </View>
       </Modal>
     </View>

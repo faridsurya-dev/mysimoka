@@ -6,14 +6,14 @@ import { useDeviceSession } from '../../features/device/useDeviceSession';
 import { DEFAULT_BATCH_ACTIVE_STUDENT } from '../../features/measurement';
 import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
+import { DeviceManagerSheet } from './DeviceManagerSheet';
+import { DeviceStatusCard } from './DeviceStatusCard';
 
 type BatchMeasurementScreenProps = {
   activeStudentName?: string;
   onBack: () => void;
-  onOpenDeviceManager: () => void;
 };
 
-const keepDigitsOnly = (value: string) => value.replace(/\D+/g, '');
 const keepDecimalNumber = (value: string) => {
   const sanitized = value.replace(/[^0-9.]/g, '');
   const dotIndex = sanitized.indexOf('.');
@@ -29,22 +29,23 @@ const keepDecimalNumber = (value: string) => {
 export function BatchMeasurementScreen({
   activeStudentName,
   onBack,
-  onOpenDeviceManager,
 }: BatchMeasurementScreenProps) {
   const insets = useSafeAreaInsets();
   const [heightValue, setHeightValue] = useState('');
   const [weightValue, setWeightValue] = useState('');
   const deviceSession = useDeviceSession();
+  const [isDeviceSheetOpen, setIsDeviceSheetOpen] = useState(false);
 
   const activeStudent = {
     name: activeStudentName ?? DEFAULT_BATCH_ACTIVE_STUDENT.name,
     photoUri: DEFAULT_BATCH_ACTIVE_STUDENT.photoUri,
   };
 
+  const isDeviceConnected = deviceSession.connectedDeviceId !== null;
   const deviceConnection = {
-    // No BLE height device is integrated yet; height stays a manual step.
-    heightConnected: false,
-    weightConnected: deviceSession.connectedDeviceId !== null,
+    // Height comes only from a SmartGrowth station; otherwise it is typed manually.
+    heightConnected: isDeviceConnected && deviceSession.latestHeightCm !== null,
+    weightConnected: isDeviceConnected,
   };
 
   const allDevicesConnected =
@@ -56,17 +57,26 @@ export function BatchMeasurementScreen({
       return 'Semua alat terhubung.';
     }
 
-    return 'Pengukuran otomatis butuh alat dan masih tahap uji coba. Tutup layar ini untuk mengisi data secara manual.';
+    return 'Alat ukur opsional dan masih tahap uji coba. Angka tetap bisa diketik manual.';
   }, [allDevicesConnected]);
 
+  // Auto-fill from the device only on stable (final) readings; typing still works.
+  const stableWeightKg = deviceSession.latestReadingStable ? deviceSession.latestWeightKg : null;
+  const stableHeightCm = deviceSession.latestReadingStable ? deviceSession.latestHeightCm : null;
+
   useEffect(() => {
-    if (!deviceSession.latestWeightKg) {
+    if (!stableWeightKg) {
       return;
     }
+    setWeightValue(stableWeightKg.toFixed(1).replace(/\.0$/, ''));
+  }, [stableWeightKg]);
 
-    const formatted = deviceSession.latestWeightKg.toFixed(1).replace(/\.0$/, '');
-    setWeightValue(formatted);
-  }, [deviceSession.latestWeightKg]);
+  useEffect(() => {
+    if (!stableHeightCm) {
+      return;
+    }
+    setHeightValue(stableHeightCm.toFixed(1).replace(/\.0$/, ''));
+  }, [stableHeightCm]);
 
   return (
     <View style={styles.container}>
@@ -129,11 +139,12 @@ export function BatchMeasurementScreen({
       </View>
 
       <Screen contentContainerStyle={styles.content} style={styles.contentScroll}>
+        <DeviceStatusCard tone="inverse" />
         <View style={styles.connectionCard}>
           <Text style={styles.connectionTitle}>Indikator koneksi alat</Text>
           <View style={styles.connectionList}>
             <View style={styles.connectionRow}>
-              <Text style={styles.connectionName}>Microtoise BLE #01</Text>
+              <Text style={styles.connectionName}>Tinggi (SmartGrowth)</Text>
               <View
                 style={[
                   styles.connectionBadge,
@@ -147,7 +158,9 @@ export function BatchMeasurementScreen({
               </View>
             </View>
             <View style={styles.connectionRow}>
-              <Text style={styles.connectionName}>Timbangan BLE #02</Text>
+              <Text style={styles.connectionName}>
+                Berat{deviceSession.connectedDeviceName ? ` (${deviceSession.connectedDeviceName})` : ''}
+              </Text>
               <View
                 style={[
                   styles.connectionBadge,
@@ -164,7 +177,7 @@ export function BatchMeasurementScreen({
           <Text style={styles.connectionHint}>{connectionMessage}</Text>
           <Pressable
             accessibilityRole="button"
-            onPress={onOpenDeviceManager}
+            onPress={() => setIsDeviceSheetOpen(true)}
             style={styles.deviceManagerButton}>
             <Text style={styles.deviceManagerButtonLabel}>Buka Perangkat</Text>
           </Pressable>
@@ -174,13 +187,12 @@ export function BatchMeasurementScreen({
           <View style={styles.fieldColumn}>
             <Text style={styles.fieldLabel}>Tinggi badan</Text>
             <TextInput
-              editable={allDevicesConnected}
-              inputMode="numeric"
-              keyboardType="number-pad"
-              onChangeText={value => setHeightValue(keepDigitsOnly(value))}
+              inputMode="decimal"
+              keyboardType="decimal-pad"
+              onChangeText={value => setHeightValue(keepDecimalNumber(value))}
               placeholder="00"
-              placeholderTextColor={allDevicesConnected ? colors.text.muted : colors.text.secondary}
-              style={[styles.fieldInput, !allDevicesConnected && styles.fieldInputDisabled]}
+              placeholderTextColor={colors.text.muted}
+              style={styles.fieldInput}
               value={heightValue}
             />
             <Text style={styles.fieldUnit}>cm</Text>
@@ -189,13 +201,12 @@ export function BatchMeasurementScreen({
           <View style={styles.fieldColumn}>
             <Text style={styles.fieldLabel}>Berat badan</Text>
             <TextInput
-              editable={allDevicesConnected}
               inputMode="decimal"
               keyboardType="decimal-pad"
               onChangeText={value => setWeightValue(keepDecimalNumber(value))}
               placeholder="00"
-              placeholderTextColor={allDevicesConnected ? colors.text.muted : colors.text.secondary}
-              style={[styles.fieldInput, !allDevicesConnected && styles.fieldInputDisabled]}
+              placeholderTextColor={colors.text.muted}
+              style={styles.fieldInput}
               value={weightValue}
             />
             <Text style={styles.fieldUnit}>kg</Text>
@@ -215,6 +226,7 @@ export function BatchMeasurementScreen({
           </Pressable>
         </View>
       </Screen>
+      <DeviceManagerSheet visible={isDeviceSheetOpen} onClose={() => setIsDeviceSheetOpen(false)} />
     </View>
   );
 }
@@ -382,11 +394,6 @@ const styles = StyleSheet.create({
     lineHeight: 52,
     fontWeight: '700',
     color: colors.text.primary,
-  },
-  fieldInputDisabled: {
-    backgroundColor: colors.surface.secondary,
-    borderColor: colors.border.strong,
-    color: colors.text.muted,
   },
   fieldUnit: {
     ...typography.labelLg,

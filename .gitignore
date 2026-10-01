@@ -73,3 +73,7 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Build-time env (MYSIMOKA_*), inlined by babel/inline-mysimoka-env.js
+.env
+.env.*

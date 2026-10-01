@@ -20,8 +20,7 @@ export type MeasurementRoute =
   | 'face-identification'
   | 'height-pose'
   | 'face-crop-preview'
-  | 'student-search'
-  | 'device-manager';
+  | 'student-search';
 
 export type FaceCropPreviewPayload = {
   imageUri: string;

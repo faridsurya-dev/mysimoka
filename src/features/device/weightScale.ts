@@ -1,6 +1,14 @@
 import type { Device, Subscription } from 'react-native-ble-plx';
+import { resolveS400BindKey } from './bindKeyStore';
+import { base64ToBytes, bytesToHex, readUInt16LE } from './bytes';
 import { setLatestWeightKg } from './deviceSession';
-import { decryptS400FromAdvertisement, isValidS400BindKey } from './s400Decryptor';
+import { decryptS400FromAdvertisement } from './s400Decryptor';
+import {
+  SMARTGROWTH_MEASUREMENT_CHAR_UUID,
+  SMARTGROWTH_SERVICE_UUID,
+  startSmartGrowthMonitor,
+  stopSmartGrowthMonitor,
+} from './smartGrowth';
 
 // Bluetooth SIG: Weight Scale service + Weight Measurement characteristic.
 const WEIGHT_SCALE_SERVICE_UUID = '0000181d-0000-1000-8000-00805f9b34fb';
@@ -17,7 +25,7 @@ const activeMonitors = new Map<string, Subscription[]>();
 export type WeightScaleDebugLog = {
   timestamp: string;
   deviceId: string;
-  source: 'WeightMeasurement' | 'BodyCompositionMeasurement';
+  source: 'WeightMeasurement' | 'BodyCompositionMeasurement' | 'SmartGrowthMeasurement';
   serviceUuid: string;
   characteristicUuid: string;
   rawValueBase64: string | null;
@@ -27,13 +35,11 @@ export type WeightScaleDebugLog = {
 
 const debugLogListeners = new Set<(entry: WeightScaleDebugLog) => void>();
 
-const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const S400_SERVICE_UUID_SHORT = '181b';
 const XIAOMI_SERVICE_UUID_SHORT = 'fe95';
 const lastAdvHexByDevice = new Map<string, string>();
 const lastManufacturerHexByDevice = new Map<string, string>();
 const macAddressByDevice = new Map<string, string>();
-let s400BindKey: string | null = null;
 
 function emitDebugLog(entry: WeightScaleDebugLog) {
   for (const listener of debugLogListeners) {
@@ -73,88 +79,12 @@ export function subscribeWeightScaleDebugLog(listener: (entry: WeightScaleDebugL
   };
 }
 
-export function setS400BindKey(value: string | null) {
-  const normalized = value?.trim() ?? null;
-  if (!normalized) {
-    s400BindKey = null;
-    return;
-  }
-
-  s400BindKey = isValidS400BindKey(normalized) ? normalized.toLowerCase() : null;
-}
-
 export function setDeviceMacAddress(deviceId: string, macAddress: string | null | undefined) {
   if (!macAddress) {
     return;
   }
 
   macAddressByDevice.set(deviceId, macAddress.toUpperCase());
-}
-
-function base64ToBytes(base64Value: string) {
-  // Hermes ships a native atob; fall back to the JS decoder elsewhere.
-  const nativeAtob = (globalThis as { atob?: (value: string) => string }).atob;
-  if (nativeAtob) {
-    try {
-      const binary = nativeAtob(base64Value);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return bytes;
-    } catch {
-      throw new Error('Invalid base64 payload.');
-    }
-  }
-
-  const normalized = base64Value.replace(/[^A-Za-z0-9+/=]/g, '');
-  const output: number[] = [];
-  let index = 0;
-
-  while (index < normalized.length) {
-    const char1 = normalized[index] ?? '=';
-    const char2 = normalized[index + 1] ?? '=';
-    const char3 = normalized[index + 2] ?? '=';
-    const char4 = normalized[index + 3] ?? '=';
-
-    const enc1 = BASE64_ALPHABET.indexOf(char1);
-    const enc2 = BASE64_ALPHABET.indexOf(char2);
-    const enc3 = char3 === '=' ? -1 : BASE64_ALPHABET.indexOf(char3);
-    const enc4 = char4 === '=' ? -1 : BASE64_ALPHABET.indexOf(char4);
-
-    if (enc1 < 0 || enc2 < 0 || (enc3 < 0 && char3 !== '=') || (enc4 < 0 && char4 !== '=')) {
-      throw new Error('Invalid base64 payload.');
-    }
-
-    const byte1 = enc1 * 4 + Math.floor(enc2 / 16);
-    output.push(byte1);
-
-    if (enc3 >= 0) {
-      const byte2 = (enc2 % 16) * 16 + Math.floor(enc3 / 4);
-      output.push(byte2);
-    }
-
-    if (enc4 >= 0 && enc3 >= 0) {
-      const byte3 = (enc3 % 4) * 64 + enc4;
-      output.push(byte3);
-    }
-
-    index += 4;
-  }
-
-  return Uint8Array.from(output);
-}
-
-function bytesToHex(bytes: Uint8Array) {
-  let result = '';
-  for (const byte of bytes) {
-    result += byte.toString(16).padStart(2, '0');
-  }
-  return result;
-}
-
-function readUInt16LE(bytes: Uint8Array, offset: number) {
-  return bytes[offset] + bytes[offset + 1] * 256;
 }
 
 function parseWeightScaleMeasurementKg(bytes: Uint8Array): number | null {
@@ -282,12 +212,12 @@ export function handleS400Advertisement(deviceId: string, serviceData: Record<st
         `adv hex preview: ${payloadHexPreview}`,
       );
 
-      const bindKey = s400BindKey;
+      const bindKey = resolveS400BindKey(deviceId).key;
       const macAddress = macAddressByDevice.get(deviceId);
       if (bindKey && macAddress) {
         const measurement = decryptS400FromAdvertisement(bytes, macAddress, bindKey);
         if (measurement) {
-          setLatestWeightKg(measurement.weightKg);
+          setLatestWeightKg(measurement.weightKg, 's400_advertisement', payloadHex);
           pushDebugLog(
             deviceId,
             'BodyCompositionMeasurement',
@@ -348,12 +278,12 @@ export function handleS400ManufacturerData(
       `manufacturer hex preview: ${payloadHex.slice(0, 120)}`,
     );
 
-    const bindKey = s400BindKey;
+    const bindKey = resolveS400BindKey(deviceId).key;
     const macAddress = macAddressByDevice.get(deviceId);
     if (bindKey && macAddress) {
       const measurement = decryptS400FromAdvertisement(bytes, macAddress, bindKey);
       if (measurement) {
-        setLatestWeightKg(measurement.weightKg);
+        setLatestWeightKg(measurement.weightKg, 's400_advertisement', payloadHex);
         pushDebugLog(
           deviceId,
           'BodyCompositionMeasurement',
@@ -388,11 +318,52 @@ export function handleS400ManufacturerData(
   }
 }
 
-export async function startMonitoringWeightScale(device: Device) {
+export type WeightScaleMonitorKind = 'smartgrowth' | 'standard';
+
+/**
+ * Subscribes to the device's measurement notifications. Prefers the SmartGrowth
+ * custom service (weight + height); falls back to the standard Weight Scale /
+ * Body Composition services. Returns null when nothing could be monitored.
+ */
+export async function startMonitoringWeightScale(
+  device: Device,
+): Promise<WeightScaleMonitorKind | null> {
   stopMonitoringWeightScale(device.id);
 
   try {
     const readyDevice = await device.discoverAllServicesAndCharacteristics();
+
+    const isSmartGrowth = await startSmartGrowthMonitor(readyDevice, (measurement, rawBase64) => {
+      pushDebugLog(
+        readyDevice.id,
+        'SmartGrowthMeasurement',
+        SMARTGROWTH_SERVICE_UUID,
+        SMARTGROWTH_MEASUREMENT_CHAR_UUID,
+        measurement
+          ? `parse sukses: berat=${measurement.weightKg ?? '-'} kg, tinggi=${measurement.heightCm ?? '-'} cm, ${measurement.stable ? 'stabil' : 'mengukur'}, seq=${measurement.sequence}`
+          : 'parse gagal',
+        rawBase64,
+        measurement?.weightKg ?? null,
+      );
+    });
+    if (isSmartGrowth) {
+      pushDebugLog(
+        readyDevice.id,
+        'SmartGrowthMeasurement',
+        SMARTGROWTH_SERVICE_UUID,
+        SMARTGROWTH_MEASUREMENT_CHAR_UUID,
+        'monitor SmartGrowth aktif (berat + tinggi)',
+      );
+      return 'smartgrowth';
+    }
+
+    let discoveredServices: string[] | null = null;
+    try {
+      discoveredServices = (await readyDevice.services()).map(service => service.uuid.toLowerCase());
+    } catch {
+      discoveredServices = null;
+    }
+
     const subscriptions: Subscription[] = [];
 
     const monitorTargets: Array<{
@@ -403,14 +374,17 @@ export async function startMonitoringWeightScale(device: Device) {
       {
         serviceUuid: WEIGHT_SCALE_SERVICE_UUID,
         characteristicUuid: WEIGHT_MEASUREMENT_CHAR_UUID,
-        label: 'WeightMeasurement',
+        label: 'WeightMeasurement' as const,
       },
       {
         serviceUuid: BODY_COMPOSITION_SERVICE_UUID,
         characteristicUuid: BODY_COMPOSITION_MEASUREMENT_CHAR_UUID,
-        label: 'BodyCompositionMeasurement',
+        label: 'BodyCompositionMeasurement' as const,
       },
-    ];
+    ].filter(
+      // ble-plx reports a missing service asynchronously, so skip absent ones up front.
+      target => discoveredServices === null || discoveredServices.includes(target.serviceUuid),
+    );
 
     for (const target of monitorTargets) {
       try {
@@ -457,7 +431,11 @@ export async function startMonitoringWeightScale(device: Device) {
               return;
             }
 
-            setLatestWeightKg(weightKg);
+            setLatestWeightKg(
+              weightKg,
+              target.label === 'WeightMeasurement' ? 'gatt_weight_scale' : 'gatt_body_composition',
+              safeBase64ToHex(value),
+            );
           },
         );
 
@@ -490,19 +468,28 @@ export async function startMonitoringWeightScale(device: Device) {
         WEIGHT_MEASUREMENT_CHAR_UUID,
         'tidak ada monitor yang aktif',
       );
-      return false;
+      return null;
     }
 
     activeMonitors.set(device.id, subscriptions);
-    return true;
+    return 'standard';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn('[BLE] Gagal monitor WeightMeasurement:', message);
-    return false;
+    return null;
+  }
+}
+
+function safeBase64ToHex(value: string) {
+  try {
+    return bytesToHex(base64ToBytes(value));
+  } catch {
+    return null;
   }
 }
 
 export function stopMonitoringWeightScale(deviceId: string) {
+  stopSmartGrowthMonitor(deviceId);
   const subscriptions = activeMonitors.get(deviceId);
   if (!subscriptions) {
     return;

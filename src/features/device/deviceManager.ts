@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { ScanMode, State } from 'react-native-ble-plx';
 import type { Device, Subscription } from 'react-native-ble-plx';
-import { S400_BIND_KEY } from '../../services/environment';
 import {
   BLE_UNAVAILABLE_MESSAGE,
   ensureBlePoweredOn,
@@ -9,16 +8,22 @@ import {
   getBleManager,
   requestBlePermissions,
 } from './ble';
+import { loadS400BindKey } from './bindKeyStore';
 import { getDeviceSessionSnapshot, setConnectedBleDevice } from './deviceSession';
 import {
   handleS400Advertisement,
   handleS400ManufacturerData,
   resetAdvertisementCache,
   setDeviceMacAddress,
-  setS400BindKey,
   startMonitoringWeightScale,
   stopMonitoringWeightScale,
 } from './weightScale';
+import {
+  SMARTGROWTH_COMMANDS,
+  SMARTGROWTH_CONTROL_CHAR_UUID,
+  SMARTGROWTH_SERVICE_UUID,
+  encodeSmartGrowthCommand,
+} from './smartGrowth';
 
 // BLE lifecycle lives here (app-wide), not inside a screen, so readings keep
 // flowing after the operator leaves the device screen. One phone : one device.
@@ -36,6 +41,9 @@ export type DetectedDevice = {
 
 export type ConnectionMode = 'gatt' | 'broadcast';
 
+/** What the connected device can report. */
+export type ConnectedDeviceKind = 'smartgrowth' | 'standard' | 's400' | 'unknown';
+
 export type DeviceManagerState = {
   isScanning: boolean;
   detectedDevices: DetectedDevice[];
@@ -43,6 +51,7 @@ export type DeviceManagerState = {
   busyAction: 'connect' | 'disconnect' | null;
   message: string | null;
   connectionMode: ConnectionMode | null;
+  deviceKind: ConnectedDeviceKind | null;
 };
 
 type ScanKind = 'discovery' | 'listen';
@@ -54,6 +63,7 @@ let state: DeviceManagerState = {
   busyAction: null,
   message: null,
   connectionMode: null,
+  deviceKind: null,
 };
 
 const stateListeners = new Set<() => void>();
@@ -92,8 +102,6 @@ function ensureInitialized() {
     return;
   }
   initialized = true;
-
-  setS400BindKey(S400_BIND_KEY);
 
   const manager = getBleManager();
   if (!manager) {
@@ -200,7 +208,13 @@ function handleConnectionLost(message: string) {
 
   setConnectedBleDevice(null);
   markConnected(null);
-  setState({ busyAction: null, busyDeviceId: null, connectionMode: null, message });
+  setState({
+    busyAction: null,
+    busyDeviceId: null,
+    connectionMode: null,
+    deviceKind: null,
+    message,
+  });
 }
 
 function watchDisconnect(deviceId: string, deviceName: string) {
@@ -289,6 +303,10 @@ export async function scanDevices() {
       }
 
       setDeviceMacAddress(device.id, device.id);
+      if (isLikelyS400Device(deviceName)) {
+        // Prefetch the per-scale bind key so the device screen can show its state.
+        loadS400BindKey(device.id).catch(() => undefined);
+      }
       setState({
         detectedDevices: existing
           ? state.detectedDevices.map(item =>
@@ -342,6 +360,9 @@ export async function connectDevice(deviceId: string) {
     const isS400 = isLikelyS400Device(fallbackName);
     setDeviceMacAddress(deviceId, deviceId);
     resetAdvertisementCache(deviceId);
+    if (isS400) {
+      await loadS400BindKey(deviceId).catch(() => null);
+    }
 
     const device = isS400
       ? await manager
@@ -354,6 +375,7 @@ export async function connectDevice(deviceId: string) {
       markConnected(deviceId);
       setState({
         connectionMode: 'broadcast',
+        deviceKind: 's400',
         message: 'S400 aktif dalam mode broadcast. Menunggu paket iklan untuk pembacaan berat.',
       });
       await startListenScan();
@@ -369,23 +391,28 @@ export async function connectDevice(deviceId: string) {
     watchDisconnect(device.id, deviceName);
 
     const deviceIsS400 = isLikelyS400Device(deviceName);
-    const canReadWeight = deviceIsS400 ? false : await startMonitoringWeightScale(device);
+    if (deviceIsS400 && deviceName !== fallbackName) {
+      await loadS400BindKey(device.id).catch(() => null);
+    }
+    const monitorKind = deviceIsS400 ? null : await startMonitoringWeightScale(device);
     markConnected(deviceId);
 
-    if (deviceIsS400 || !canReadWeight) {
+    if (deviceIsS400 || !monitorKind) {
       // No GATT weight notifications: fall back to reading advertisements.
-      setState({ connectionMode: 'broadcast' });
+      setState({ connectionMode: 'broadcast', deviceKind: deviceIsS400 ? 's400' : 'unknown' });
       await startListenScan();
     } else {
-      setState({ connectionMode: 'gatt' });
+      setState({ connectionMode: 'gatt', deviceKind: monitorKind });
     }
 
     setState({
       message: deviceIsS400
         ? 'Perangkat S400 terhubung. Menunggu paket terenkripsi dan proses decode berat.'
-        : canReadWeight
-          ? 'Perangkat BLT berhasil terhubung. Pembacaan berat via BLE aktif.'
-          : 'Perangkat BLT berhasil terhubung, tapi layanan timbangan (GATT Weight Scale) tidak terdeteksi.',
+        : monitorKind === 'smartgrowth'
+          ? 'SmartGrowth terhubung. Pembacaan tinggi dan berat via BLE aktif.'
+          : monitorKind === 'standard'
+            ? 'Perangkat BLT berhasil terhubung. Pembacaan berat via BLE aktif.'
+            : 'Perangkat BLT berhasil terhubung, tapi layanan timbangan (GATT Weight Scale) tidak terdeteksi.',
     });
   } catch (error) {
     setState({
@@ -417,13 +444,42 @@ export async function disconnectDevice(deviceId: string) {
 
     setConnectedBleDevice(null);
     markConnected(null);
-    setState({ connectionMode: null, message: 'Perangkat BLT berhasil diputuskan.' });
+    setState({
+      connectionMode: null,
+      deviceKind: null,
+      message: 'Perangkat BLT berhasil diputuskan.',
+    });
   } catch (error) {
     setState({
       message: error instanceof Error ? error.message : 'Gagal memutuskan perangkat.',
     });
   } finally {
     setState({ busyAction: null, busyDeviceId: null });
+  }
+}
+
+/** Sends a Control command (tare / start) to a connected SmartGrowth station. */
+export async function sendSmartGrowthControl(
+  command: (typeof SMARTGROWTH_COMMANDS)[keyof typeof SMARTGROWTH_COMMANDS],
+) {
+  const { connectedDeviceId } = getDeviceSessionSnapshot();
+  const manager = getBleManager();
+  if (!connectedDeviceId || !manager || state.deviceKind !== 'smartgrowth') {
+    return false;
+  }
+  try {
+    await manager.writeCharacteristicWithResponseForDevice(
+      connectedDeviceId,
+      SMARTGROWTH_SERVICE_UUID,
+      SMARTGROWTH_CONTROL_CHAR_UUID,
+      encodeSmartGrowthCommand(command),
+    );
+    return true;
+  } catch (error) {
+    setState({
+      message: error instanceof Error ? error.message : 'Perintah ke alat gagal dikirim.',
+    });
+    return false;
   }
 }
 

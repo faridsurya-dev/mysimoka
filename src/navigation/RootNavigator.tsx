@@ -76,8 +76,9 @@ const TAB_LABELS: Record<MainTab, string> = {
   profile: 'Pengaturan',
 };
 
-// The device manager is reachable from the measurement flow ("Atur alat") only;
-// manual input is the primary path, so it no longer occupies a bottom tab.
+// Manual input is the primary path, so the optional device manager has no bottom
+// tab. It opens as a sheet from Pengaturan › Perangkat, the "Alat ukur" status
+// card in Pencatatan, and "Atur alat" in the measurement form.
 const VISIBLE_TABS: MainTab[] = ['dashboard', 'measurement', 'profile'];
 
 const TAB_ACTIVE_COLORS: Record<MainTab, string> = {
@@ -1094,7 +1095,6 @@ export function RootNavigator() {
               setMeasurementRoute('batch');
             },
             onOpenManual: () => setMeasurementRoute('manual'),
-            onOpenDeviceManager: () => setMeasurementRoute('device-manager'),
             onOpenImmunizationManual: () => setMeasurementRoute('immunization-manual'),
             activeImmunizationType,
             activeImmunizationDose,
@@ -1590,7 +1590,6 @@ type MeasurementStackOptions = {
   onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
   onFaceIdentificationMatched: (studentName: string) => void;
   onOpenManual: () => void;
-  onOpenDeviceManager: () => void;
   onOpenImmunizationManual: () => void;
   faceCropPreview: FaceCropPreviewPayload | null;
   createSessionClassPreset: { id: string | null; name: string | null } | null;
@@ -1619,7 +1618,6 @@ function renderMeasurementStack({
   onFaceCropReady,
   onFaceIdentificationMatched,
   onOpenManual,
-  onOpenDeviceManager,
   onOpenImmunizationManual,
   faceCropPreview,
   createSessionClassPreset,
@@ -1679,7 +1677,6 @@ function renderMeasurementStack({
         <BatchMeasurementScreen
           activeStudentName={identifiedStudentName ?? undefined}
           onBack={onOpenManual}
-          onOpenDeviceManager={onOpenDeviceManager}
         />
       );
     case 'student-search':
@@ -1691,7 +1688,6 @@ function renderMeasurementStack({
           sessionDate={activeMeasurementSession?.sessionDate ?? activeSessionDate}
           className={activeMeasurementSession?.className}
           onBack={onBackToSessionList}
-          onOpenDeviceManager={onOpenDeviceManager}
           onOpenFaceIdentification={onOpenFaceIdentification}
         />
       );
@@ -1708,8 +1704,6 @@ function renderMeasurementStack({
           sessionDateIso={activeSessionDate}
         />
       );
-    case 'device-manager':
-      return <DeviceManagerScreen onBack={onOpenManual} />;
     case 'session-list':
     default:
       return (

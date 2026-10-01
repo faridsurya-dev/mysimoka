@@ -51,7 +51,7 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
           </Text>
         </View>
 
-        {onBack ? <PrimaryButton label="Kembali ke Input Manual" onPress={onBack} /> : null}
+        {onBack ? <PrimaryButton label="Kembali" onPress={onBack} /> : null}
       </Screen>
     </View>
   );
