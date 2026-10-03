@@ -63,6 +63,7 @@ const REGISTER_ENDPOINT = '/register';
 const LOGIN_ENDPOINT = '/login';
 const REFRESH_ENDPOINT = '/refresh';
 const VERIFY_EMAIL_ENDPOINT = '/verify-email';
+const JOIN_SCHOOL_ENDPOINT = '/schools/join';
 const AUTH_SESSION_STORAGE_KEY = 'mysimoka:auth-session';
 const CURRENT_SCHOOL_STORAGE_KEY = 'mysimoka:current-school';
 export const ROLE_HIERARCHY = ['school_admin', 'teacher', 'user'] as const;
@@ -1206,54 +1207,30 @@ export async function joinSchool(payload: JoinSchoolPayload): Promise<CurrentSch
     throw new Error('Kode join wajib diisi.');
   }
 
-  const query = `
-    query FindSchoolByJoinCode($joinCode: String!) {
-      schools(where: { join_code: { _eq: $joinCode } }, limit: 1) {
-        id
-        name
-      }
-    }
-  `;
-
-  const responseBody = (await apiRequest(GRAPHQL_URL, {
+  // The auth service looks the code up and upserts the membership (role 'user'
+  // for new members) and makes it the active school; Hasura no longer exposes
+  // other schools or their join codes to role user.
+  const responseBody = (await apiRequest(createAuthRequestUrl(JOIN_SCHOOL_ENDPOINT), {
     method: 'POST',
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
-      'x-hasura-role': 'user',
     },
-    body: JSON.stringify({
-      query,
-      variables: { joinCode: normalizedJoinCode },
-    }),
+    body: JSON.stringify({ join_code: normalizedJoinCode }),
   })) as
     | {
-        data?: { schools?: Array<{ id?: string | null; name?: string | null }> };
-        errors?: Array<{ message?: string }>;
+        data?: { school_id?: string | null; school_name?: string | null } | null;
       }
     | null;
 
-  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
-    logHasuraClaimsDebug('joinSchool');
-    const firstMessage = responseBody.errors[0]?.message;
-    if (firstMessage?.includes('invalid input syntax for type uuid: "id"')) {
-      throw new Error(
-        'Permission select schools untuk role user masih memakai literal "id" pada filter UUID.',
-      );
-    }
-    throw new Error(firstMessage || 'Gagal validasi kode join.');
-  }
-
-  const foundSchool = responseBody?.data?.schools?.[0] ?? null;
-  const schoolId = foundSchool?.id ?? null;
+  const schoolId = responseBody?.data?.school_id ?? null;
   if (!schoolId) {
     throw new Error('Kode join sekolah tidak ditemukan.');
   }
 
-  await setActiveSchool(schoolId, 'user');
   return {
     schoolId,
-    schoolName: foundSchool?.name ?? `Sekolah ${schoolId.slice(0, 8).toUpperCase()}`,
+    schoolName: responseBody?.data?.school_name ?? `Sekolah ${schoolId.slice(0, 8).toUpperCase()}`,
   };
 }
 
