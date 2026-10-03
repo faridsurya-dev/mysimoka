@@ -21,6 +21,7 @@ import {
 } from '../../features/device';
 import { colors, radius, spacing, typography } from '../../theme';
 import { S400BindKeyPanel } from './S400BindKeyPanel';
+import { SensorStatusChecklist } from './SensorStatusChecklist';
 
 type DeviceManagerScreenProps = {
   onBack?: () => void;
@@ -296,6 +297,7 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                     ) : null}
                     {deviceKind === 'smartgrowth' ? (
                       <View style={styles.controlRow}>
+                        <SensorStatusChecklist status={deviceSession.sensorStatus} />
                         {smartGrowthInfo ? (
                           <Text style={styles.latestWeightLabel}>
                             Firmware {smartGrowthInfo.firmwareVersion}

@@ -1,3 +1,8 @@
+import type { SmartGrowthSensorStatus } from './smartGrowth';
+
+/** null = unknown yet / not a SmartGrowth; 'unsupported' = old firmware without Status. */
+export type DeviceSensorStatus = SmartGrowthSensorStatus | 'unsupported' | null;
+
 export type DeviceReadingSource =
   | 'gatt_weight_scale'
   | 'gatt_body_composition'
@@ -27,6 +32,8 @@ export type DeviceSessionSnapshot = {
   latestRawHex: string | null;
   latestSequence: number | null;
   latestBatteryPct: number | null;
+  /** SmartGrowth sensor checklist (Status characteristic); cleared on disconnect. */
+  sensorStatus: DeviceSensorStatus;
 };
 
 const EMPTY_READING = {
@@ -40,6 +47,7 @@ const EMPTY_READING = {
   latestRawHex: null,
   latestSequence: null,
   latestBatteryPct: null,
+  sensorStatus: null,
 } as const;
 
 let snapshot: DeviceSessionSnapshot = {
@@ -102,6 +110,25 @@ export function setReconnectingDeviceName(name: string | null) {
     return;
   }
   snapshot = { ...snapshot, reconnectingDeviceName: name };
+  emitChange();
+}
+
+function isSameSensorStatus(a: DeviceSensorStatus, b: DeviceSensorStatus) {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b || a === 'unsupported' || b === 'unsupported') {
+    return false;
+  }
+  return (Object.keys(a) as Array<keyof SmartGrowthSensorStatus>).every(key => a[key] === b[key]);
+}
+
+export function setSensorStatus(status: DeviceSensorStatus) {
+  // Ignore late notifications after disconnect and identical periodic frames (every 5 s).
+  if (!snapshot.connectedDeviceId || isSameSensorStatus(snapshot.sensorStatus, status)) {
+    return;
+  }
+  snapshot = { ...snapshot, sensorStatus: status };
   emitChange();
 }
 

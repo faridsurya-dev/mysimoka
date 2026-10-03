@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { describeDeviceStatus } from '../../features/device/deviceStatus';
+import { describeDeviceStatus, describeSensorSummary } from '../../features/device/deviceStatus';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
 import { Icon } from '../../shared/components';
 import { colors, layout, radius, spacing, typography } from '../../theme';
@@ -28,12 +28,13 @@ export function DeviceStatusCard({ style, tone = 'default' }: DeviceStatusCardPr
 
   const isConnected = session.connectedDeviceId !== null;
   const statusText = describeDeviceStatus(session);
+  const sensorSummary = isConnected ? describeSensorSummary(session.sensorStatus) : null;
 
   return (
     <>
       <Pressable
         accessibilityHint="Buka pengaturan perangkat timbangan dan alat ukur"
-        accessibilityLabel={`Alat ukur. ${statusText}`}
+        accessibilityLabel={`Alat ukur. ${statusText}${sensorSummary ? `. ${sensorSummary.text}` : ''}`}
         accessibilityRole="button"
         onPress={() => setIsSheetOpen(true)}
         style={({ pressed }) => [
@@ -55,6 +56,13 @@ export function DeviceStatusCard({ style, tone = 'default' }: DeviceStatusCardPr
           <Text numberOfLines={1} style={styles.status}>
             {statusText}
           </Text>
+          {sensorSummary ? (
+            <Text
+              numberOfLines={1}
+              style={[styles.sensor, sensorSummary.ok === false && styles.sensorWarning]}>
+              {sensorSummary.text}
+            </Text>
+          ) : null}
         </View>
         <Text style={styles.action}>{isConnected ? 'Atur' : 'Hubungkan'}</Text>
         <Icon color={colors.text.muted} name="chevron-right" size={18} />
@@ -109,6 +117,13 @@ const styles = StyleSheet.create({
   status: {
     ...typography.bodySm,
     color: colors.text.secondary,
+  },
+  sensor: {
+    ...typography.bodySm,
+    color: colors.feedback.successText,
+  },
+  sensorWarning: {
+    color: colors.feedback.warningText,
   },
   action: {
     ...typography.labelMd,

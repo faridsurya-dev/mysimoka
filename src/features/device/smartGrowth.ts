@@ -1,7 +1,7 @@
 /* eslint-disable no-bitwise */
 import type { Device, Subscription } from 'react-native-ble-plx';
 import { base64ToBytes, bytesToBase64, bytesToHex, readUInt16LE } from './bytes';
-import { setLatestReading } from './deviceSession';
+import { setLatestReading, setSensorStatus } from './deviceSession';
 
 // SmartGrowth (MySimoka height + weight station) custom GATT protocol.
 // Spec: docs/ble-smartgrowth-protocol.md — keep both in sync.
@@ -10,6 +10,8 @@ export const SMARTGROWTH_SERVICE_UUID = '519e0001-59fe-44b5-828f-34822e2361a9';
 export const SMARTGROWTH_MEASUREMENT_CHAR_UUID = '519e0002-59fe-44b5-828f-34822e2361a9';
 export const SMARTGROWTH_DEVICE_INFO_CHAR_UUID = '519e0003-59fe-44b5-828f-34822e2361a9';
 export const SMARTGROWTH_CONTROL_CHAR_UUID = '519e0004-59fe-44b5-828f-34822e2361a9';
+/** Sensor status (read + notify), protocol section 6a. Absent on old firmware. */
+export const SMARTGROWTH_STATUS_CHAR_UUID = '519e0005-59fe-44b5-828f-34822e2361a9';
 
 export const SMARTGROWTH_NAME_PATTERN = /^(smartgrowth|mysimoka)-/i;
 
@@ -130,6 +132,78 @@ export function parseSmartGrowthDeviceInfo(bytes: Uint8Array): SmartGrowthDevice
   };
 }
 
+export const SMARTGROWTH_STATUS_FLAGS = {
+  weightOk: 0x01,
+  heightDetected: 0x02,
+  heightReading: 0x04,
+  batterySensing: 0x08,
+  weightCalibrated: 0x10,
+  tareSet: 0x20,
+} as const;
+
+export type SmartGrowthHeightSensorType = 'none' | 'vl53l0x' | 'sharp' | 'unknown';
+export type SmartGrowthDeviceState = 'idle' | 'measuring' | 'held' | 'unknown';
+
+export type SmartGrowthSensorStatus = {
+  version: number;
+  /** HX711 delivered data within the last second. */
+  weightOk: boolean;
+  /** Height sensor found at boot. */
+  heightDetected: boolean;
+  /** Height sensor gave a valid reading within 2 s (head board seen). */
+  heightReading: boolean;
+  batterySensing: boolean;
+  weightCalibrated: boolean;
+  tareSet: boolean;
+  heightSensorType: SmartGrowthHeightSensorType;
+  state: SmartGrowthDeviceState;
+  batteryPct: number | null;
+};
+
+const HEIGHT_SENSOR_TYPES: Record<number, SmartGrowthHeightSensorType> = {
+  0: 'none',
+  1: 'vl53l0x',
+  2: 'sharp',
+};
+
+const DEVICE_STATES: Record<number, SmartGrowthDeviceState> = {
+  0: 'idle',
+  1: 'measuring',
+  2: 'held',
+};
+
+/**
+ * Status frame: [0] version (=1) | [1] flags | [2] height sensor type
+ * | [3] state | [4] battery % (0xFF = none). Unknown flag bits are ignored.
+ */
+export function parseSmartGrowthStatus(bytes: Uint8Array): SmartGrowthSensorStatus | null {
+  if (bytes.length < 5 || bytes[0] !== 1) {
+    return null;
+  }
+  const flags = bytes[1];
+  const battery = bytes[4];
+  return {
+    version: bytes[0],
+    weightOk: (flags & SMARTGROWTH_STATUS_FLAGS.weightOk) !== 0,
+    heightDetected: (flags & SMARTGROWTH_STATUS_FLAGS.heightDetected) !== 0,
+    heightReading: (flags & SMARTGROWTH_STATUS_FLAGS.heightReading) !== 0,
+    batterySensing: (flags & SMARTGROWTH_STATUS_FLAGS.batterySensing) !== 0,
+    weightCalibrated: (flags & SMARTGROWTH_STATUS_FLAGS.weightCalibrated) !== 0,
+    tareSet: (flags & SMARTGROWTH_STATUS_FLAGS.tareSet) !== 0,
+    heightSensorType: HEIGHT_SENSOR_TYPES[bytes[2]] ?? 'unknown',
+    state: DEVICE_STATES[bytes[3]] ?? 'unknown',
+    batteryPct: battery <= 100 ? battery : null,
+  };
+}
+
+export function parseSmartGrowthStatusBase64(base64Value: string) {
+  try {
+    return parseSmartGrowthStatus(base64ToBytes(base64Value));
+  } catch {
+    return null;
+  }
+}
+
 export function buildSmartGrowthCommand(command: number, params: number[] = []) {
   return Uint8Array.from([command & 0xff, ...params.map(value => value & 0xff)]);
 }
@@ -137,6 +211,7 @@ export function buildSmartGrowthCommand(command: number, params: number[] = []) 
 // --- GATT wiring -------------------------------------------------------------
 
 const subscriptionsByDevice = new Map<string, Subscription>();
+const statusSubscriptionsByDevice = new Map<string, Subscription>();
 const deviceInfoById = new Map<string, SmartGrowthDeviceInfo>();
 
 export function getSmartGrowthDeviceInfo(deviceId: string) {
@@ -207,15 +282,68 @@ export async function startSmartGrowthMonitor(
       },
     );
     subscriptionsByDevice.set(device.id, subscription);
-    return true;
   } catch {
     return false;
+  }
+
+  await startSmartGrowthStatusMonitor(device);
+  return true;
+}
+
+/** Status is optional: old firmware lacks it and the device stays fully usable. */
+async function startSmartGrowthStatusMonitor(device: Device) {
+  let hasStatus = false;
+  try {
+    const characteristics = await device.characteristicsForService(SMARTGROWTH_SERVICE_UUID);
+    hasStatus = characteristics.some(
+      characteristic => characteristic.uuid.toLowerCase() === SMARTGROWTH_STATUS_CHAR_UUID,
+    );
+  } catch {
+    hasStatus = false;
+  }
+  if (!hasStatus) {
+    setSensorStatus('unsupported');
+    return;
+  }
+
+  try {
+    const initial = await device.readCharacteristicForService(
+      SMARTGROWTH_SERVICE_UUID,
+      SMARTGROWTH_STATUS_CHAR_UUID,
+    );
+    const parsed = initial.value ? parseSmartGrowthStatusBase64(initial.value) : null;
+    if (parsed) {
+      setSensorStatus(parsed);
+    }
+  } catch {
+    // A notify follows within ~5 s.
+  }
+
+  try {
+    const subscription = device.monitorCharacteristicForService(
+      SMARTGROWTH_SERVICE_UUID,
+      SMARTGROWTH_STATUS_CHAR_UUID,
+      (error, characteristic) => {
+        if (error || !characteristic?.value) {
+          return;
+        }
+        const parsed = parseSmartGrowthStatusBase64(characteristic.value);
+        if (parsed) {
+          setSensorStatus(parsed);
+        }
+      },
+    );
+    statusSubscriptionsByDevice.set(device.id, subscription);
+  } catch {
+    // Ignore: status is informational only.
   }
 }
 
 export function stopSmartGrowthMonitor(deviceId: string) {
   subscriptionsByDevice.get(deviceId)?.remove();
   subscriptionsByDevice.delete(deviceId);
+  statusSubscriptionsByDevice.get(deviceId)?.remove();
+  statusSubscriptionsByDevice.delete(deviceId);
 }
 
 /** Control write payload (base64) for ble-plx writeCharacteristic* calls. */

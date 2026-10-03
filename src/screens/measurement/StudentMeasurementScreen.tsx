@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Import the store hook directly (not the device barrel) so this manual screen
 // never pulls the BLE stack in.
-import { getDeviceDisplayName } from '../../features/device/deviceStatus';
+import { describeSensorSummary, getDeviceDisplayName } from '../../features/device/deviceStatus';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
 import { listMeasurementStudents, saveStudentMeasurementRecord } from '../../services';
 import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
@@ -95,6 +95,7 @@ export function StudentMeasurementScreen({
   onOpenFaceIdentification,
 }: StudentMeasurementScreenProps) {
   const deviceSession = useDeviceSession();
+  const sensorSummary = describeSensorSummary(deviceSession.sensorStatus);
   const [students, setStudents] = useState<StudentMeasurementItem[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -563,6 +564,15 @@ export function StudentMeasurementScreen({
                               ? `Data stabil ${liveReadingText}, terisi otomatis dan tetap bisa diubah.`
                               : `Mengukur ${liveReadingText}, tunggu sampai stabil.`}
                       </Text>
+                      {isScaleConnected && sensorSummary ? (
+                        <Text
+                          style={[
+                            styles.autoDeviceDescription,
+                            sensorSummary.ok === false && styles.autoDeviceSensorWarning,
+                          ]}>
+                          {sensorSummary.text}
+                        </Text>
+                      ) : null}
                     </View>
                     <PrimaryButton
                       label="Atur alat"
@@ -900,6 +910,9 @@ const styles = StyleSheet.create({
   autoDeviceDescription: {
     ...typography.caption,
     color: colors.text.secondary,
+  },
+  autoDeviceSensorWarning: {
+    color: colors.feedback.warningText,
   },
   fieldGrid: {
     flexDirection: 'row',
