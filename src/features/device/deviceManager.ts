@@ -13,6 +13,11 @@ import { getDeviceSessionSnapshot, setConnectedBleDevice, setDeviceNotice } from
 import { setDeviceDisabledHandler, stopTrackingDevice, trackConnectedDevice } from './deviceRegistry';
 import { DEVICE_DISABLED_MESSAGE } from './deviceRegistryPayload';
 import {
+  forgetRememberedDevice,
+  pauseAutoReconnectFor,
+  rememberConnectedDevice,
+} from './lastDeviceStore';
+import {
   handleS400Advertisement,
   handleS400ManufacturerData,
   resetAdvertisementCache,
@@ -26,6 +31,7 @@ import {
   SMARTGROWTH_SERVICE_UUID,
   encodeSmartGrowthCommand,
   getSmartGrowthDeviceInfo,
+  isSmartGrowthName,
 } from './smartGrowth';
 
 // BLE lifecycle lives here (app-wide), not inside a screen, so readings keep
@@ -34,6 +40,7 @@ import {
 const DISCOVERY_DURATION_MS = 7000;
 const S400_CONNECT_TIMEOUT_MS = 6000;
 const GATT_CONNECT_TIMEOUT_MS = 10000;
+const RECONNECT_SCAN_DURATION_MS = 5000;
 const BROADCAST_RECEIVING_MESSAGE = 'Menerima broadcast data S400 (service data terdeteksi).';
 
 export type DetectedDevice = {
@@ -88,13 +95,17 @@ function setState(patch: Partial<DeviceManagerState>) {
   }
 }
 
-function markConnected(deviceId: string | null) {
-  setState({
-    detectedDevices: state.detectedDevices.map(device => ({
-      ...device,
-      isConnected: device.id === deviceId,
-    })),
-  });
+function markConnected(deviceId: string | null, name?: string) {
+  const devices = state.detectedDevices.map(device => ({
+    ...device,
+    isConnected: device.id === deviceId,
+  }));
+  // Auto-reconnect connects without a discovery scan; list the device anyway so
+  // the device screen can show it and offer "Putuskan".
+  if (deviceId && !devices.some(device => device.id === deviceId)) {
+    devices.push({ id: deviceId, name: name ?? deviceId, isConnected: true });
+  }
+  setState({ detectedDevices: devices });
 }
 
 function readServiceData(device: Device) {
@@ -211,7 +222,8 @@ function handleDeviceDisabled(deviceId: string) {
   if (getDeviceSessionSnapshot().connectedDeviceId !== deviceId || state.busyDeviceId) {
     return;
   }
-  disconnectDevice(deviceId, DEVICE_DISABLED_MESSAGE)
+  forgetRememberedDevice(deviceId);
+  disconnectDevice(deviceId, { message: DEVICE_DISABLED_MESSAGE, reason: 'disabled' })
     .catch(() => undefined)
     .finally(() => setDeviceNotice(DEVICE_DISABLED_MESSAGE));
 }
@@ -362,23 +374,44 @@ export async function scanDevices() {
 }
 
 export async function connectDevice(deviceId: string) {
+  await connectDeviceInternal(deviceId, { auto: false });
+}
+
+type ConnectOptions = {
+  /** Background auto-reconnect: quiet on failure, never S400. */
+  auto: boolean;
+  name?: string | null;
+};
+
+async function connectDeviceInternal(deviceId: string, options: ConnectOptions): Promise<boolean> {
   ensureInitialized();
   if (getDeviceSessionSnapshot().connectedDeviceId || state.busyDeviceId) {
-    return;
+    return false;
   }
 
   const manager = getBleManager();
   if (!manager) {
-    setState({ message: BLE_UNAVAILABLE_MESSAGE });
-    return;
+    if (!options.auto) {
+      setState({ message: BLE_UNAVAILABLE_MESSAGE });
+    }
+    return false;
+  }
+
+  const fallbackName =
+    state.detectedDevices.find(item => item.id === deviceId)?.name ?? options.name ?? deviceId;
+  if (options.auto && isLikelyS400Device(fallbackName)) {
+    return false;
   }
 
   clearDiscoveryTimeout();
-  setState({ busyAction: 'connect', busyDeviceId: deviceId, message: null });
+  setState({
+    busyAction: 'connect',
+    busyDeviceId: deviceId,
+    ...(options.auto ? {} : { message: null }),
+  });
 
   try {
     await stopScan();
-    const fallbackName = state.detectedDevices.find(item => item.id === deviceId)?.name ?? deviceId;
     const isS400 = isLikelyS400Device(fallbackName);
     setDeviceMacAddress(deviceId, deviceId);
     resetAdvertisementCache(deviceId);
@@ -394,7 +427,7 @@ export async function connectDevice(deviceId: string) {
 
     if (!device && isS400) {
       setConnectedBleDevice({ id: deviceId, name: fallbackName });
-      markConnected(deviceId);
+      markConnected(deviceId, fallbackName);
       setState({
         connectionMode: 'broadcast',
         deviceKind: 's400',
@@ -402,7 +435,7 @@ export async function connectDevice(deviceId: string) {
       });
       trackConnectedDevice({ bleId: deviceId, name: fallbackName, kindHint: 's400' });
       await startListenScan();
-      return;
+      return true;
     }
 
     if (!device) {
@@ -418,7 +451,7 @@ export async function connectDevice(deviceId: string) {
       await loadS400BindKey(device.id).catch(() => null);
     }
     const monitorKind = deviceIsS400 ? null : await startMonitoringWeightScale(device);
-    markConnected(deviceId);
+    markConnected(deviceId, deviceName);
 
     const connectedKind: ConnectedDeviceKind = deviceIsS400 ? 's400' : (monitorKind ?? 'unknown');
     // SmartGrowth Device Info (serial/firmware) is read while monitoring starts,
@@ -431,6 +464,10 @@ export async function connectDevice(deviceId: string) {
       serial: deviceInfo?.serial,
       firmwareVersion: deviceInfo?.firmwareVersion,
     });
+    if (!deviceIsS400) {
+      // Remember for auto-reconnect; a manual connect also lifts a "Putuskan" pause.
+      rememberConnectedDevice({ bleId: device.id, name: deviceName, kind: connectedKind });
+    }
 
     if (deviceIsS400 || !monitorKind) {
       // No GATT weight notifications: fall back to reading advertisements.
@@ -449,10 +486,18 @@ export async function connectDevice(deviceId: string) {
             ? 'Perangkat BLT berhasil terhubung. Pembacaan berat via BLE aktif.'
             : 'Perangkat BLT berhasil terhubung, tapi layanan timbangan (GATT Weight Scale) tidak terdeteksi.',
     });
+    return true;
   } catch (error) {
-    setState({
-      message: error instanceof Error ? error.message : 'Gagal menghubungkan perangkat.',
-    });
+    if (options.auto) {
+      if (__DEV__) {
+        console.log('[autoReconnect] connect failed', error instanceof Error ? error.message : error);
+      }
+    } else {
+      setState({
+        message: error instanceof Error ? error.message : 'Gagal menghubungkan perangkat.',
+      });
+    }
+    return false;
   } finally {
     setState({ isScanning: false, busyAction: null, busyDeviceId: null });
     const disabledId = pendingDisabledDeviceId;
@@ -463,7 +508,17 @@ export async function connectDevice(deviceId: string) {
   }
 }
 
-export async function disconnectDevice(deviceId: string, doneMessage?: string) {
+export type DisconnectOptions = {
+  message?: string;
+  /** 'user' (default) pauses auto-reconnect for this device until a manual connect. */
+  reason?: 'user' | 'disabled';
+};
+
+export async function disconnectDevice(deviceId: string, options: DisconnectOptions = {}) {
+  const { message: doneMessage, reason = 'user' } = options;
+  if (reason === 'user') {
+    pauseAutoReconnectFor(deviceId);
+  }
   setState({ busyAction: 'disconnect', busyDeviceId: deviceId, message: null });
 
   try {
@@ -497,6 +552,86 @@ export async function disconnectDevice(deviceId: string, doneMessage?: string) {
   } finally {
     setState({ busyAction: null, busyDeviceId: null });
   }
+}
+
+function scanForDevice(target: { bleId: string; name: string | null }): Promise<string | null> {
+  const manager = getBleManager();
+  if (!manager) {
+    return Promise.resolve(null);
+  }
+  // Names are only trusted when unique per unit (SmartGrowth-<serial>); a generic
+  // scale name could match a nearby scale of the same model.
+  const matchName = target.name && isSmartGrowthName(target.name) ? target.name : null;
+
+  return new Promise(resolve => {
+    let done = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const finish = (foundId: string | null) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      stopScan().finally(() => resolve(foundId));
+    };
+    timeout = setTimeout(() => finish(null), RECONNECT_SCAN_DURATION_MS);
+    try {
+      Promise.resolve(
+        manager.startDeviceScan(null, { scanMode: ScanMode.LowLatency }, (error, device) => {
+          if (error) {
+            finish(null);
+            return;
+          }
+          if (
+            device &&
+            (device.id === target.bleId ||
+              (matchName !== null && getBleDeviceName(device) === matchName))
+          ) {
+            finish(device.id);
+          }
+        }),
+      ).catch(() => finish(null));
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/**
+ * Background auto-reconnect attempt: direct connect by id, then a short
+ * filtered scan. Quiet (no messages, no prompts); returns whether it connected.
+ * Callers must have checked permissions and Bluetooth state already.
+ */
+export async function reconnectToDevice(target: { bleId: string; name: string | null }) {
+  ensureInitialized();
+  const isBlocked = () =>
+    getDeviceSessionSnapshot().connectedDeviceId !== null ||
+    state.busyDeviceId !== null ||
+    state.isScanning;
+  if (isBlocked()) {
+    return false;
+  }
+  if (await connectDeviceInternal(target.bleId, { auto: true, name: target.name })) {
+    return true;
+  }
+  if (isBlocked()) {
+    return getDeviceSessionSnapshot().connectedDeviceId !== null;
+  }
+
+  // Hold the busy flag during the scan so manual scan/connect wait for it.
+  setState({ busyAction: 'connect', busyDeviceId: target.bleId });
+  let foundId: string | null = null;
+  try {
+    foundId = await scanForDevice(target);
+  } finally {
+    setState({ busyAction: null, busyDeviceId: null });
+  }
+  if (!foundId) {
+    return false;
+  }
+  return connectDeviceInternal(foundId, { auto: true, name: target.name });
 }
 
 /** Sends a Control command (tare / start) to a connected SmartGrowth station. */

@@ -53,6 +53,11 @@ import {
   sortRolesByPriority,
   updateAcademicYear,
 } from '../services';
+import {
+  resetAutoReconnectOnLogout,
+  startAutoReconnect,
+  stopAutoReconnect,
+} from '../features/device/autoReconnect';
 import type { ClassroomListItem, DashboardStudentListItem } from '../services';
 import { colors, radius, spacing, typography } from '../theme';
 import type {
@@ -341,6 +346,15 @@ export function RootNavigator() {
   const [isBootstrapSlow, setIsBootstrapSlow] = useState(false);
   const [bootstrapHealthError, setBootstrapHealthError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Optional BLE device: quietly reconnect to the last one while logged in.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    startAutoReconnect();
+    return () => stopAutoReconnect();
+  }, [isAuthenticated]);
   const [currentSchool, setCurrentSchool] = useState(DEFAULT_SCHOOL_NAME);
   const [currentSchoolId, setCurrentSchoolId] = useState<string | null>(null);
   const [schoolMemberships, setSchoolMemberships] = useState<
@@ -600,6 +614,7 @@ export function RootNavigator() {
           } catch (error) {
             if (isAuthSessionInvalidError(error)) {
               clearAuthSession();
+              resetAutoReconnectOnLogout();
               clearCurrentSchoolContext().catch(() => {});
               setSchoolMemberships([]);
               setIsAuthenticated(false);
@@ -775,6 +790,7 @@ export function RootNavigator() {
               .catch(async error => {
                 if (isAuthSessionInvalidError(error)) {
                   clearAuthSession();
+                  resetAutoReconnectOnLogout();
                   clearCurrentSchoolContext().catch(() => undefined);
                   setAuthRoute('login');
                   return;
@@ -791,6 +807,7 @@ export function RootNavigator() {
           }}
           onLogout={() => {
             clearAuthSession();
+            resetAutoReconnectOnLogout();
             clearCurrentSchoolContext().catch(() => undefined);
             setAuthRoute('login');
           }}
@@ -1314,6 +1331,7 @@ export function RootNavigator() {
             },
             onLogout: () => {
               clearAuthSession();
+              resetAutoReconnectOnLogout();
               clearCurrentSchoolContext().catch(() => undefined);
               setCurrentSchool(DEFAULT_SCHOOL_NAME);
               setCurrentSchoolId(null);

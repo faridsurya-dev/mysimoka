@@ -78,3 +78,28 @@ export async function ensureBlePoweredOn() {
     return false;
   }
 }
+
+/**
+ * True when BLE permissions are already granted. Never shows a prompt, so it is
+ * safe for background work such as auto-reconnect.
+ */
+export async function hasBlePermissions() {
+  if (Platform.OS !== 'android') {
+    // iOS has no runtime check API here; auto-reconnect only runs for a device
+    // the user already connected, i.e. after the system prompt was answered.
+    return isBleSupported();
+  }
+
+  try {
+    if (Platform.Version >= 31) {
+      const [canScan, canConnect] = await Promise.all([
+        PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN),
+        PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT),
+      ]);
+      return canScan && canConnect;
+    }
+    return await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+  } catch {
+    return false;
+  }
+}

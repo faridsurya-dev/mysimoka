@@ -864,6 +864,15 @@ export type AcademicYear = {
   is_active: boolean;
 };
 
+/** Logged-in user id, or null when there is no usable session. */
+export function getSessionUserId(): string | null {
+  try {
+    return getSessionUserIdOrThrow();
+  } catch {
+    return null;
+  }
+}
+
 function getSessionUserIdOrThrow(): string {
   const sessionUser = asObject(authSession.user);
   const userIdFromUserObject = readFirstNonEmptyString(sessionUser, ['id', 'user_id', 'userId']);

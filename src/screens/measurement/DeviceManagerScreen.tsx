@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { PrimaryButton, Screen } from '../../shared/components';
@@ -10,11 +10,14 @@ import {
   getSmartGrowthDeviceInfo,
   isLikelyS400Device,
   isSmartGrowthName,
+  loadLastDeviceStore,
   scanDevices,
   sendSmartGrowthControl,
+  setAutoReconnectEnabled,
   subscribeWeightScaleDebugLog,
   useDeviceManager,
   useDeviceSession,
+  useLastDeviceState,
 } from '../../features/device';
 import { colors, radius, spacing, typography } from '../../theme';
 import { S400BindKeyPanel } from './S400BindKeyPanel';
@@ -76,6 +79,7 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
       : null;
   const smartGrowthInfo =
     deviceKind === 'smartgrowth' ? getSmartGrowthDeviceInfo(deviceSession.connectedDeviceId ?? '') : null;
+  const { autoReconnectEnabled } = useLastDeviceState();
   const [measurementLogs, setMeasurementLogs] = useState<string[]>([]);
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
 
@@ -93,6 +97,10 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     });
 
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    loadLastDeviceStore().catch(() => undefined);
   }, []);
 
   const handleScanDevices = () => {
@@ -151,6 +159,25 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
           {scanMessage && scanMessage !== deviceSession.deviceNotice ? (
             <Text style={styles.scanMessage}>{scanMessage}</Text>
           ) : null}
+          {deviceSession.reconnectingDeviceName && !deviceSession.connectedDeviceId ? (
+            <Text style={styles.scanMessage}>
+              Menyambungkan ulang ke {deviceSession.reconnectingDeviceName}…
+            </Text>
+          ) : null}
+          <View style={styles.autoReconnectRow}>
+            <View style={styles.autoReconnectText}>
+              <Text style={styles.autoReconnectLabel}>Sambung otomatis ke alat terakhir</Text>
+              <Text style={styles.scanMessage}>
+                Menyambung lagi di latar belakang saat Bluetooth aktif. Tekan Putuskan untuk
+                menghentikannya sampai Anda menghubungkan alat lagi.
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel="Sambung otomatis ke alat terakhir"
+              onValueChange={setAutoReconnectEnabled}
+              value={autoReconnectEnabled}
+            />
+          </View>
           {measurementLogs.length > 0 ? (
             <View style={styles.debugLogContainer}>
               <Text style={styles.debugLogTitle}>Log BLE Timbangan (raw)</Text>
@@ -368,6 +395,20 @@ const styles = StyleSheet.create({
   scanMessage: {
     ...typography.bodySm,
     color: colors.text.secondary,
+  },
+  autoReconnectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+    marginTop: spacing[4],
+  },
+  autoReconnectText: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  autoReconnectLabel: {
+    ...typography.labelMd,
+    color: colors.text.primary,
   },
   deviceNotice: {
     ...typography.labelMd,

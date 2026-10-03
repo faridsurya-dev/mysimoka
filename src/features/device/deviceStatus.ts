@@ -33,7 +33,12 @@ export function getDeviceDisplayName(
 /** e.g. "Belum terhubung" or "Terhubung: SmartGrowth-1A2B · 25,4 kg · 123,4 cm". */
 export function describeDeviceStatus(session: DeviceSessionSnapshot) {
   if (!session.connectedDeviceId) {
-    return session.deviceNotice ?? 'Belum terhubung';
+    if (session.deviceNotice) {
+      return session.deviceNotice;
+    }
+    return session.reconnectingDeviceName
+      ? `Menyambungkan ulang ke ${session.reconnectingDeviceName}…`
+      : 'Belum terhubung';
   }
   const name = getDeviceDisplayName(session);
   const reading = describeLatestReading(session);

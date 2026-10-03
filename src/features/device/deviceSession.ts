@@ -11,6 +11,8 @@ export type DeviceSessionSnapshot = {
   connectedDeviceLabel: string | null;
   /** Notice that outlives the connection, e.g. the device was disabled by the school admin. */
   deviceNotice: string | null;
+  /** Set while auto-reconnect is trying to reach the last device. */
+  reconnectingDeviceName: string | null;
   /** Latest weight from the device (stable or not); see latestReadingStable. */
   latestWeightKg: number | null;
   latestWeightAt: string | null;
@@ -45,6 +47,7 @@ let snapshot: DeviceSessionSnapshot = {
   connectedDeviceName: null,
   connectedDeviceLabel: null,
   deviceNotice: null,
+  reconnectingDeviceName: null,
   ...EMPTY_READING,
 };
 
@@ -75,6 +78,7 @@ export function setConnectedBleDevice(device: { id: string; name: string } | nul
     connectedDeviceLabel: null,
     // A new connection supersedes any notice about a previous device.
     deviceNotice: device ? null : snapshot.deviceNotice,
+    reconnectingDeviceName: device ? null : snapshot.reconnectingDeviceName,
   };
 
   if (!device) {
@@ -90,6 +94,14 @@ export function setConnectedDeviceLabel(deviceId: string, label: string | null) 
     return;
   }
   snapshot = { ...snapshot, connectedDeviceLabel: label };
+  emitChange();
+}
+
+export function setReconnectingDeviceName(name: string | null) {
+  if (snapshot.reconnectingDeviceName === name) {
+    return;
+  }
+  snapshot = { ...snapshot, reconnectingDeviceName: name };
   emitChange();
 }
 
