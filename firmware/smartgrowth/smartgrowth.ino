@@ -18,8 +18,9 @@
  * Board: "ESP32 Dev Module" (ESP32 DevKit V1, ESP32-WROOM-32).
  * Libraries (Arduino Library Manager):
  *   - NimBLE-Arduino (h2zero) 2.x
- *   - HX711 (bogde)
  *   - Adafruit_VL53L0X
+ * The HX711 is read directly (no library): the common HX711 libraries block
+ * forever in begin()/read() when no HX711 is connected.
  *
  * Serial monitor (115200 baud, line ending "Newline"):
  *   t            tare (platform empty)
@@ -32,7 +33,6 @@
 #include <Arduino.h>
 #include <climits>
 #include <NimBLEDevice.h>
-#include <HX711.h>
 #include <Preferences.h>
 #include <Wire.h>
 #include <Adafruit_VL53L0X.h>
@@ -106,6 +106,17 @@
 #define SG_MEASUREMENT_UUID "519e0002-59fe-44b5-828f-34822e2361a9"
 #define SG_DEVICE_INFO_UUID "519e0003-59fe-44b5-828f-34822e2361a9"
 #define SG_CONTROL_UUID "519e0004-59fe-44b5-828f-34822e2361a9"
+#define SG_STATUS_UUID "519e0005-59fe-44b5-828f-34822e2361a9"
+
+// Status characteristic (read + notify), additive to protocol v1.
+#define STATUS_VERSION 1
+#define ST_HX711_OK 0x01         // HX711 delivered a sample in the last second
+#define ST_HEIGHT_PRESENT 0x02   // a height sensor was detected at boot
+#define ST_HEIGHT_READING 0x04   // the height sensor gave a valid reading recently
+#define ST_BATTERY_SENSE 0x08
+#define ST_WEIGHT_CALIBRATED 0x10  // weight factor set with "c <kg>"
+#define ST_ZERO_SET 0x20           // tare done (boot auto-tare, "t" or BLE)
+#define STATUS_PERIOD_MS 5000
 
 #define FLAG_WEIGHT 0x01
 #define FLAG_HEIGHT 0x02
@@ -143,7 +154,6 @@ enum State { STATE_EMPTY, STATE_MEASURING, STATE_HOLD };
 
 enum HeightSource { HEIGHT_NONE, HEIGHT_VL53L0X, HEIGHT_SHARP };
 
-HX711 scale;
 Adafruit_VL53L0X tof;
 Preferences prefs;
 
@@ -151,9 +161,13 @@ HeightSource heightSource = HEIGHT_NONE;
 long zeroOffset = DEFAULT_ZERO_OFFSET;
 float calFactor = DEFAULT_CAL_FACTOR;
 float heightOffsetCm = DEFAULT_HEIGHT_OFFSET_CM;
+bool weightCalibrated = false;
+bool zeroSet = false;
+unsigned long lastDistanceMs = 0;
 
 NimBLECharacteristic* weightMeasurementChar = nullptr;  // 0x2A9D
 NimBLECharacteristic* sgMeasurementChar = nullptr;
+NimBLECharacteristic* sgStatusChar = nullptr;
 
 volatile bool clientConnected = false;
 volatile bool clientJustConnected = false;
@@ -255,6 +269,8 @@ static void loadCalibration() {
   zeroOffset = prefs.getLong("zero", DEFAULT_ZERO_OFFSET);
   calFactor = prefs.getFloat("factor", DEFAULT_CAL_FACTOR);
   heightOffsetCm = prefs.getFloat("hoffset", DEFAULT_HEIGHT_OFFSET_CM);
+  weightCalibrated = prefs.getBool("calibrated", false);
+  zeroSet = prefs.isKey("zero");
   prefs.end();
   if (calFactor == 0 || isnan(calFactor)) calFactor = DEFAULT_CAL_FACTOR;
 }
@@ -264,12 +280,45 @@ static void saveCalibration() {
   prefs.putLong("zero", zeroOffset);
   prefs.putFloat("factor", calFactor);
   prefs.putFloat("hoffset", heightOffsetCm);
+  prefs.putBool("calibrated", weightCalibrated);
   prefs.end();
 }
 
-static void applyScaleCalibration() {
-  scale.set_offset(zeroOffset);
-  scale.set_scale(calFactor);
+// ---------------------------------------------------------------------------
+// HX711 (bit-banged, never blocks)
+// ---------------------------------------------------------------------------
+
+static portMUX_TYPE hx711Mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void hx711Begin() {
+  // Pull-up: a missing HX711 reads HIGH = "not ready" instead of floating.
+  pinMode(HX711_DT_PIN, INPUT_PULLUP);
+  pinMode(HX711_SCK_PIN, OUTPUT);
+  digitalWrite(HX711_SCK_PIN, LOW);
+}
+
+static bool hx711Ready() {
+  return digitalRead(HX711_DT_PIN) == LOW;
+}
+
+// Reads one 24-bit sample (channel A, gain 128). Call only when hx711Ready().
+// SCK high must stay < 60 us or the HX711 powers down, hence the critical section.
+static int32_t hx711ReadRaw() {
+  uint32_t value = 0;
+  portENTER_CRITICAL(&hx711Mux);
+  for (int i = 0; i < 24; i++) {
+    digitalWrite(HX711_SCK_PIN, HIGH);
+    delayMicroseconds(1);
+    value = (value << 1) | (digitalRead(HX711_DT_PIN) ? 1 : 0);
+    digitalWrite(HX711_SCK_PIN, LOW);
+    delayMicroseconds(1);
+  }
+  digitalWrite(HX711_SCK_PIN, HIGH);  // 25th pulse: next sample channel A, gain 128
+  delayMicroseconds(1);
+  digitalWrite(HX711_SCK_PIN, LOW);
+  portEXIT_CRITICAL(&hx711Mux);
+  if (value & 0x800000) value |= 0xFF000000;  // sign-extend
+  return (int32_t)value;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,9 +327,9 @@ static void applyScaleCalibration() {
 
 // NAN when the HX711 has no new sample (it runs at 10 SPS).
 static float readWeightKg() {
-  if (!scale.is_ready()) return NAN;
+  if (!hx711Ready()) return NAN;
   lastWeightReadyMs = millis();
-  return scale.get_units(1);
+  return (hx711ReadRaw() - zeroOffset) / calFactor;
 }
 
 static long readRawAverage(int samples) {
@@ -288,8 +337,8 @@ static long readRawAverage(int samples) {
   int got = 0;
   unsigned long start = millis();
   while (got < samples && millis() - start < (unsigned long)samples * 200) {
-    if (scale.is_ready()) {
-      sum += scale.read();
+    if (hx711Ready()) {
+      sum += hx711ReadRaw();
       got++;
     }
     delay(5);
@@ -301,7 +350,7 @@ static bool tare() {
   long raw = readRawAverage(20);
   if (raw == LONG_MIN) return false;
   zeroOffset = raw;
-  applyScaleCalibration();
+  zeroSet = true;
   saveCalibration();
   resetFilters();
   return true;
@@ -429,6 +478,38 @@ static void notifyMeasurement(float weightKg, float heightCm, bool stable) {
   }
 }
 
+// 5 bytes: version, sensor flags, height sensor type, state, battery (0xFF = none).
+static size_t buildStatus(uint8_t* out) {
+  uint8_t flags = 0;
+  if (lastWeightReadyMs != 0 && millis() - lastWeightReadyMs < HX711_TIMEOUT_MS) flags |= ST_HX711_OK;
+  if (heightSource != HEIGHT_NONE) flags |= ST_HEIGHT_PRESENT;
+  if (lastDistanceMs != 0 && millis() - lastDistanceMs < 2000) flags |= ST_HEIGHT_READING;
+  int battery = readBatteryPct();
+  if (battery >= 0) flags |= ST_BATTERY_SENSE;
+  if (weightCalibrated) flags |= ST_WEIGHT_CALIBRATED;
+  if (zeroSet) flags |= ST_ZERO_SET;
+  out[0] = STATUS_VERSION;
+  out[1] = flags;
+  out[2] = (uint8_t)heightSource;  // 0 none, 1 VL53L0X, 2 Sharp
+  out[3] = (uint8_t)state;         // 0 empty, 1 measuring, 2 hold
+  out[4] = battery >= 0 ? (uint8_t)battery : 0xFF;
+  return 5;
+}
+
+// Keeps the readable value current; notifies on change or every STATUS_PERIOD_MS.
+static void updateStatus() {
+  static uint8_t last[5] = {0};
+  static unsigned long lastSentMs = 0;
+  uint8_t now[5];
+  size_t length = buildStatus(now);
+  bool changed = memcmp(now, last, length) != 0;
+  if (!changed && millis() - lastSentMs < STATUS_PERIOD_MS) return;
+  memcpy(last, now, length);
+  lastSentMs = millis();
+  sgStatusChar->setValue(now, length);
+  if (clientConnected) sgStatusChar->notify();
+}
+
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& info) override {
     clientConnected = true;
@@ -480,6 +561,7 @@ static void setupBle() {
       SG_MEASUREMENT_UUID, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
   NimBLECharacteristic* info = sg->createCharacteristic(SG_DEVICE_INFO_UUID, NIMBLE_PROPERTY::READ);
   NimBLECharacteristic* control = sg->createCharacteristic(SG_CONTROL_UUID, NIMBLE_PROPERTY::WRITE);
+  sgStatusChar = sg->createCharacteristic(SG_STATUS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   control->setCallbacks(new ControlCallbacks());
 
   uint8_t infoValue[20];
@@ -549,8 +631,8 @@ static void handleSerialCommand(String line) {
       float factor = (raw - zeroOffset) / arg;
       if (fabsf(factor) < 1) { Serial.println("no load detected, tare first and put the weight on"); break; }
       calFactor = factor;
-      applyScaleCalibration();
-      saveCalibration();
+      weightCalibrated = true;
+          saveCalibration();
       resetFilters();
       Serial.printf("weight calibrated: factor=%.2f\n", calFactor);
       break;
@@ -580,8 +662,8 @@ static void handleSerialCommand(String line) {
       zeroOffset = DEFAULT_ZERO_OFFSET;
       calFactor = DEFAULT_CAL_FACTOR;
       heightOffsetCm = DEFAULT_HEIGHT_OFFSET_CM;
-      applyScaleCalibration();
-      saveCalibration();
+      weightCalibrated = false;
+          saveCalibration();
       Serial.println("calibration reset to defaults");
       break;
     case 'i':
@@ -624,8 +706,7 @@ void setup() {
   }
 
   loadCalibration();
-  scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
-  applyScaleCalibration();
+  hx711Begin();
   // Re-zero only when the platform is (almost) empty, so a child standing on
   // it during power-up does not become the new zero.
   long raw = readRawAverage(10);
@@ -642,6 +723,7 @@ void setup() {
   setupBle();
   enterState(STATE_EMPTY);
   printStatus();
+  Serial.println("ready (type i for status)");
 }
 
 void loop() {
@@ -668,7 +750,11 @@ void loop() {
   }
 
   float distance = readDistanceCm();
-  if (!isnan(distance)) lastDistanceCm = distance;
+  if (!isnan(distance)) {
+    lastDistanceCm = distance;
+    lastDistanceMs = millis();
+  }
+  updateStatus();
   float sample = readWeightKg();
 
   if (isnan(sample)) {
@@ -676,7 +762,6 @@ void loop() {
       Serial.println("HX711 timeout");
       resetFilters();
       enterState(STATE_EMPTY);
-      lastWeightReadyMs = millis();
     }
     delay(5);
     return;

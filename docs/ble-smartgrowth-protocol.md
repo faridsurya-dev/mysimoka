@@ -60,6 +60,7 @@ Kirim **hanya** saat berat stabil.
 | Measurement | `519e0002-59fe-44b5-828f-34822e2361a9` | Notify (+ Read opsional) |
 | Device Info | `519e0003-59fe-44b5-828f-34822e2361a9` | Read |
 | Control | `519e0004-59fe-44b5-828f-34822e2361a9` | Write (with response) |
+| Status (tambahan, opsional) | `519e0005-59fe-44b5-828f-34822e2361a9` | Read + Notify |
 
 UUID ini tetap (sudah dipakai aplikasi). Jangan diubah tanpa menaikkan versi protokol.
 
@@ -127,6 +128,34 @@ Format: `cmd u8` + parameter (opsional). Perintah tak dikenal diabaikan (tetap A
 
 Aplikasi menampilkan tombol **Tare** dan **Mulai ukur** di layar Perangkat bila terhubung ke
 SmartGrowth.
+
+## 6a. Characteristic Status (read + notify, tambahan)
+
+Melaporkan sensor mana yang tersambung/siap, untuk ditampilkan di aplikasi. Tambahan pada
+protokol 1: firmware lama tidak punya characteristic ini, aplikasi lalu menampilkan "status
+sensor tidak tersedia". Dikirim (notify) saat isinya berubah dan tiap 5 detik selama terhubung.
+
+| Offset | Tipe | Field |
+| --- | --- | --- |
+| 0 | u8 | versi status (= `0x01`) |
+| 1 | u8 | flags sensor (tabel di bawah) |
+| 2 | u8 | jenis sensor tinggi: 0 tidak ada, 1 VL53L0X, 2 Sharp GP2Y0A02 |
+| 3 | u8 | state: 0 kosong/siap, 1 mengukur, 2 hasil ditahan |
+| 4 | u8 | baterai 0–100 %, `0xFF` = tidak ada pembacaan baterai |
+
+| Bit | Arti |
+| --- | --- |
+| 0 | HX711 (berat) memberi data dalam 1 detik terakhir |
+| 1 | sensor tinggi terdeteksi saat boot |
+| 2 | sensor tinggi memberi bacaan valid dalam 2 detik terakhir (papan kepala terbaca) |
+| 3 | pembacaan baterai tersedia |
+| 4 | berat sudah dikalibrasi (perintah Serial `c <kg>`) |
+| 5 | titik nol sudah diset (tare) |
+| 6–7 | cadangan (0) |
+
+Contoh: `01 01 00 00 FF` → hanya timbangan, HX711 OK, belum dikalibrasi, belum tare, kosong.
+`01 37 01 01 57` → HX711 OK, VL53L0X terdeteksi dan terbaca, kalibrasi + tare OK, sedang
+mengukur, baterai 87 %.
 
 ## 7. Timing
 

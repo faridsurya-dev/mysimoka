@@ -12,7 +12,7 @@ Pin HX711 (DT 33, SCK 32), LED (25/26/27/14), I2C (21/22) dan kalibrasi awal dia
 ## Build
 
 1. Arduino IDE → Boards Manager: **esp32** (Espressif). Board: **ESP32 Dev Module**.
-2. Library Manager: **NimBLE-Arduino** 2.x, **HX711** (bogde), **Adafruit_VL53L0X**.
+2. Library Manager: **NimBLE-Arduino** 2.x, **Adafruit_VL53L0X**. HX711 dibaca langsung tanpa library (library HX711 umum macet selamanya bila HX711 tidak terpasang).
 3. Buka `smartgrowth.ino`, sesuaikan blok *Hardware configuration* dengan PCB, upload.
 
 ## Sensor tinggi
