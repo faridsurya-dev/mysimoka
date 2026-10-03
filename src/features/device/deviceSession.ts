@@ -7,6 +7,10 @@ export type DeviceReadingSource =
 export type DeviceSessionSnapshot = {
   connectedDeviceId: string | null;
   connectedDeviceName: string | null;
+  /** Admin nickname from the school device registry (preferred display name). */
+  connectedDeviceLabel: string | null;
+  /** Notice that outlives the connection, e.g. the device was disabled by the school admin. */
+  deviceNotice: string | null;
   /** Latest weight from the device (stable or not); see latestReadingStable. */
   latestWeightKg: number | null;
   latestWeightAt: string | null;
@@ -39,6 +43,8 @@ const EMPTY_READING = {
 let snapshot: DeviceSessionSnapshot = {
   connectedDeviceId: null,
   connectedDeviceName: null,
+  connectedDeviceLabel: null,
+  deviceNotice: null,
   ...EMPTY_READING,
 };
 
@@ -66,12 +72,32 @@ export function setConnectedBleDevice(device: { id: string; name: string } | nul
     ...snapshot,
     connectedDeviceId: device?.id ?? null,
     connectedDeviceName: device?.name ?? null,
+    connectedDeviceLabel: null,
+    // A new connection supersedes any notice about a previous device.
+    deviceNotice: device ? null : snapshot.deviceNotice,
   };
 
   if (!device) {
     snapshot = { ...snapshot, ...EMPTY_READING };
   }
 
+  emitChange();
+}
+
+/** Applies the registry label, only if that device is still the connected one. */
+export function setConnectedDeviceLabel(deviceId: string, label: string | null) {
+  if (snapshot.connectedDeviceId !== deviceId || snapshot.connectedDeviceLabel === label) {
+    return;
+  }
+  snapshot = { ...snapshot, connectedDeviceLabel: label };
+  emitChange();
+}
+
+export function setDeviceNotice(notice: string | null) {
+  if (snapshot.deviceNotice === notice) {
+    return;
+  }
+  snapshot = { ...snapshot, deviceNotice: notice };
   emitChange();
 }
 

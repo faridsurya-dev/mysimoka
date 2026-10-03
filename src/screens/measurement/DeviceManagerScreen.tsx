@@ -143,7 +143,14 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
             onPress={handleScanDevices}
             style={styles.scanButton}
           />
-          {scanMessage ? <Text style={styles.scanMessage}>{scanMessage}</Text> : null}
+          {deviceSession.deviceNotice ? (
+            <Text accessibilityRole="alert" style={styles.deviceNotice}>
+              {deviceSession.deviceNotice} Pengukuran tetap bisa diisi manual.
+            </Text>
+          ) : null}
+          {scanMessage && scanMessage !== deviceSession.deviceNotice ? (
+            <Text style={styles.scanMessage}>{scanMessage}</Text>
+          ) : null}
           {measurementLogs.length > 0 ? (
             <View style={styles.debugLogContainer}>
               <Text style={styles.debugLogTitle}>Log BLE Timbangan (raw)</Text>
@@ -180,7 +187,20 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                   device.isConnected && styles.detectedCardConnected,
                 ]}>
                 <View style={styles.detectedCardHeader}>
-                  <Text style={styles.detectedCardTitle}>{device.name}</Text>
+                  <View style={styles.detectedCardTitleBlock}>
+                    <Text style={styles.detectedCardTitle}>
+                      {device.isConnected &&
+                      device.id === deviceSession.connectedDeviceId &&
+                      deviceSession.connectedDeviceLabel
+                        ? deviceSession.connectedDeviceLabel
+                        : device.name}
+                    </Text>
+                    {device.isConnected &&
+                    device.id === deviceSession.connectedDeviceId &&
+                    deviceSession.connectedDeviceLabel ? (
+                      <Text style={styles.latestWeightLabel}>{device.name}</Text>
+                    ) : null}
+                  </View>
                   {device.isConnected ? (
                     <Pressable
                       accessibilityRole="button"
@@ -349,6 +369,16 @@ const styles = StyleSheet.create({
     ...typography.bodySm,
     color: colors.text.secondary,
   },
+  deviceNotice: {
+    ...typography.labelMd,
+    color: colors.feedback.warningText,
+    backgroundColor: colors.feedback.warningBackground,
+    borderColor: colors.feedback.warningBorder,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[8],
+  },
   debugLogContainer: {
     marginTop: spacing[8],
     borderRadius: radius.md,
@@ -420,10 +450,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing[12],
   },
+  detectedCardTitleBlock: {
+    flex: 1,
+    gap: spacing[2],
+  },
   detectedCardTitle: {
     ...typography.headingMd,
     color: colors.text.primary,
-    flex: 1,
   },
   latestWeightRow: {
     flexDirection: 'row',

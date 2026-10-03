@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Import the store hook directly (not the device barrel) so this manual screen
 // never pulls the BLE stack in.
+import { getDeviceDisplayName } from '../../features/device/deviceStatus';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
 import { listMeasurementStudents, saveStudentMeasurementRecord } from '../../services';
 import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
@@ -550,7 +551,7 @@ export function StudentMeasurementScreen({
                     <View style={styles.autoDeviceTextBlock}>
                       <Text style={styles.autoDeviceTitle}>
                         {isScaleConnected
-                          ? `Terhubung: ${deviceSession.connectedDeviceName ?? 'alat ukur'}`
+                          ? `Terhubung: ${getDeviceDisplayName(deviceSession) ?? 'alat ukur'}`
                           : 'Alat ukur belum terhubung'}
                       </Text>
                       <Text style={styles.autoDeviceDescription}>

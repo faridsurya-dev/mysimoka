@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { getDeviceDisplayName } from '../../features/device/deviceStatus';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
 import { DEFAULT_BATCH_ACTIVE_STUDENT } from '../../features/measurement';
 import { Screen } from '../../shared/components';
@@ -34,6 +35,9 @@ export function BatchMeasurementScreen({
   const [heightValue, setHeightValue] = useState('');
   const [weightValue, setWeightValue] = useState('');
   const deviceSession = useDeviceSession();
+  const connectedDeviceDisplayName = deviceSession.connectedDeviceId
+    ? getDeviceDisplayName(deviceSession)
+    : null;
   const [isDeviceSheetOpen, setIsDeviceSheetOpen] = useState(false);
 
   const activeStudent = {
@@ -159,7 +163,7 @@ export function BatchMeasurementScreen({
             </View>
             <View style={styles.connectionRow}>
               <Text style={styles.connectionName}>
-                Berat{deviceSession.connectedDeviceName ? ` (${deviceSession.connectedDeviceName})` : ''}
+                Berat{connectedDeviceDisplayName ? ` (${connectedDeviceDisplayName})` : ''}
               </Text>
               <View
                 style={[

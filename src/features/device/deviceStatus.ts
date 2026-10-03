@@ -20,12 +20,22 @@ export function describeLatestReading(session: DeviceSessionSnapshot) {
   return parts.join(' · ');
 }
 
+/** Admin label from the school registry when set, else the advertised name. */
+export function getDeviceDisplayName(
+  session: Pick<
+    DeviceSessionSnapshot,
+    'connectedDeviceId' | 'connectedDeviceName' | 'connectedDeviceLabel'
+  >,
+) {
+  return session.connectedDeviceLabel ?? session.connectedDeviceName ?? session.connectedDeviceId;
+}
+
 /** e.g. "Belum terhubung" or "Terhubung: SmartGrowth-1A2B · 25,4 kg · 123,4 cm". */
 export function describeDeviceStatus(session: DeviceSessionSnapshot) {
   if (!session.connectedDeviceId) {
-    return 'Belum terhubung';
+    return session.deviceNotice ?? 'Belum terhubung';
   }
-  const name = session.connectedDeviceName ?? session.connectedDeviceId;
+  const name = getDeviceDisplayName(session);
   const reading = describeLatestReading(session);
   return reading ? `Terhubung: ${name} · ${reading}` : `Terhubung: ${name} · menunggu data`;
 }

@@ -9,7 +9,9 @@ import {
   requestBlePermissions,
 } from './ble';
 import { loadS400BindKey } from './bindKeyStore';
-import { getDeviceSessionSnapshot, setConnectedBleDevice } from './deviceSession';
+import { getDeviceSessionSnapshot, setConnectedBleDevice, setDeviceNotice } from './deviceSession';
+import { setDeviceDisabledHandler, stopTrackingDevice, trackConnectedDevice } from './deviceRegistry';
+import { DEVICE_DISABLED_MESSAGE } from './deviceRegistryPayload';
 import {
   handleS400Advertisement,
   handleS400ManufacturerData,
@@ -23,6 +25,7 @@ import {
   SMARTGROWTH_CONTROL_CHAR_UUID,
   SMARTGROWTH_SERVICE_UUID,
   encodeSmartGrowthCommand,
+  getSmartGrowthDeviceInfo,
 } from './smartGrowth';
 
 // BLE lifecycle lives here (app-wide), not inside a screen, so readings keep
@@ -72,6 +75,7 @@ let initialized = false;
 let activeScan: ScanKind | null = null;
 let discoveryTimeout: ReturnType<typeof setTimeout> | null = null;
 let disconnectSubscription: Subscription | null = null;
+let pendingDisabledDeviceId: string | null = null;
 
 export function isLikelyS400Device(name: string) {
   return /s400|xmtzc/i.test(name);
@@ -102,6 +106,7 @@ function ensureInitialized() {
     return;
   }
   initialized = true;
+  setDeviceDisabledHandler(handleDeviceDisabled);
 
   const manager = getBleManager();
   if (!manager) {
@@ -195,10 +200,27 @@ async function startListenScan() {
   }
 }
 
+// The school admin disabled this device in the registry: drop the connection.
+// Manual input is unaffected; the notice stays visible until the next connect.
+function handleDeviceDisabled(deviceId: string) {
+  if (state.busyAction === 'connect' && state.busyDeviceId === deviceId) {
+    // Registry answered before connectDevice() finished; apply it right after.
+    pendingDisabledDeviceId = deviceId;
+    return;
+  }
+  if (getDeviceSessionSnapshot().connectedDeviceId !== deviceId || state.busyDeviceId) {
+    return;
+  }
+  disconnectDevice(deviceId, DEVICE_DISABLED_MESSAGE)
+    .catch(() => undefined)
+    .finally(() => setDeviceNotice(DEVICE_DISABLED_MESSAGE));
+}
+
 function handleConnectionLost(message: string) {
   const { connectedDeviceId } = getDeviceSessionSnapshot();
   if (connectedDeviceId) {
     stopMonitoringWeightScale(connectedDeviceId);
+    stopTrackingDevice(connectedDeviceId);
   }
   disconnectSubscription?.remove();
   disconnectSubscription = null;
@@ -378,6 +400,7 @@ export async function connectDevice(deviceId: string) {
         deviceKind: 's400',
         message: 'S400 aktif dalam mode broadcast. Menunggu paket iklan untuk pembacaan berat.',
       });
+      trackConnectedDevice({ bleId: deviceId, name: fallbackName, kindHint: 's400' });
       await startListenScan();
       return;
     }
@@ -397,9 +420,21 @@ export async function connectDevice(deviceId: string) {
     const monitorKind = deviceIsS400 ? null : await startMonitoringWeightScale(device);
     markConnected(deviceId);
 
+    const connectedKind: ConnectedDeviceKind = deviceIsS400 ? 's400' : (monitorKind ?? 'unknown');
+    // SmartGrowth Device Info (serial/firmware) is read while monitoring starts,
+    // so it is included here; the serial is the stable registry key.
+    const deviceInfo = monitorKind === 'smartgrowth' ? getSmartGrowthDeviceInfo(device.id) : null;
+    trackConnectedDevice({
+      bleId: device.id,
+      name: deviceName,
+      kindHint: connectedKind,
+      serial: deviceInfo?.serial,
+      firmwareVersion: deviceInfo?.firmwareVersion,
+    });
+
     if (deviceIsS400 || !monitorKind) {
       // No GATT weight notifications: fall back to reading advertisements.
-      setState({ connectionMode: 'broadcast', deviceKind: deviceIsS400 ? 's400' : 'unknown' });
+      setState({ connectionMode: 'broadcast', deviceKind: connectedKind });
       await startListenScan();
     } else {
       setState({ connectionMode: 'gatt', deviceKind: monitorKind });
@@ -420,13 +455,19 @@ export async function connectDevice(deviceId: string) {
     });
   } finally {
     setState({ isScanning: false, busyAction: null, busyDeviceId: null });
+    const disabledId = pendingDisabledDeviceId;
+    pendingDisabledDeviceId = null;
+    if (disabledId) {
+      handleDeviceDisabled(disabledId);
+    }
   }
 }
 
-export async function disconnectDevice(deviceId: string) {
+export async function disconnectDevice(deviceId: string, doneMessage?: string) {
   setState({ busyAction: 'disconnect', busyDeviceId: deviceId, message: null });
 
   try {
+    stopTrackingDevice(deviceId);
     disconnectSubscription?.remove();
     disconnectSubscription = null;
     stopMonitoringWeightScale(deviceId);
@@ -447,7 +488,7 @@ export async function disconnectDevice(deviceId: string) {
     setState({
       connectionMode: null,
       deviceKind: null,
-      message: 'Perangkat BLT berhasil diputuskan.',
+      message: doneMessage ?? 'Perangkat BLT berhasil diputuskan.',
     });
   } catch (error) {
     setState({

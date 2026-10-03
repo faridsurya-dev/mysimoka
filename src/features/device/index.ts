@@ -6,3 +6,4 @@ export * from './deviceManager';
 export * from './bindKey';
 export * from './bindKeyStore';
 export * from './smartGrowth';
+export * from './deviceRegistryPayload';

@@ -1,5 +1,10 @@
 import { API_BASE_URL, AUTH_BASE_URL, GRAPHQL_URL } from './environment';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  buildDeviceUpdateColumns,
+  buildDeviceUpsertObject,
+  type DeviceRegistrationInput,
+} from '../features/device/deviceRegistryPayload';
 import type {
   AverageMetricItem,
   ImmunizationSessionListItem,
@@ -3010,6 +3015,95 @@ export async function saveStudentMeasurementRecord(
     photoUri: null,
     heightCm: heightText,
     weightKg: weightText,
+  };
+}
+
+export type SchoolDeviceUpsertResult = {
+  id: string | null;
+  isActive: boolean;
+  label: string | null;
+};
+
+/**
+ * Registers/refreshes a BLE measuring device for the active school
+ * (Hasura `devices`). Returns null when skipped (no session, no active school,
+ * or plain 'user' role). Throws on request/GraphQL errors; callers must treat
+ * the device registry as best-effort and never block on it.
+ */
+export async function upsertSchoolDevice(
+  input: DeviceRegistrationInput,
+): Promise<SchoolDeviceUpsertResult | null> {
+  if (!authSession.accessToken) {
+    return null;
+  }
+  const role = resolveHighestAllowedRoleFromSession();
+  if (role === 'user') {
+    return null;
+  }
+  let userId: string;
+  try {
+    userId = getSessionUserIdOrThrow();
+  } catch {
+    return null;
+  }
+  const school = await loadCurrentSchoolContext().catch(() => null);
+  if (!school) {
+    return null;
+  }
+
+  const object = buildDeviceUpsertObject(input, {
+    schoolId: school.schoolId,
+    userId,
+    now: new Date(),
+  });
+  if (!object) {
+    return null;
+  }
+
+  const mutation = `
+    mutation UpsertDevice($object: devices_insert_input!, $updateColumns: [devices_update_column!]!) {
+      insert_devices_one(
+        object: $object
+        on_conflict: { constraint: devices_school_id_device_key_key, update_columns: $updateColumns }
+      ) {
+        id
+        is_active
+        label
+      }
+    }
+  `;
+
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { object, updateColumns: buildDeviceUpdateColumns(object) },
+    }),
+  })) as
+    | {
+        data?: { insert_devices_one?: Record<string, unknown> | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal mendaftarkan alat ukur.');
+  }
+
+  const row = asObject(responseBody?.data?.insert_devices_one);
+  if (!row) {
+    throw new Error('Respons pendaftaran alat ukur tidak valid.');
+  }
+
+  return {
+    id: readNullableString(row.id),
+    // Only an explicit false disables; anything else keeps the device usable.
+    isActive: row.is_active !== false,
+    label: readNullableString(row.label)?.trim() || null,
   };
 }
 
