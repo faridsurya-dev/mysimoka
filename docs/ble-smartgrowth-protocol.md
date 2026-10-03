@@ -4,8 +4,9 @@ Versi protokol: **1** · Status: draf acuan untuk tim firmware · Implementasi a
 `src/features/device/smartGrowth.ts` (parser + UUID), `src/features/device/weightScale.ts`
 (deteksi layanan), uji: `__tests__/smartGrowth.test.ts` (vektor hex di bawah).
 
-Dokumen ini adalah **sumber kebenaran** untuk firmware. Contoh sketch Arduino (belum diuji):
-[`ble-smartgrowth-firmware-example.ino`](./ble-smartgrowth-firmware-example.ino).
+Dokumen ini adalah **sumber kebenaran** untuk firmware. Firmware (belum diuji di perangkat):
+[`firmware/smartgrowth/`](../firmware/smartgrowth/) — pin, sensor, dan kalibrasi lewat Serial
+dijelaskan di README-nya.
 
 > Prinsip produk: alat **opsional**. Aplikasi tetap bisa dipakai penuh tanpa alat (input
 > manual). Firmware tidak boleh mensyaratkan aplikasi melakukan langkah khusus agar
@@ -17,7 +18,7 @@ Dokumen ini adalah **sumber kebenaran** untuk firmware. Contoh sketch Arduino (b
 | --- | --- |
 | MCU | ESP32 DevKit V1 (ESP32-WROOM-32, 30 pin), stack **NimBLE-Arduino** (2.x) |
 | Berat | Load cell + HX711 (library `bogde/HX711`) |
-| Tinggi | **Belum dipilih** — lihat §10. Unit tanpa sensor tinggi tetap valid (flag bit1 = 0) |
+| Tinggi | VL53L0X (I2C) atau Sharp GP2Y0A02 (analog) — lihat §10. Unit tanpa sensor tinggi tetap valid (flag bit1 = 0) |
 | Daya | Li-ion + TP4056 (USB-C, proteksi) → MT3608 boost 5 V → VIN DevKit |
 | Baterai | Tidak ada sensing di papan saat ini. Opsional: pembagi tegangan ke ADC1 (mis. GPIO34) |
 
@@ -157,6 +158,11 @@ SmartGrowth.
 Aplikasi juga memvalidasi ulang saat menyimpan (form). Operator selalu bisa mengetik manual.
 
 ## 10. Pilihan sensor tinggi
+
+> **PCB v1 (tim hardware):** VL53L0X (I2C) atau Sharp GP2Y0A02 (analog 20–150 cm), sensor di
+> platform menghadap **ke atas** ke papan kepala (`tinggi = jarak + offset`). Firmware mendukung
+> kedua arah pemasangan; kalibrasi offset lewat perintah Serial `h <cm>`. Uraian di bawah adalah
+> kajian awal (pemasangan ke bawah).
 
 Prinsip: sensor dipasang menghadap ke bawah pada ketinggian tetap yang diketahui di atas
 platform timbangan, lalu `tinggi_cm = mount_height_cm − jarak_terukur_cm`. Gunakan **papan
