@@ -77,3 +77,6 @@ yarn-error.log
 # Build-time env (MYSIMOKA_*), inlined by babel/inline-mysimoka-env.js
 .env
 .env.*
+
+# Built APKs (served from mysimoka-web/deploy/downloads, not git)
+*.apk
