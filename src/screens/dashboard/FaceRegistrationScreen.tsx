@@ -671,6 +671,7 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
 
     const studentId = assignedByCropId[selectedCrop.id];
     if (!studentId || !capturedPhoto) {
+      Alert.alert('Siswa belum dipilih', 'Pasangkan wajah ini dengan siswa sebelum mengunggah.');
       return;
     }
 
@@ -718,7 +719,22 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
       );
 
     if (pendingPairs.length === 0) {
-      onBack();
+      const hasUploaded = faceCrops.some(crop => uploadedByCropId[crop.id] === true);
+      if (hasUploaded) {
+        onBack();
+        return;
+      }
+
+      Alert.alert(
+        'Belum ada wajah yang disimpan',
+        faceCrops.length === 0
+          ? 'Tidak ada wajah terdeteksi di foto. Ambil ulang foto dengan wajah terlihat jelas.'
+          : 'Pasangkan setiap wajah dengan siswa terlebih dahulu, lalu tekan Selesai.',
+        [
+          { text: 'Tetap di sini', style: 'cancel' },
+          { text: 'Keluar tanpa menyimpan', style: 'destructive', onPress: onBack },
+        ],
+      );
       return;
     }
 
@@ -740,7 +756,11 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
         });
         return next;
       });
-      onBack();
+      Alert.alert(
+        'Wajah tersimpan',
+        `${pendingPairs.length} wajah siswa berhasil disimpan.`,
+        [{ text: 'OK', onPress: onBack }],
+      );
     } catch (error) {
       Alert.alert(
         'Upload wajah gagal',
