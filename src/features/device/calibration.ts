@@ -225,3 +225,75 @@ export function createBatchId() {
     return value.toString(16);
   });
 }
+
+/** Default days after the last accuracy check before staff are told to ask for a re-check. */
+export const DEFAULT_RECALIBRATION_INTERVAL_DAYS = 180;
+
+/** One accuracy-check row (`device_calibrations`, kind 'check') as read by the app. */
+export type CalibrationCheckRow = {
+  measure: CalibrationMeasure;
+  createdAt: string;
+  bias: number | null;
+  withinTolerance: boolean | null;
+};
+
+export type DeviceCalibrationStatus = {
+  /** Latest accuracy check of any measure; null = never checked. */
+  lastCheckAt: string | null;
+  /** Bias of the latest check per measure (kg / cm), null when absent. */
+  weightBias: number | null;
+  heightBias: number | null;
+  never: boolean;
+  /** Latest check older than the recalibration interval. */
+  stale: boolean;
+  /** Measures whose latest check was out of tolerance (no later passing check). */
+  outOfTolerance: Array<{ measure: CalibrationMeasure; bias: number | null }>;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Staff-facing status of a device from its accuracy-check rows (any order).
+ * Per measure only the latest check counts: a later passing check clears an
+ * earlier out-of-tolerance one.
+ */
+export function computeDeviceCalibrationStatus(
+  rows: CalibrationCheckRow[],
+  intervalDays: number,
+  now: number = Date.now(),
+): DeviceCalibrationStatus {
+  const valid = rows
+    .map(row => ({ row, time: new Date(row.createdAt).getTime() }))
+    .filter(item => Number.isFinite(item.time))
+    .sort((first, second) => second.time - first.time);
+  const latestOf = (measure: CalibrationMeasure) => valid.find(item => item.row.measure === measure) ?? null;
+  const weight = latestOf('weight');
+  const height = latestOf('height');
+  const newest = valid[0] ?? null;
+  const days = Number.isFinite(intervalDays) && intervalDays > 0 ? intervalDays : DEFAULT_RECALIBRATION_INTERVAL_DAYS;
+  const outOfTolerance: DeviceCalibrationStatus['outOfTolerance'] = [];
+  for (const item of [weight, height]) {
+    if (item && item.row.withinTolerance === false) {
+      outOfTolerance.push({ measure: item.row.measure, bias: item.row.bias });
+    }
+  }
+  return {
+    lastCheckAt: newest ? newest.row.createdAt : null,
+    weightBias: weight?.row.bias ?? null,
+    heightBias: height?.row.bias ?? null,
+    never: newest === null,
+    stale: newest !== null && now - newest.time > days * DAY_MS,
+    outOfTolerance,
+  };
+}
+
+/** "+0.12" / "-0.30" / "0.00" */
+export function formatBias(value: number, measure: CalibrationMeasure) {
+  const text = value.toFixed(measure === 'weight' ? 2 : 1);
+  return value > 0 ? `+${text}` : text;
+}
+
+/** "6 bulan" for 180 days, else "N hari". */
+export function describeInterval(days: number) {
+  return days % 30 === 0 ? `${days / 30} bulan` : `${days} hari`;
+}

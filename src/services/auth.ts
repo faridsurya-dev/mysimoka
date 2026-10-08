@@ -7,10 +7,13 @@ import {
 } from '../features/device/deviceRegistryPayload';
 import {
   DEFAULT_CALIBRATION_TOLERANCES,
+  DEFAULT_RECALIBRATION_INTERVAL_DAYS,
   buildCalibrationInsertObject,
+  type CalibrationCheckRow,
   type CalibrationTolerances,
   type DeviceCalibrationRowInput,
 } from '../features/device/calibration';
+import type { TechnicianPinConfig } from '../features/device/technicianMode';
 import type {
   AverageMetricItem,
   ImmunizationSessionListItem,
@@ -3235,6 +3238,162 @@ export async function fetchCalibrationTolerances(): Promise<CalibrationTolerance
     };
   } catch {
     return DEFAULT_CALIBRATION_TOLERANCES;
+  }
+}
+
+export type CalibrationExtras = {
+  /** False when the settings could not be read (offline, columns not deployed, no access). */
+  loaded: boolean;
+  recalibrationIntervalDays: number;
+  /** Technician PIN: school row first, then the global row; null = none set. */
+  technicianPin: TechnicianPinConfig | null;
+};
+
+/**
+ * Re-check interval and technician PIN from `calibration_settings`. Separate
+ * from fetchCalibrationTolerances so the tolerances keep working on a backend
+ * where these later columns are not deployed yet. Never throws.
+ */
+export async function fetchCalibrationExtras(): Promise<CalibrationExtras> {
+  const fallback: CalibrationExtras = {
+    loaded: false,
+    recalibrationIntervalDays: DEFAULT_RECALIBRATION_INTERVAL_DAYS,
+    technicianPin: null,
+  };
+  try {
+    if (!authSession.accessToken || resolveHighestAllowedRoleFromSession() === 'user') {
+      return fallback;
+    }
+    const school = await loadCurrentSchoolContext().catch(() => null);
+    const query = `
+      query CalibrationExtras($schoolId: uuid) {
+        calibration_settings(
+          where: { _or: [{ school_id: { _eq: $schoolId } }, { school_id: { _is_null: true } }] }
+        ) {
+          school_id
+          recalibration_interval_days
+          technician_pin_hash
+          technician_pin_salt
+        }
+      }
+    `;
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, variables: { schoolId: school?.schoolId ?? null } }),
+    })) as
+      | {
+          data?: { calibration_settings?: Array<Record<string, unknown>> | null };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+    if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      return fallback;
+    }
+    if (!Array.isArray(responseBody?.data?.calibration_settings)) {
+      return fallback;
+    }
+    const rows = responseBody.data.calibration_settings;
+    const schoolRow = school
+      ? rows.find(row => readNullableString(asObject(row)?.school_id) === school.schoolId)
+      : undefined;
+    const globalRow = rows.find(row => readNullableString(asObject(row)?.school_id) === null);
+
+    const intervalRow = schoolRow ?? globalRow;
+    const interval = intervalRow ? readNullableNumber(intervalRow.recalibration_interval_days) : null;
+
+    const pinOf = (row: Record<string, unknown> | undefined, source: 'school' | 'global') => {
+      const hash = row ? readNullableString(row.technician_pin_hash)?.trim() : null;
+      const salt = row ? readNullableString(row.technician_pin_salt) : null;
+      return hash && salt ? { hash, salt, source } : null;
+    };
+
+    return {
+      loaded: true,
+      recalibrationIntervalDays:
+        interval !== null && interval > 0 ? Math.round(interval) : DEFAULT_RECALIBRATION_INTERVAL_DAYS,
+      technicianPin: pinOf(schoolRow, 'school') ?? pinOf(globalRow, 'global'),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Accuracy-check rows of one device (by registry id, device_key or BLE id),
+ * newest first. Null when they could not be read (no session, offline, no
+ * access). Never throws.
+ */
+export async function fetchDeviceCalibrationChecks(device: {
+  bleId: string;
+  deviceKey: string | null;
+  deviceId: string | null;
+}): Promise<CalibrationCheckRow[] | null> {
+  try {
+    if (!authSession.accessToken || resolveHighestAllowedRoleFromSession() === 'user') {
+      return null;
+    }
+    const match: Array<Record<string, unknown>> = [{ ble_id: { _eq: device.bleId } }];
+    if (device.deviceKey) {
+      match.push({ device_key: { _eq: device.deviceKey } });
+    }
+    if (device.deviceId) {
+      match.push({ device_id: { _eq: device.deviceId } });
+    }
+    const query = `
+      query DeviceCalibrationChecks($where: device_calibrations_bool_exp!) {
+        device_calibrations(where: $where, order_by: { created_at: desc }, limit: 40) {
+          measure
+          created_at
+          bias
+          within_tolerance
+        }
+      }
+    `;
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        variables: { where: { kind: { _eq: 'check' }, _or: match } },
+      }),
+    })) as
+      | {
+          data?: { device_calibrations?: Array<Record<string, unknown>> | null };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+    if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+      return null;
+    }
+    if (!Array.isArray(responseBody?.data?.device_calibrations)) {
+      return null;
+    }
+    return responseBody.data.device_calibrations
+      .map(row => {
+        const source = asObject(row);
+        const measure = readNullableString(source?.measure);
+        const createdAt = readNullableString(source?.created_at);
+        if ((measure !== 'weight' && measure !== 'height') || !createdAt) {
+          return null;
+        }
+        return {
+          measure,
+          createdAt,
+          bias: readNullableNumber(source?.bias),
+          withinTolerance:
+            typeof source?.within_tolerance === 'boolean' ? source.within_tolerance : null,
+        } satisfies CalibrationCheckRow;
+      })
+      .filter((row): row is CalibrationCheckRow => row !== null);
+  } catch {
+    return null;
   }
 }
 

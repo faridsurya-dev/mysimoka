@@ -3,7 +3,7 @@ import { AppState, Linking, Pressable, StyleSheet, Switch, Text, View } from 're
 import { State } from 'react-native-ble-plx';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { PrimaryButton, Screen } from '../../shared/components';
+import { InlineAlert, PrimaryButton, Screen } from '../../shared/components';
 import {
   SMARTGROWTH_COMMANDS,
   connectDevice,
@@ -25,11 +25,22 @@ import {
   useDeviceSession,
   useLastDeviceState,
 } from '../../features/device';
+import {
+  computeDeviceCalibrationStatus,
+  describeInterval,
+  formatBias,
+  type DeviceCalibrationStatus,
+} from '../../features/device/calibration';
+import { getRegisteredDevice } from '../../features/device/deviceRegistry';
+import { resolveDeviceKey } from '../../features/device/deviceRegistryPayload';
+import { disableTechnicianMode, useTechnicianModeActive } from '../../features/device/technicianMode';
+import { fetchCalibrationExtras, fetchDeviceCalibrationChecks } from '../../services/auth';
 import { colors, radius, spacing, typography } from '../../theme';
 import { BluetoothAccessModal, type BluetoothAccessReason } from './BluetoothAccessModal';
 import { S400BindKeyPanel } from './S400BindKeyPanel';
 import { SensorStatusChecklist } from './SensorStatusChecklist';
 import { SmartGrowthCalibrationModal } from './SmartGrowthCalibrationModal';
+import { TechnicianPinModal } from './TechnicianPinModal';
 
 type DeviceManagerScreenProps = {
   onBack?: () => void;
@@ -41,6 +52,58 @@ function formatWeightKg(weightKg: number) {
   }
 
   return `${weightKg.toFixed(2)} kg`;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  try {
+    return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+/** Long press on the "Perangkat" title that opens the technician PIN prompt. */
+const TECHNICIAN_LONG_PRESS_MS = 1500;
+
+type CalibrationStatusView = DeviceCalibrationStatus & { intervalDays: number };
+
+/**
+ * Read-only calibration status of the connected SmartGrowth device for staff.
+ * Best-effort: null while loading or when it could not be read; never throws.
+ */
+function useDeviceCalibrationStatus(bleId: string | null, serial: string | null, refreshKey: number) {
+  const [status, setStatus] = useState<CalibrationStatusView | null>(null);
+  useEffect(() => {
+    setStatus(null);
+    if (!bleId) {
+      return undefined;
+    }
+    let active = true;
+    const registered = getRegisteredDevice(bleId);
+    Promise.all([
+      fetchCalibrationExtras(),
+      fetchDeviceCalibrationChecks({
+        bleId,
+        deviceKey: registered?.deviceKey ?? resolveDeviceKey({ bleId, serial }),
+        deviceId: registered?.id ?? null,
+      }),
+    ])
+      .then(([extras, rows]) => {
+        if (active && rows) {
+          const intervalDays = extras.recalibrationIntervalDays;
+          setStatus({ ...computeDeviceCalibrationStatus(rows, intervalDays), intervalDays });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [bleId, serial, refreshKey]);
+  return status;
 }
 
 function formatTimestamp(value: string) {
@@ -91,6 +154,15 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   const { autoReconnectEnabled } = useLastDeviceState();
   const [measurementLogs, setMeasurementLogs] = useState<string[]>([]);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
+  const technicianMode = useTechnicianModeActive();
+  // Re-read the calibration status after the calibration menu closes.
+  const [calibrationStatusKey, setCalibrationStatusKey] = useState(0);
+  const calibrationStatus = useDeviceCalibrationStatus(
+    deviceKind === 'smartgrowth' ? deviceSession.connectedDeviceId : null,
+    smartGrowthInfo?.serial ?? null,
+    calibrationStatusKey,
+  );
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
 
   // BLE scan/connection is owned by the device manager and survives this screen
@@ -218,7 +290,11 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     <View style={styles.container}>
       <View style={[styles.fixedHeader, { paddingTop: insets.top + spacing[8] }]}>
         {onBack ? (
-          <Pressable onPress={onBack} style={styles.headerIdentity}>
+          <Pressable
+            delayLongPress={TECHNICIAN_LONG_PRESS_MS}
+            onLongPress={() => setPinOpen(true)}
+            onPress={onBack}
+            style={styles.headerIdentity}>
             <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
               <Path
                 d="M15 6l-6 6 6 6"
@@ -231,8 +307,21 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
             <Text style={styles.headerTitle}>Perangkat</Text>
           </Pressable>
         ) : (
-          <Text style={styles.headerTitle}>Perangkat</Text>
+          <Pressable
+            delayLongPress={TECHNICIAN_LONG_PRESS_MS}
+            onLongPress={() => setPinOpen(true)}>
+            <Text style={styles.headerTitle}>Perangkat</Text>
+          </Pressable>
         )}
+        {technicianMode ? (
+          <Pressable
+            accessibilityLabel="Mode teknisi aktif. Tekan untuk mengunci."
+            accessibilityRole="button"
+            onPress={disableTechnicianMode}
+            style={({ pressed }) => [styles.technicianPill, pressed && styles.technicianPillPressed]}>
+            <Text style={styles.technicianPillLabel}>Mode teknisi aktif · Kunci</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <Screen contentContainerStyle={[styles.content, { paddingTop: headerHeight + spacing[16] }]}>
@@ -413,6 +502,9 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                             {smartGrowthInfo.serial ? ` • SN ${smartGrowthInfo.serial}` : ''}
                           </Text>
                         ) : null}
+                        {calibrationStatus ? (
+                          <CalibrationStatusNotice status={calibrationStatus} />
+                        ) : null}
                         <View style={styles.controlButtons}>
                           <PrimaryButton
                             label="Tare (nol-kan)"
@@ -434,12 +526,14 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                             size="sm"
                             variant="outline"
                           />
-                          <PrimaryButton
-                            label="Cek akurasi & kalibrasi"
-                            onPress={() => setCalibrationOpen(true)}
-                            size="sm"
-                            variant="secondary"
-                          />
+                          {technicianMode ? (
+                            <PrimaryButton
+                              label="Cek akurasi & kalibrasi"
+                              onPress={() => setCalibrationOpen(true)}
+                              size="sm"
+                              variant="secondary"
+                            />
+                          ) : null}
                         </View>
                       </View>
                     ) : null}
@@ -455,10 +549,63 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
         </View>
       </Screen>
       <SmartGrowthCalibrationModal
-        onClose={() => setCalibrationOpen(false)}
+        onClose={() => {
+          setCalibrationOpen(false);
+          setCalibrationStatusKey(key => key + 1);
+        }}
         visible={calibrationOpen}
       />
+      <TechnicianPinModal
+        onClose={() => setPinOpen(false)}
+        onUnlocked={() => setPinOpen(false)}
+        visible={pinOpen}
+      />
     </View>
+  );
+}
+
+/** Last accuracy check + warnings for staff. Informational only: never blocks measuring. */
+function CalibrationStatusNotice({ status }: { status: CalibrationStatusView }) {
+  if (status.never) {
+    return (
+      <InlineAlert message="Alat belum dikalibrasi. Hubungi tim teknis sebelum dipakai." tone="warning" />
+    );
+  }
+  const parts: string[] = [];
+  if (status.weightBias !== null) {
+    parts.push(`bias ${formatBias(status.weightBias, 'weight')} kg`);
+  }
+  if (status.heightBias !== null) {
+    parts.push(`bias tinggi ${formatBias(status.heightBias, 'height')} cm`);
+  }
+  const lastDate = status.lastCheckAt ? formatDate(status.lastCheckAt) : '-';
+  const outOfTolerance = status.outOfTolerance
+    .map(item =>
+      item.bias !== null
+        ? `${item.measure === 'weight' ? 'bias' : 'bias tinggi'} ${formatBias(item.bias, item.measure)} ${
+            item.measure === 'weight' ? 'kg' : 'cm'
+          }`
+        : item.measure === 'weight'
+          ? 'berat'
+          : 'tinggi',
+    )
+    .join(', ');
+  return (
+    <>
+      <Text style={styles.latestWeightLabel}>
+        Kalibrasi terakhir: {lastDate}
+        {parts.length > 0 ? ` · ${parts.join(' · ')}` : ''}
+      </Text>
+      {status.outOfTolerance.length > 0 ? (
+        <InlineAlert message={`Hasil cek terakhir di luar toleransi (${outOfTolerance}).`} tone="warning" />
+      ) : null}
+      {status.stale ? (
+        <InlineAlert
+          message={`Kalibrasi terakhir lebih dari ${describeInterval(status.intervalDays)} lalu (${lastDate}). Minta tim teknis cek ulang.`}
+          tone="warning"
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -498,6 +645,21 @@ const styles = StyleSheet.create({
   headerTitle: {
     ...typography.headingXL,
     color: colors.text.primary,
+  },
+  technicianPill: {
+    paddingHorizontal: spacing[10],
+    paddingVertical: spacing[4],
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.feedback.warningBorder,
+    backgroundColor: colors.feedback.warningBackground,
+  },
+  technicianPillPressed: {
+    opacity: 0.7,
+  },
+  technicianPillLabel: {
+    ...typography.labelMd,
+    color: colors.feedback.warningText,
   },
   intro: {
     gap: spacing[8],
