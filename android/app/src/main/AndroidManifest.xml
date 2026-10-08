@@ -1,9 +1,36 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!--
+      No storage/media permission: the gallery pick in FaceRegistrationScreen uses
+      react-native-image-picker launchImageLibrary, which goes through the system
+      Photo Picker (PickVisualMedia) and needs no READ_MEDIA_IMAGES /
+      READ_EXTERNAL_STORAGE. Removed in case any library adds them back.
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" tools:node="remove" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
+
+    <!--
+      BLE (react-native-ble-plx). On Android 12+ the app only requests
+      BLUETOOTH_SCAN (neverForLocation, declared by the library) and
+      BLUETOOTH_CONNECT; see src/features/device/ble.ts. Location is only needed
+      for BLE scanning on Android 8-11, so cap it at API 30 (the library declares
+      it without maxSdkVersion).
+    -->
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30"
+        tools:node="replace" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30"
+        tools:node="replace" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application

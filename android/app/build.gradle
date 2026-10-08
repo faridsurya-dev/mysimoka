@@ -72,6 +72,51 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * Release (upload) signing.
+ *
+ * Values are read from android/keystore.properties (gitignored, see
+ * keystore.properties.example) and can be overridden by environment variables:
+ *   MYSIMOKA_UPLOAD_STORE_FILE, MYSIMOKA_UPLOAD_STORE_PASSWORD,
+ *   MYSIMOKA_UPLOAD_KEY_ALIAS, MYSIMOKA_UPLOAD_KEY_PASSWORD
+ * storeFile is resolved relative to the android/ folder unless absolute.
+ * When anything is missing, release builds are signed with the debug key and a
+ * warning is printed, so local release builds keep working.
+ */
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+def readSigningValue = { String envName, String propName ->
+    def fromEnv = System.getenv(envName)
+    if (fromEnv != null && !fromEnv.trim().isEmpty()) {
+        return fromEnv.trim()
+    }
+    def fromFile = keystoreProperties.getProperty(propName)
+    return (fromFile != null && !fromFile.trim().isEmpty()) ? fromFile.trim() : null
+}
+def uploadKeystore = [
+    storeFile    : readSigningValue("MYSIMOKA_UPLOAD_STORE_FILE", "storeFile"),
+    storePassword: readSigningValue("MYSIMOKA_UPLOAD_STORE_PASSWORD", "storePassword"),
+    keyAlias     : readSigningValue("MYSIMOKA_UPLOAD_KEY_ALIAS", "keyAlias"),
+    keyPassword  : readSigningValue("MYSIMOKA_UPLOAD_KEY_PASSWORD", "keyPassword"),
+]
+def uploadStoreFile = uploadKeystore.storeFile ? rootProject.file(uploadKeystore.storeFile) : null
+def hasUploadKeystore = uploadKeystore.values().every { it != null } && uploadStoreFile.exists()
+if (!hasUploadKeystore) {
+    def reason = uploadStoreFile != null && !uploadStoreFile.exists() ?
+        "keystore file not found: ${uploadStoreFile}" :
+        "android/keystore.properties or MYSIMOKA_UPLOAD_* env vars not set"
+    logger.warn("")
+    logger.warn("=====================================================================")
+    logger.warn(" WARNING: MySimoka release builds are signed with the DEBUG key.")
+    logger.warn(" Reason: ${reason}")
+    logger.warn(" Google Play will REJECT this APK/AAB. See docs/playstore/README.md.")
+    logger.warn("=====================================================================")
+    logger.warn("")
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -82,8 +127,8 @@ android {
         applicationId "com.mysimoka_mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.2"
+        versionCode 4
+        versionName "1.3"
     }
     signingConfigs {
         debug {
@@ -92,16 +137,29 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasUploadKeystore) {
+            release {
+                storeFile uploadStoreFile
+                storePassword uploadKeystore.storePassword
+                keyAlias uploadKeystore.keyAlias
+                keyPassword uploadKeystore.keyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Upload key from keystore.properties / MYSIMOKA_UPLOAD_* env vars.
+            // Without it, release falls back to the debug key (NOT accepted by Google Play).
+            signingConfig hasUploadKeystore ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
+            // Ship native symbol tables in the AAB so Play Console can symbolicate
+            // native crashes/ANRs (Hermes, Reanimated, Skia, VisionCamera).
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }

@@ -265,6 +265,13 @@ export function ProfileOverviewScreen({
               onPress={onOpenEditPassword}
               value="••••••••"
             />
+            <Divider inset={48} />
+            <ListRow
+              icon="shield"
+              label="Pengaturan Akun"
+              onPress={onOpenAccountSettings}
+              value="Privasi, hapus akun, dan keluar"
+            />
             {shouldShowWhatsApp ? (
               <>
                 <Divider inset={48} />

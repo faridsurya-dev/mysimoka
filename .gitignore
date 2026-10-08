@@ -80,3 +80,8 @@ yarn-error.log
 
 # Built APKs (served from mysimoka-web/deploy/downloads, not git)
 *.apk
+
+# Release signing (upload key) - never commit
+*.jks
+android/keystore.properties
+keystore.properties
