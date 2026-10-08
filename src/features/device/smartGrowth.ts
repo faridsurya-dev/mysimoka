@@ -12,6 +12,8 @@ export const SMARTGROWTH_DEVICE_INFO_CHAR_UUID = '519e0003-59fe-44b5-828f-34822e
 export const SMARTGROWTH_CONTROL_CHAR_UUID = '519e0004-59fe-44b5-828f-34822e2361a9';
 /** Sensor status (read + notify), protocol section 6a. Absent on old firmware. */
 export const SMARTGROWTH_STATUS_CHAR_UUID = '519e0005-59fe-44b5-828f-34822e2361a9';
+/** Calibration values + last calibration result (read + notify), protocol section 6b. Firmware >= 2.1. */
+export const SMARTGROWTH_CALIBRATION_CHAR_UUID = '519e0006-59fe-44b5-828f-34822e2361a9';
 
 export const SMARTGROWTH_NAME_PATTERN = /^(smartgrowth|mysimoka)-/i;
 
@@ -28,9 +30,19 @@ export const SMARTGROWTH_COMMANDS = {
   stopMeasurement: 0x03,
   /** Reserved: set display unit. */
   setUnit: 0x10,
-  /** Reserved: calibration. */
-  calibrate: 0x20,
+  /** Weight calibration, param float32 LE reference kg (firmware >= 2.1). */
+  calibrateWeight: 0x20,
+  /** Height calibration, param float32 LE reference cm (firmware >= 2.1). */
+  calibrateHeight: 0x21,
+  /** Reset calibration to defaults, param 0xA5 (confirm) (firmware >= 2.1). */
+  resetCalibration: 0x22,
 } as const;
+
+export type SmartGrowthCommand = (typeof SMARTGROWTH_COMMANDS)[keyof typeof SMARTGROWTH_COMMANDS];
+
+/** Tare param: skip the "platform empty" check (calibration wizard). */
+export const SMARTGROWTH_TARE_FORCE = 0x01;
+export const SMARTGROWTH_RESET_CONFIRM = 0xa5;
 
 export const SMARTGROWTH_RANGES = {
   weightKg: { min: 2, max: 200 },
@@ -204,6 +216,105 @@ export function parseSmartGrowthStatusBase64(base64Value: string) {
   }
 }
 
+export const SMARTGROWTH_CALIBRATION_FLAGS = {
+  weightCalibrated: 0x01,
+  zeroSet: 0x02,
+  heightCalibrated: 0x04,
+  busy: 0x08,
+  heightPresent: 0x10,
+} as const;
+
+/** Result codes of the last calibration command (Calibration characteristic byte 3). */
+export const SMARTGROWTH_CALIBRATION_RESULTS: Record<number, string> = {
+  0x00: 'ok',
+  0x01: 'hx711_not_responding',
+  0x02: 'no_load',
+  0x03: 'bad_argument',
+  0x04: 'height_no_reading',
+  0x05: 'platform_not_empty',
+  0x06: 'no_height_sensor',
+  0x07: 'busy',
+  0x08: 'unknown_command',
+  0xff: 'none',
+};
+
+export type SmartGrowthCalibrationState = {
+  version: number;
+  weightCalibrated: boolean;
+  zeroSet: boolean;
+  heightCalibrated: boolean;
+  busy: boolean;
+  heightPresent: boolean;
+  /** Opcode of the last calibration command (0 = none since boot). */
+  lastCommand: number;
+  /** Raw result code, see SMARTGROWTH_CALIBRATION_RESULTS. */
+  lastResultCode: number;
+  lastResult: string;
+  /** Increments (mod 256) when a calibration command finishes. */
+  sequence: number;
+  zeroOffset: number;
+  calFactor: number;
+  heightOffsetCm: number;
+  /** tare/weight: HX711 raw; height: distance in 0.01 cm. */
+  lastMeasuredRaw: number;
+};
+
+function readInt32LE(bytes: Uint8Array, offset: number) {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(offset, true);
+}
+
+function readFloat32LE(bytes: Uint8Array, offset: number) {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getFloat32(offset, true);
+}
+
+/**
+ * Calibration frame (20 bytes, little-endian): [0] version (=1) | [1] flags | [2] last opcode
+ * | [3] last result | [4] seq | [5-8] zero i32 | [9-12] factor f32 | [13-16] height offset f32
+ * | [17-19] measured i24.
+ */
+export function parseSmartGrowthCalibration(bytes: Uint8Array): SmartGrowthCalibrationState | null {
+  if (bytes.length < 20 || bytes[0] !== 1) {
+    return null;
+  }
+  const flags = bytes[1];
+  let measured = bytes[17] + bytes[18] * 256 + bytes[19] * 65536;
+  if (measured >= 0x800000) {
+    measured -= 0x1000000;
+  }
+  const resultCode = bytes[3];
+  return {
+    version: bytes[0],
+    weightCalibrated: (flags & SMARTGROWTH_CALIBRATION_FLAGS.weightCalibrated) !== 0,
+    zeroSet: (flags & SMARTGROWTH_CALIBRATION_FLAGS.zeroSet) !== 0,
+    heightCalibrated: (flags & SMARTGROWTH_CALIBRATION_FLAGS.heightCalibrated) !== 0,
+    busy: (flags & SMARTGROWTH_CALIBRATION_FLAGS.busy) !== 0,
+    heightPresent: (flags & SMARTGROWTH_CALIBRATION_FLAGS.heightPresent) !== 0,
+    lastCommand: bytes[2],
+    lastResultCode: resultCode,
+    lastResult: SMARTGROWTH_CALIBRATION_RESULTS[resultCode] ?? `error_${resultCode}`,
+    sequence: bytes[4],
+    zeroOffset: readInt32LE(bytes, 5),
+    calFactor: readFloat32LE(bytes, 9),
+    heightOffsetCm: readFloat32LE(bytes, 13),
+    lastMeasuredRaw: measured,
+  };
+}
+
+export function parseSmartGrowthCalibrationBase64(base64Value: string) {
+  try {
+    return parseSmartGrowthCalibration(base64ToBytes(base64Value));
+  } catch {
+    return null;
+  }
+}
+
+/** float32 little-endian bytes, for command parameters. */
+export function float32LEBytes(value: number) {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setFloat32(0, value, true);
+  return Array.from(bytes);
+}
+
 export function buildSmartGrowthCommand(command: number, params: number[] = []) {
   return Uint8Array.from([command & 0xff, ...params.map(value => value & 0xff)]);
 }
@@ -213,6 +324,15 @@ export function buildSmartGrowthCommand(command: number, params: number[] = []) 
 const subscriptionsByDevice = new Map<string, Subscription>();
 const statusSubscriptionsByDevice = new Map<string, Subscription>();
 const deviceInfoById = new Map<string, SmartGrowthDeviceInfo>();
+const frameListeners = new Set<(measurement: SmartGrowthMeasurement) => void>();
+
+/** Every parsed Measurement frame (incl. repeats), e.g. for the accuracy check. */
+export function subscribeSmartGrowthFrames(listener: (measurement: SmartGrowthMeasurement) => void) {
+  frameListeners.add(listener);
+  return () => {
+    frameListeners.delete(listener);
+  };
+}
 
 export function getSmartGrowthDeviceInfo(deviceId: string) {
   return deviceInfoById.get(deviceId) ?? null;
@@ -269,6 +389,9 @@ export async function startSmartGrowthMonitor(
         onFrame?.(measurement, characteristic.value);
         if (!measurement) {
           return;
+        }
+        for (const listener of frameListeners) {
+          listener(measurement);
         }
         setLatestReading({
           weightKg: measurement.weightKg,

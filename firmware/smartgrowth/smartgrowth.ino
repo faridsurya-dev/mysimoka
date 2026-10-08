@@ -14,6 +14,8 @@
  *   - tare no longer subtracts the zero offset twice (weight stuck at 0)
  *   - tare and calibration are stored in flash (NVS) and survive a reboot
  *   - weight and height calibration work (Serial commands, see below)
+ *   - calibration can also be done from the app over BLE (Control 0x01/0x20/
+ *     0x21/0x22, result on the Calibration characteristic 519e0006)
  *
  * Board: "ESP32 Dev Module" (ESP32 DevKit V1, ESP32-WROOM-32).
  * Libraries (Arduino Library Manager):
@@ -28,6 +30,8 @@
  *   h 100.0      height calibration with a 100.0 cm reference block
  *   r            reset calibration to the defaults below
  *   i            print status
+ * The same operations are available over BLE (Control characteristic), see
+ * firmware/smartgrowth/README.md and docs/ble-smartgrowth-protocol.md.
  */
 
 #include <Arduino.h>
@@ -41,9 +45,12 @@
 // Hardware configuration (match the PCB)
 // ---------------------------------------------------------------------------
 
-// HX711 load cell amplifier (from v1.1).
-#define HX711_DT_PIN 33
-#define HX711_SCK_PIN 32
+// HX711 load cell amplifier (PCB Esp32_Sensorjarak: DT=D16, SCK=D4).
+// Prototype rework: GPIO16 on the first ESP32 died (stuck LOW, likely from the
+// HX711's 5 V DT), so DT is rerouted to D18 via a 10k series resistor and the
+// RX2 pin is bent out of the socket. Use 16 for a board without that rework.
+#define HX711_DT_PIN 18
+#define HX711_SCK_PIN 4
 
 // Status LEDs (from v1.1). -1 disables a LED.
 #define LED_READY_PIN 25    // blinks slowly: platform empty, ready
@@ -66,7 +73,7 @@
 // Sharp output on an ADC1 pin (32-39; ADC2 is not reliable with the radio).
 // The sensor runs on 5 V but its output stays below ~2.8 V, safe for the ESP32.
 // -1 = not fitted.
-#define SHARP_ADC_PIN -1
+#define SHARP_ADC_PIN 34  // PCB connector GP-2Y02 -> D34
 
 // Mounting (v1.1 geometry: sensor on the platform pointing UP at a board held
 // on the child's head, height = distance + offset). Use HEIGHT_MOUNT_DOWN for
@@ -92,7 +99,7 @@
 // ---------------------------------------------------------------------------
 
 #define FW_MAJOR 2
-#define FW_MINOR 0
+#define FW_MINOR 1
 #define FW_PATCH 0
 // Serial number in Device Info. Empty = "SG-" + last 3 bytes of the MAC.
 #define SERIAL_NUMBER ""
@@ -107,6 +114,7 @@
 #define SG_DEVICE_INFO_UUID "519e0003-59fe-44b5-828f-34822e2361a9"
 #define SG_CONTROL_UUID "519e0004-59fe-44b5-828f-34822e2361a9"
 #define SG_STATUS_UUID "519e0005-59fe-44b5-828f-34822e2361a9"
+#define SG_CALIBRATION_UUID "519e0006-59fe-44b5-828f-34822e2361a9"
 
 // Status characteristic (read + notify), additive to protocol v1.
 #define STATUS_VERSION 1
@@ -123,9 +131,39 @@
 #define FLAG_STABLE 0x04
 #define FLAG_BATTERY 0x08
 
-#define CMD_TARE 0x01
+#define CMD_TARE 0x01        // optional param u8: 0x01 = force (skip "platform empty" check)
 #define CMD_START 0x02
 #define CMD_STOP 0x03
+#define CMD_CAL_WEIGHT 0x20  // param float32 LE: reference mass in kg (0 < kg <= 200)
+#define CMD_CAL_HEIGHT 0x21  // param float32 LE: reference height in cm (0 < cm <= 250)
+#define CMD_CAL_RESET 0x22   // param u8 0xA5 (confirm): restore default calibration
+
+#define TARE_FORCE 0x01
+#define CAL_RESET_CONFIRM 0xA5
+#define CAL_HEIGHT_MAX_REF_CM 250.0f
+
+// Calibration characteristic (read + notify), additive to protocol v1. 20 bytes
+// so a notification fits the default MTU 23:
+//   [0] version (=1) | [1] flags | [2] last opcode | [3] last result | [4] seq u8
+//   | [5-8] zero offset i32 | [9-12] cal factor f32 | [13-16] height offset cm f32
+//   | [17-19] last measured value i24 (tare/weight: HX711 raw; height: distance 0.01 cm)
+#define CALIBRATION_VERSION 1
+#define CF_WEIGHT_CALIBRATED 0x01
+#define CF_ZERO_SET 0x02
+#define CF_HEIGHT_CALIBRATED 0x04
+#define CF_BUSY 0x08  // a calibration command is running
+#define CF_HEIGHT_PRESENT 0x10
+
+#define CAL_OK 0x00
+#define CAL_ERR_HX711 0x01          // HX711 not responding
+#define CAL_ERR_NO_LOAD 0x02        // reference load not detected (tare first)
+#define CAL_ERR_BAD_ARG 0x03        // reference value missing / out of range / no confirm byte
+#define CAL_ERR_HEIGHT_READING 0x04 // height sensor gave no stable reading
+#define CAL_ERR_NOT_EMPTY 0x05      // tare refused: platform not empty
+#define CAL_ERR_NO_HEIGHT_SENSOR 0x06
+#define CAL_ERR_BUSY 0x07           // another calibration command is still running
+#define CAL_ERR_UNKNOWN 0x08
+#define CAL_NONE 0xFF               // no command since boot
 
 #define WEIGHT_MIN_KG 2.0f
 #define WEIGHT_MAX_KG 200.0f
@@ -162,12 +200,27 @@ long zeroOffset = DEFAULT_ZERO_OFFSET;
 float calFactor = DEFAULT_CAL_FACTOR;
 float heightOffsetCm = DEFAULT_HEIGHT_OFFSET_CM;
 bool weightCalibrated = false;
+bool heightCalibrated = false;
 bool zeroSet = false;
 unsigned long lastDistanceMs = 0;
 
 NimBLECharacteristic* weightMeasurementChar = nullptr;  // 0x2A9D
 NimBLECharacteristic* sgMeasurementChar = nullptr;
 NimBLECharacteristic* sgStatusChar = nullptr;
+NimBLECharacteristic* sgCalibrationChar = nullptr;
+
+// Calibration command handed from the BLE task to loop() (one at a time).
+static portMUX_TYPE calCmdMux = portMUX_INITIALIZER_UNLOCKED;
+volatile uint8_t pendingCalOp = 0;  // 0 = none, else CMD_TARE / CMD_CAL_*
+volatile float pendingCalArg = 0;
+volatile bool pendingTareForce = false;
+volatile bool calRejectedBusy = false;
+// Result of the last calibration command (Calibration characteristic).
+uint8_t lastCalOp = 0;
+uint8_t lastCalResult = CAL_NONE;
+uint8_t calSequence = 0;
+int32_t lastCalMeasured = 0;
+bool calBusy = false;
 
 volatile bool clientConnected = false;
 volatile bool clientJustConnected = false;
@@ -270,6 +323,7 @@ static void loadCalibration() {
   calFactor = prefs.getFloat("factor", DEFAULT_CAL_FACTOR);
   heightOffsetCm = prefs.getFloat("hoffset", DEFAULT_HEIGHT_OFFSET_CM);
   weightCalibrated = prefs.getBool("calibrated", false);
+  heightCalibrated = prefs.getBool("hcal", false);
   zeroSet = prefs.isKey("zero");
   prefs.end();
   if (calFactor == 0 || isnan(calFactor)) calFactor = DEFAULT_CAL_FACTOR;
@@ -281,6 +335,7 @@ static void saveCalibration() {
   prefs.putFloat("factor", calFactor);
   prefs.putFloat("hoffset", heightOffsetCm);
   prefs.putBool("calibrated", weightCalibrated);
+  prefs.putBool("hcal", heightCalibrated);
   prefs.end();
 }
 
@@ -340,20 +395,24 @@ static long readRawAverage(int samples) {
     if (hx711Ready()) {
       sum += hx711ReadRaw();
       got++;
+      lastWeightReadyMs = millis();  // no false "HX711 timeout" after a calibration
     }
     delay(5);
   }
   return got ? sum / got : LONG_MIN;
 }
 
-static bool tare() {
-  long raw = readRawAverage(20);
+static bool tareWithRaw(long raw) {
   if (raw == LONG_MIN) return false;
   zeroOffset = raw;
   zeroSet = true;
   saveCalibration();
   resetFilters();
   return true;
+}
+
+static bool tare() {
+  return tareWithRaw(readRawAverage(20));
 }
 
 static void setupHeightSensor() {
@@ -510,6 +569,38 @@ static void updateStatus() {
   if (clientConnected) sgStatusChar->notify();
 }
 
+// 20 bytes, layout documented at CALIBRATION_VERSION.
+static void updateCalibrationChar(bool notify) {
+  if (!sgCalibrationChar) return;
+  uint8_t out[20];
+  uint8_t flags = 0;
+  if (weightCalibrated) flags |= CF_WEIGHT_CALIBRATED;
+  if (zeroSet) flags |= CF_ZERO_SET;
+  if (heightCalibrated) flags |= CF_HEIGHT_CALIBRATED;
+  if (calBusy) flags |= CF_BUSY;
+  if (heightSource != HEIGHT_NONE) flags |= CF_HEIGHT_PRESENT;
+  int32_t zero = (int32_t)zeroOffset;
+  float factor = calFactor;
+  float hoffset = heightOffsetCm;
+  int32_t measured = lastCalMeasured;
+  if (measured > 8388607) measured = 8388607;
+  if (measured < -8388608) measured = -8388608;
+  out[0] = CALIBRATION_VERSION;
+  out[1] = flags;
+  out[2] = lastCalOp;
+  out[3] = lastCalResult;
+  out[4] = calSequence;
+  memcpy(out + 5, &zero, 4);  // ESP32 is little-endian
+  memcpy(out + 9, &factor, 4);
+  memcpy(out + 13, &hoffset, 4);
+  uint32_t m = (uint32_t)measured;
+  out[17] = (uint8_t)(m & 0xFF);
+  out[18] = (uint8_t)((m >> 8) & 0xFF);
+  out[19] = (uint8_t)((m >> 16) & 0xFF);
+  sgCalibrationChar->setValue(out, sizeof(out));
+  if (notify && clientConnected) sgCalibrationChar->notify();
+}
+
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& info) override {
     clientConnected = true;
@@ -521,17 +612,55 @@ class ServerCallbacks : public NimBLEServerCallbacks {
   }
 };
 
+// Queues a calibration command for loop(). false = one is already pending.
+static bool queueCalCommand(uint8_t op, float arg, bool force) {
+  bool queued = false;
+  portENTER_CRITICAL(&calCmdMux);
+  if (pendingCalOp == 0) {
+    pendingCalArg = arg;
+    pendingTareForce = force;
+    pendingCalOp = op;
+    queued = true;
+  }
+  portEXIT_CRITICAL(&calCmdMux);
+  return queued;
+}
+
+static float readFloatLE(const uint8_t* data) {
+  float value;
+  memcpy(&value, data, 4);
+  return value;
+}
+
 // Runs on the BLE task: only set flags, the loop does the work.
 class ControlCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& info) override {
     NimBLEAttValue value = c->getValue();
     if (value.size() == 0) return;
-    switch (value.data()[0]) {
-      case CMD_TARE: tareRequested = true; break;
+    const uint8_t* data = value.data();
+    size_t size = value.size();
+    bool queued = true;
+    switch (data[0]) {
+      case CMD_TARE:
+        if (size >= 2 && data[1] == TARE_FORCE) {
+          queued = queueCalCommand(CMD_TARE, 0, true);
+        } else {
+          tareRequested = true;  // v1 behaviour: refused unless the platform is empty
+        }
+        break;
       case CMD_START: startRequested = true; measuringEnabled = true; break;
       case CMD_STOP: measuringEnabled = false; break;
-      default: break;  // 0x10 / 0x20 reserved, acknowledged and ignored
+      case CMD_CAL_WEIGHT:
+      case CMD_CAL_HEIGHT:
+        // A missing parameter becomes NAN and is rejected with CAL_ERR_BAD_ARG.
+        queued = queueCalCommand(data[0], size >= 5 ? readFloatLE(data + 1) : NAN, false);
+        break;
+      case CMD_CAL_RESET:
+        queued = queueCalCommand(CMD_CAL_RESET, (size >= 2 && data[1] == CAL_RESET_CONFIRM) ? 1.0f : 0.0f, false);
+        break;
+      default: break;  // 0x10 reserved; unknown commands are acknowledged and ignored
     }
+    if (!queued) calRejectedBusy = true;
   }
 };
 
@@ -562,7 +691,10 @@ static void setupBle() {
   NimBLECharacteristic* info = sg->createCharacteristic(SG_DEVICE_INFO_UUID, NIMBLE_PROPERTY::READ);
   NimBLECharacteristic* control = sg->createCharacteristic(SG_CONTROL_UUID, NIMBLE_PROPERTY::WRITE);
   sgStatusChar = sg->createCharacteristic(SG_STATUS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  sgCalibrationChar =
+      sg->createCharacteristic(SG_CALIBRATION_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   control->setCallbacks(new ControlCallbacks());
+  updateCalibrationChar(false);
 
   uint8_t infoValue[20];
   infoValue[0] = PROTOCOL_VERSION;
@@ -614,6 +746,99 @@ static void printStatus() {
                 distanceToHeightCm(lastDistanceCm), clientConnected ? "connected" : "advertising");
 }
 
+// ---------------------------------------------------------------------------
+// Calibration operations (shared by Serial and BLE). Each returns a CAL_* code
+// and stores the measured raw value in lastCalMeasured. They sample for up to
+// ~5 s but always time out, also without HX711 / height sensor.
+// ---------------------------------------------------------------------------
+
+static uint8_t calTare() {
+  long raw = readRawAverage(20);
+  if (raw == LONG_MIN) return CAL_ERR_HX711;
+  lastCalMeasured = (int32_t)raw;
+  return tareWithRaw(raw) ? CAL_OK : CAL_ERR_HX711;
+}
+
+static uint8_t calWeight(float referenceKg) {
+  if (isnan(referenceKg) || referenceKg <= 0 || referenceKg > WEIGHT_MAX_KG) return CAL_ERR_BAD_ARG;
+  long raw = readRawAverage(20);
+  if (raw == LONG_MIN) return CAL_ERR_HX711;
+  lastCalMeasured = (int32_t)raw;
+  float factor = (raw - zeroOffset) / referenceKg;
+  if (fabsf(factor) < 1) return CAL_ERR_NO_LOAD;
+  calFactor = factor;
+  weightCalibrated = true;
+  saveCalibration();
+  resetFilters();
+  return CAL_OK;
+}
+
+static uint8_t calHeight(float referenceCm) {
+  if (isnan(referenceCm) || referenceCm <= 0 || referenceCm > CAL_HEIGHT_MAX_REF_CM) return CAL_ERR_BAD_ARG;
+  if (heightSource == HEIGHT_NONE) return CAL_ERR_NO_HEIGHT_SENSOR;
+  float sum = 0;
+  int got = 0;
+  unsigned long start = millis();
+  while (got < 20 && millis() - start < 5000) {
+    float d = readDistanceCm();
+    if (!isnan(d)) { sum += d; got++; }
+    delay(60);
+  }
+  if (got < 10) return CAL_ERR_HEIGHT_READING;
+  float distance = sum / got;
+  lastCalMeasured = (int32_t)lroundf(distance * 100.0f);
+#if HEIGHT_MOUNT == HEIGHT_MOUNT_DOWN
+  heightOffsetCm = referenceCm + distance;
+#else
+  heightOffsetCm = referenceCm - distance;
+#endif
+  heightCalibrated = true;
+  saveCalibration();
+  return CAL_OK;
+}
+
+static uint8_t calReset() {
+  zeroOffset = DEFAULT_ZERO_OFFSET;
+  calFactor = DEFAULT_CAL_FACTOR;
+  heightOffsetCm = DEFAULT_HEIGHT_OFFSET_CM;
+  weightCalibrated = false;
+  heightCalibrated = false;
+  saveCalibration();
+  resetFilters();
+  lastCalMeasured = 0;
+  return CAL_OK;
+}
+
+// Publishes the result on the Calibration characteristic (seq + 1).
+static void finishCalibration(uint8_t op, uint8_t result) {
+  lastCalOp = op;
+  lastCalResult = result;
+  calSequence++;
+  calBusy = false;
+  updateCalibrationChar(true);
+}
+
+// BLE-triggered calibration (from loop()).
+static void runCalibration(uint8_t op, float arg, bool force) {
+  calBusy = true;
+  lastCalMeasured = 0;
+  updateCalibrationChar(true);
+  uint8_t result;
+  switch (op) {
+    case CMD_TARE:
+      // Forced tare: the app wizard has the operator confirm the platform is empty.
+      result = (force || state == STATE_EMPTY) ? calTare() : CAL_ERR_NOT_EMPTY;
+      break;
+    case CMD_CAL_WEIGHT: result = calWeight(arg); break;
+    case CMD_CAL_HEIGHT: result = calHeight(arg); break;
+    case CMD_CAL_RESET: result = arg == 1.0f ? calReset() : CAL_ERR_BAD_ARG; break;
+    default: result = CAL_ERR_UNKNOWN; break;
+  }
+  Serial.printf("calibration (BLE) op=0x%02X result=%u zero=%ld factor=%.2f hoffset=%.1f\n",
+                op, result, zeroOffset, calFactor, heightOffsetCm);
+  finishCalibration(op, result);
+}
+
 static void handleSerialCommand(String line) {
   line.trim();
   if (line.length() == 0) return;
@@ -621,49 +846,37 @@ static void handleSerialCommand(String line) {
   float arg = line.length() > 1 ? line.substring(1).toFloat() : 0;
 
   switch (cmd) {
-    case 't':
-      Serial.println(tare() ? "tare ok" : "tare failed: HX711 not responding");
+    case 't': {
+      uint8_t result = calTare();
+      Serial.println(result == CAL_OK ? "tare ok" : "tare failed: HX711 not responding");
+      finishCalibration(CMD_TARE, result);
       break;
+    }
     case 'c': {
       if (arg <= 0) { Serial.println("usage: c <reference kg>"); break; }
-      long raw = readRawAverage(20);
-      if (raw == LONG_MIN) { Serial.println("HX711 not responding"); break; }
-      float factor = (raw - zeroOffset) / arg;
-      if (fabsf(factor) < 1) { Serial.println("no load detected, tare first and put the weight on"); break; }
-      calFactor = factor;
-      weightCalibrated = true;
-          saveCalibration();
-      resetFilters();
-      Serial.printf("weight calibrated: factor=%.2f\n", calFactor);
+      uint8_t result = calWeight(arg);
+      if (result == CAL_ERR_HX711) Serial.println("HX711 not responding");
+      else if (result == CAL_ERR_NO_LOAD) Serial.println("no load detected, tare first and put the weight on");
+      else if (result == CAL_ERR_BAD_ARG) Serial.println("reference out of range");
+      else Serial.printf("weight calibrated: factor=%.2f\n", calFactor);
+      finishCalibration(CMD_CAL_WEIGHT, result);
       break;
     }
     case 'h': {
       if (arg <= 0) { Serial.println("usage: h <reference cm>"); break; }
-      float sum = 0;
-      int got = 0;
-      unsigned long start = millis();
-      while (got < 20 && millis() - start < 5000) {
-        float d = readDistanceCm();
-        if (!isnan(d)) { sum += d; got++; }
-        delay(60);
+      uint8_t result = calHeight(arg);
+      if (result == CAL_OK) {
+        Serial.printf("height calibrated: distance=%.1f offset=%.1f\n", lastCalMeasured / 100.0f, heightOffsetCm);
+      } else if (result == CAL_ERR_BAD_ARG) {
+        Serial.println("reference out of range");
+      } else {
+        Serial.println("height sensor gives no stable reading");
       }
-      if (got < 10) { Serial.println("height sensor gives no stable reading"); break; }
-      float distance = sum / got;
-#if HEIGHT_MOUNT == HEIGHT_MOUNT_DOWN
-      heightOffsetCm = arg + distance;
-#else
-      heightOffsetCm = arg - distance;
-#endif
-      saveCalibration();
-      Serial.printf("height calibrated: distance=%.1f offset=%.1f\n", distance, heightOffsetCm);
+      finishCalibration(CMD_CAL_HEIGHT, result);
       break;
     }
     case 'r':
-      zeroOffset = DEFAULT_ZERO_OFFSET;
-      calFactor = DEFAULT_CAL_FACTOR;
-      heightOffsetCm = DEFAULT_HEIGHT_OFFSET_CM;
-      weightCalibrated = false;
-          saveCalibration();
+      finishCalibration(CMD_CAL_RESET, calReset());
       Serial.println("calibration reset to defaults");
       break;
     case 'i':
@@ -733,11 +946,29 @@ void loop() {
   if (tareRequested) {
     tareRequested = false;
     // Refuse while someone stands on the platform (would zero their weight).
+    uint8_t result = CAL_ERR_NOT_EMPTY;
     if (state == STATE_EMPTY) {
-      Serial.println(tare() ? "tare ok (BLE)" : "tare failed (BLE)");
+      result = calTare();
+      Serial.println(result == CAL_OK ? "tare ok (BLE)" : "tare failed (BLE)");
     } else {
       Serial.println("tare refused: platform not empty");
     }
+    finishCalibration(CMD_TARE, result);
+  }
+  if (pendingCalOp != 0) {
+    portENTER_CRITICAL(&calCmdMux);
+    uint8_t op = pendingCalOp;
+    float arg = pendingCalArg;
+    bool force = pendingTareForce;
+    portEXIT_CRITICAL(&calCmdMux);
+    runCalibration(op, arg, force);
+    portENTER_CRITICAL(&calCmdMux);
+    pendingCalOp = 0;  // accept the next command only after this one finished
+    portEXIT_CRITICAL(&calCmdMux);
+  }
+  if (calRejectedBusy) {
+    calRejectedBusy = false;
+    finishCalibration(lastCalOp, CAL_ERR_BUSY);
   }
   if (startRequested) {
     startRequested = false;

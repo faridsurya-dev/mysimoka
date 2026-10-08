@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { AppState, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { State } from 'react-native-ble-plx';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { PrimaryButton, Screen } from '../../shared/components';
@@ -7,7 +8,12 @@ import {
   SMARTGROWTH_COMMANDS,
   connectDevice,
   disconnectDevice,
+  ensureBlePoweredOn,
+  getBleManager,
   getSmartGrowthDeviceInfo,
+  hasBlePermissions,
+  requestBlePermissionStatus,
+  requestBluetoothEnable,
   isLikelyS400Device,
   isSmartGrowthName,
   loadLastDeviceStore,
@@ -20,8 +26,10 @@ import {
   useLastDeviceState,
 } from '../../features/device';
 import { colors, radius, spacing, typography } from '../../theme';
+import { BluetoothAccessModal, type BluetoothAccessReason } from './BluetoothAccessModal';
 import { S400BindKeyPanel } from './S400BindKeyPanel';
 import { SensorStatusChecklist } from './SensorStatusChecklist';
+import { SmartGrowthCalibrationModal } from './SmartGrowthCalibrationModal';
 
 type DeviceManagerScreenProps = {
   onBack?: () => void;
@@ -82,6 +90,7 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     deviceKind === 'smartgrowth' ? getSmartGrowthDeviceInfo(deviceSession.connectedDeviceId ?? '') : null;
   const { autoReconnectEnabled } = useLastDeviceState();
   const [measurementLogs, setMeasurementLogs] = useState<string[]>([]);
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
 
   // BLE scan/connection is owned by the device manager and survives this screen
@@ -104,9 +113,98 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     loadLastDeviceStore().catch(() => undefined);
   }, []);
 
-  const handleScanDevices = () => {
+  const [bluetoothAccess, setBluetoothAccess] = useState<BluetoothAccessReason | null>(null);
+  const [bluetoothAccessBusy, setBluetoothAccessBusy] = useState(false);
+  const [bluetoothAccessNote, setBluetoothAccessNote] = useState<string | null>(null);
+
+  const openBluetoothAccess = (reason: BluetoothAccessReason) => {
+    setBluetoothAccessNote(null);
+    setBluetoothAccess(reason);
+  };
+
+  const closeBluetoothAccess = () => {
+    setBluetoothAccess(null);
+    setBluetoothAccessBusy(false);
+    setBluetoothAccessNote(null);
+  };
+
+  // Checks permission and adapter state without prompting; the modal explains
+  // and asks first, so the system prompt never appears out of nowhere.
+  const handleScanDevices = async () => {
+    if (!(await hasBlePermissions())) {
+      openBluetoothAccess('permission');
+      return;
+    }
+    if (!(await ensureBlePoweredOn())) {
+      openBluetoothAccess('off');
+      return;
+    }
+    closeBluetoothAccess();
     scanDevices().catch(() => undefined);
   };
+
+  const handleBluetoothAccessConfirm = async () => {
+    if (bluetoothAccess === 'permission') {
+      setBluetoothAccessBusy(true);
+      const status = await requestBlePermissionStatus();
+      setBluetoothAccessBusy(false);
+      if (status === 'granted') {
+        handleScanDevices().catch(() => undefined);
+      } else if (status === 'blocked') {
+        openBluetoothAccess('blocked');
+      } else {
+        setBluetoothAccessNote('Izin belum diberikan. Tekan Izinkan lalu pilih "Izinkan".');
+      }
+      return;
+    }
+
+    if (bluetoothAccess === 'blocked') {
+      Linking.openSettings().catch(() => undefined);
+      return;
+    }
+
+    if (bluetoothAccess === 'off') {
+      setBluetoothAccessBusy(true);
+      await requestBluetoothEnable();
+      // The BLE state listener below closes the modal once Bluetooth is on.
+      setTimeout(() => setBluetoothAccessBusy(false), 4000);
+    }
+  };
+
+  // While the modal is open, continue automatically as soon as the user turns
+  // Bluetooth on (system dialog, quick settings) or returns from Settings.
+  useEffect(() => {
+    if (bluetoothAccess === null) {
+      return undefined;
+    }
+
+    const manager = getBleManager();
+    const stateSubscription =
+      bluetoothAccess === 'off' && manager
+        ? manager.onStateChange(bleState => {
+            if (bleState === State.PoweredOn) {
+              handleScanDevices().catch(() => undefined);
+            }
+          }, false)
+        : null;
+    const appStateSubscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') {
+        hasBlePermissions()
+          .then(granted => {
+            if (granted && bluetoothAccess !== 'off') {
+              handleScanDevices().catch(() => undefined);
+            }
+          })
+          .catch(() => undefined);
+      }
+    });
+
+    return () => {
+      stateSubscription?.remove();
+      appStateSubscription.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bluetoothAccess]);
 
   const handleConnectDevice = (deviceId: string) => {
     connectDevice(deviceId).catch(() => undefined);
@@ -149,8 +247,19 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
             label={isScanning ? 'Memindai perangkat...' : 'Scan Perangkat'}
             loading={isScanning}
             disabled={busyDeviceId !== null}
-            onPress={handleScanDevices}
+            onPress={() => {
+              handleScanDevices().catch(() => undefined);
+            }}
             style={styles.scanButton}
+          />
+          <BluetoothAccessModal
+            busy={bluetoothAccessBusy}
+            note={bluetoothAccessNote}
+            onClose={closeBluetoothAccess}
+            onConfirm={() => {
+              handleBluetoothAccessConfirm().catch(() => undefined);
+            }}
+            reason={bluetoothAccess}
           />
           {deviceSession.deviceNotice ? (
             <Text accessibilityRole="alert" style={styles.deviceNotice}>
@@ -325,6 +434,12 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                             size="sm"
                             variant="outline"
                           />
+                          <PrimaryButton
+                            label="Cek akurasi & kalibrasi"
+                            onPress={() => setCalibrationOpen(true)}
+                            size="sm"
+                            variant="secondary"
+                          />
                         </View>
                       </View>
                     ) : null}
@@ -339,6 +454,10 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
           )}
         </View>
       </Screen>
+      <SmartGrowthCalibrationModal
+        onClose={() => setCalibrationOpen(false)}
+        visible={calibrationOpen}
+      />
     </View>
   );
 }

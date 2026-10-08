@@ -5,6 +5,12 @@ import {
   buildDeviceUpsertObject,
   type DeviceRegistrationInput,
 } from '../features/device/deviceRegistryPayload';
+import {
+  DEFAULT_CALIBRATION_TOLERANCES,
+  buildCalibrationInsertObject,
+  type CalibrationTolerances,
+  type DeviceCalibrationRowInput,
+} from '../features/device/calibration';
 import type {
   AverageMetricItem,
   ImmunizationSessionListItem,
@@ -3114,6 +3120,122 @@ export async function upsertSchoolDevice(
     isActive: row.is_active !== false,
     label: readNullableString(row.label)?.trim() || null,
   };
+}
+
+/**
+ * Logs one accuracy check / calibration command in `device_calibrations`.
+ * Returns the row id, or null when skipped (no session, no active school,
+ * plain 'user' role). Throws on request/GraphQL errors; callers treat the log
+ * as best-effort and never block calibration on it.
+ */
+export async function insertDeviceCalibration(
+  input: DeviceCalibrationRowInput,
+): Promise<string | null> {
+  if (!authSession.accessToken) {
+    return null;
+  }
+  if (resolveHighestAllowedRoleFromSession() === 'user') {
+    return null;
+  }
+  let userId: string;
+  try {
+    userId = getSessionUserIdOrThrow();
+  } catch {
+    return null;
+  }
+  const school = await loadCurrentSchoolContext().catch(() => null);
+  if (!school) {
+    return null;
+  }
+
+  const object = buildCalibrationInsertObject(input, { schoolId: school.schoolId, userId });
+  const mutation = `
+    mutation InsertDeviceCalibration($object: device_calibrations_insert_input!) {
+      insert_device_calibrations_one(object: $object) {
+        id
+      }
+    }
+  `;
+  const responseBody = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query: mutation, variables: { object } }),
+  })) as
+    | {
+        data?: { insert_device_calibrations_one?: Record<string, unknown> | null };
+        errors?: Array<{ message?: string }>;
+      }
+    | null;
+
+  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
+    throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan riwayat kalibrasi.');
+  }
+  const row = asObject(responseBody?.data?.insert_device_calibrations_one);
+  if (!row) {
+    throw new Error('Respons penyimpanan kalibrasi tidak valid.');
+  }
+  return readNullableString(row.id);
+}
+
+/**
+ * Accuracy tolerances for the active school: its own `calibration_settings`
+ * row, else the global row (school_id NULL), else the built-in defaults.
+ * Never throws.
+ */
+export async function fetchCalibrationTolerances(): Promise<CalibrationTolerances> {
+  try {
+    if (!authSession.accessToken || resolveHighestAllowedRoleFromSession() === 'user') {
+      return DEFAULT_CALIBRATION_TOLERANCES;
+    }
+    const school = await loadCurrentSchoolContext().catch(() => null);
+    const query = `
+      query CalibrationSettings($schoolId: uuid) {
+        calibration_settings(
+          where: { _or: [{ school_id: { _eq: $schoolId } }, { school_id: { _is_null: true } }] }
+        ) {
+          school_id
+          weight_tolerance_kg
+          height_tolerance_cm
+        }
+      }
+    `;
+    const responseBody = (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, variables: { schoolId: school?.schoolId ?? null } }),
+    })) as
+      | {
+          data?: { calibration_settings?: Array<Record<string, unknown>> | null };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+    const rows = Array.isArray(responseBody?.data?.calibration_settings)
+      ? responseBody.data.calibration_settings
+      : [];
+    const schoolRow = school
+      ? rows.find(row => readNullableString(asObject(row)?.school_id) === school.schoolId)
+      : undefined;
+    const globalRow = rows.find(row => readNullableString(asObject(row)?.school_id) === null);
+    const picked = schoolRow ?? globalRow;
+    if (!picked) {
+      return DEFAULT_CALIBRATION_TOLERANCES;
+    }
+    const weightKg = readNullableNumber(picked.weight_tolerance_kg);
+    const heightCm = readNullableNumber(picked.height_tolerance_cm);
+    return {
+      weightKg: weightKg !== null && weightKg > 0 ? weightKg : DEFAULT_CALIBRATION_TOLERANCES.weightKg,
+      heightCm: heightCm !== null && heightCm > 0 ? heightCm : DEFAULT_CALIBRATION_TOLERANCES.heightCm,
+      source: schoolRow ? 'school' : 'global',
+    };
+  } catch {
+    return DEFAULT_CALIBRATION_TOLERANCES;
+  }
 }
 
 function readNullableNumber(value: unknown): number | null {

@@ -634,9 +634,13 @@ export async function reconnectToDevice(target: { bleId: string; name: string | 
   return connectDeviceInternal(foundId, { auto: true, name: target.name });
 }
 
-/** Sends a Control command (tare / start) to a connected SmartGrowth station. */
+/**
+ * Sends a Control command (tare / start / calibration) to a connected SmartGrowth
+ * station. `params` are the command's parameter bytes (protocol section 6).
+ */
 export async function sendSmartGrowthControl(
   command: (typeof SMARTGROWTH_COMMANDS)[keyof typeof SMARTGROWTH_COMMANDS],
+  params: number[] = [],
 ) {
   const { connectedDeviceId } = getDeviceSessionSnapshot();
   const manager = getBleManager();
@@ -648,7 +652,7 @@ export async function sendSmartGrowthControl(
       connectedDeviceId,
       SMARTGROWTH_SERVICE_UUID,
       SMARTGROWTH_CONTROL_CHAR_UUID,
-      encodeSmartGrowthCommand(command),
+      encodeSmartGrowthCommand(command, params),
     );
     return true;
   } catch (error) {

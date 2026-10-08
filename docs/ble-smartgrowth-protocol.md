@@ -61,6 +61,7 @@ Kirim **hanya** saat berat stabil.
 | Device Info | `519e0003-59fe-44b5-828f-34822e2361a9` | Read |
 | Control | `519e0004-59fe-44b5-828f-34822e2361a9` | Write (with response) |
 | Status (tambahan, opsional) | `519e0005-59fe-44b5-828f-34822e2361a9` | Read + Notify |
+| Calibration (tambahan, firmware ≥ 2.1) | `519e0006-59fe-44b5-828f-34822e2361a9` | Read + Notify |
 
 UUID ini tetap (sudah dipakai aplikasi). Jangan diubah tanpa menaikkan versi protokol.
 
@@ -120,14 +121,24 @@ Format: `cmd u8` + parameter (opsional). Perintah tak dikenal diabaikan (tetap A
 
 | Cmd | Nama | Parameter | Perilaku |
 | --- | --- | --- | --- |
-| `0x01` | Tare | — | nol-kan timbangan (platform harus kosong) |
+| `0x01` | Tare | opsional `u8`: `0x01` = paksa | nol-kan timbangan. Tanpa parameter: ditolak bila platform tidak kosong (perilaku v1). Dengan `01 01`: tanpa cek platform kosong (wizard kalibrasi, operator sudah konfirmasi) |
 | `0x02` | Start measurement | — | reset status stabil, mulai siklus ukur baru |
 | `0x03` | Stop measurement | — | berhenti mengirim frame "mengukur" |
 | `0x10` | Set unit | cadangan | belum dipakai; unit protokol selalu kg/cm |
-| `0x20` | Kalibrasi | cadangan | belum dipakai; kalibrasi lewat Serial (§11) |
+| `0x20` | Kalibrasi berat | `float32` LE: berat acuan kg (0 < kg ≤ 200) | `faktor = (raw − zero) / kg`, disimpan di flash (fw ≥ 2.1) |
+| `0x21` | Kalibrasi tinggi | `float32` LE: tinggi acuan cm (0 < cm ≤ 250) | rata-rata 20 jarak → offset tinggi, disimpan (fw ≥ 2.1) |
+| `0x22` | Reset kalibrasi | `u8` `0xA5` (konfirmasi) | kembali ke nilai bawaan; tanpa `0xA5` ditolak (fw ≥ 2.1) |
 
-Aplikasi menampilkan tombol **Tare** dan **Mulai ukur** di layar Perangkat bila terhubung ke
-SmartGrowth.
+Contoh: kalibrasi berat 10,00 kg = `20 00 00 20 41`; reset = `22 A5`.
+
+Perintah tare paksa / `0x20`–`0x22` dikerjakan di loop (bisa ~2–5 detik, selalu time-out bila
+sensor tidak ada) dan hasilnya dilaporkan di characteristic Calibration (§6b). Satu perintah
+kalibrasi pada satu waktu; perintah kedua saat masih berjalan dijawab `0x07` (busy). Tare tanpa
+parameter juga melaporkan hasilnya di §6b. Perintah Serial (`t`, `c`, `h`, `r`) tetap ada dan
+memperbarui §6b juga.
+
+Aplikasi menampilkan tombol **Tare**, **Mulai ukur** dan **Cek akurasi & kalibrasi** di layar
+Perangkat bila terhubung ke SmartGrowth.
 
 ## 6a. Characteristic Status (read + notify, tambahan)
 
@@ -149,13 +160,53 @@ sensor tidak tersedia". Dikirim (notify) saat isinya berubah dan tiap 5 detik se
 | 1 | sensor tinggi terdeteksi saat boot |
 | 2 | sensor tinggi memberi bacaan valid dalam 2 detik terakhir (papan kepala terbaca) |
 | 3 | pembacaan baterai tersedia |
-| 4 | berat sudah dikalibrasi (perintah Serial `c <kg>`) |
+| 4 | berat sudah dikalibrasi (Serial `c <kg>` atau Control `0x20`) |
 | 5 | titik nol sudah diset (tare) |
 | 6–7 | cadangan (0) |
 
 Contoh: `01 01 00 00 FF` → hanya timbangan, HX711 OK, belum dikalibrasi, belum tare, kosong.
 `01 37 01 01 57` → HX711 OK, VL53L0X terdeteksi dan terbaca, kalibrasi + tare OK, sedang
 mengukur, baterai 87 %.
+
+## 6b. Characteristic Calibration (read + notify, tambahan, firmware ≥ 2.1)
+
+Nilai kalibrasi aktif + hasil perintah kalibrasi terakhir. 20 byte (muat di notify MTU 23),
+little-endian. Notify saat perintah mulai (flag busy) dan saat selesai (`seq` naik).
+
+| Offset | Tipe | Field |
+| --- | --- | --- |
+| 0 | u8 | versi (= `0x01`) |
+| 1 | u8 | flags: bit0 berat dikalibrasi, bit1 tare/nol diset, bit2 tinggi dikalibrasi, bit3 busy (perintah sedang berjalan), bit4 sensor tinggi ada |
+| 2 | u8 | opcode perintah terakhir (`0x01`, `0x20`, `0x21`, `0x22`; 0 = belum ada) |
+| 3 | u8 | hasil terakhir (tabel di bawah) |
+| 4 | u8 | `seq`, naik 1 (mod 256) tiap perintah selesai |
+| 5–8 | i32 | zero offset (raw HX711 platform kosong) |
+| 9–12 | f32 | faktor kalibrasi (raw per kg) |
+| 13–16 | f32 | offset tinggi (cm) |
+| 17–19 | i24 | nilai terukur perintah terakhir: tare/berat = raw HX711 rata-rata; tinggi = jarak rata-rata dalam 0,01 cm |
+
+| Hasil | Arti |
+| --- | --- |
+| `0x00` | OK |
+| `0x01` | HX711 tidak merespons |
+| `0x02` | beban acuan tidak terdeteksi (tare dulu) |
+| `0x03` | parameter tidak valid / tanpa konfirmasi |
+| `0x04` | sensor tinggi tidak memberi bacaan stabil |
+| `0x05` | tare ditolak: platform tidak kosong |
+| `0x06` | tidak ada sensor tinggi |
+| `0x07` | busy: perintah sebelumnya masih berjalan |
+| `0x08` | perintah tidak dikenal |
+| `0xFF` | belum ada perintah sejak boot |
+
+Aplikasi: tulis perintah ke Control, tunggu notify dengan `seq` berbeda, busy = 0 dan opcode
+sama (time-out 15 detik, lalu satu kali baca).
+
+### Cek akurasi (tanpa perubahan firmware)
+
+Cek akurasi memakai stream Measurement biasa: aplikasi mengirim `0x02` lalu menunggu frame
+"mengukur" diikuti frame stabil, diulang 5 kali, lalu menghitung rata-rata, bias (rata-rata −
+acuan), kesalahan absolut, % kesalahan dan SD. Karena alat hanya mengukur saat berat ≥ 2 kg,
+cek tinggi butuh beban ≥ 2 kg di platform (mis. balok acuan yang cukup berat).
 
 ## 7. Timing
 
@@ -251,5 +302,8 @@ HC-SR04 tetap didukung di firmware sebagai opsi hemat biaya.
 - [ ] Unit tanpa sensor tinggi: bit1 selalu 0.
 - [ ] Device Info terbaca sesuai §5.
 - [ ] Control `01` men-tare; `02` memulai siklus baru.
+- [ ] (fw ≥ 2.1) Calibration `519e0006` terbaca 20 byte; `01 01` (tare paksa), `20 <kg f32>`,
+      `21 <cm f32>`, `22 A5` → notify busy lalu `seq` naik dengan hasil `00`; `22` tanpa `A5` →
+      hasil `03`; HX711 dicabut → `01` setelah ±4 detik, alat tidak macet.
 - [ ] Putus koneksi → kembali beriklan.
 - [ ] Aplikasi: kartu "Alat ukur" menampilkan berat/tinggi; form terisi otomatis saat stabil.

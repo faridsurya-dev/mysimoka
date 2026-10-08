@@ -9,6 +9,7 @@ import {
   mapConnectKindToKind,
   mapReadingSourceToKind,
   normalizeBatteryPct,
+  resolveDeviceKey,
   shouldRefineKind,
   type ConnectKindHint,
   type DeviceRegistrationInput,
@@ -55,6 +56,12 @@ type TrackedDevice = {
 };
 
 let tracked: TrackedDevice | null = null;
+/** Registry row (devices.id + device_key) per BLE id, for logging calibrations. */
+const registeredDevices = new Map<string, { id: string | null; deviceKey: string }>();
+
+export function getRegisteredDevice(bleId: string) {
+  return registeredDevices.get(bleId) ?? null;
+}
 let disabledHandler: ((bleId: string) => void) | null = null;
 let sessionUnsubscribe: (() => void) | null = null;
 
@@ -84,6 +91,12 @@ async function send(device: TrackedDevice, kind: RegistryDeviceKind, batteryPct:
   device.lastAttemptFailed = result === null;
   device.waitForReading = false;
   device.sentKind = kind;
+  if (result) {
+    registeredDevices.set(device.bleId, {
+      id: result.id,
+      deviceKey: resolveDeviceKey({ bleId: device.bleId, serial: device.serial }),
+    });
+  }
   if (batteryPct !== null) {
     device.sentBatteryPct = batteryPct;
   }
