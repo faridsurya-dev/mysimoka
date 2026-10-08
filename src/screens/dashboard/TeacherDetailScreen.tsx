@@ -94,7 +94,7 @@ export function TeacherDetailScreen({
       {notice ? <InlineNotice message={notice} tone="success" /> : null}
 
       <Card style={styles.hero}>
-        <Avatar name={teacher.name} size={64} />
+        <Avatar imageUrl={teacher.imageUrl} name={teacher.name} size={64} />
         <View style={styles.heroCopy}>
           <Text style={styles.heroName}>{teacher.name}</Text>
           <Text selectable style={styles.heroMeta}>

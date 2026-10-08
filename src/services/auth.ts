@@ -78,6 +78,7 @@ const LOGIN_ENDPOINT = '/login';
 const REFRESH_ENDPOINT = '/refresh';
 const VERIFY_EMAIL_ENDPOINT = '/verify-email';
 const JOIN_SCHOOL_ENDPOINT = '/schools/join';
+const PROFILE_PHOTO_ENDPOINT = '/me/photo';
 const AUTH_SESSION_STORAGE_KEY = 'mysimoka:auth-session';
 const CURRENT_SCHOOL_STORAGE_KEY = 'mysimoka:current-school';
 export const ROLE_HIERARCHY = ['school_admin', 'teacher', 'user'] as const;
@@ -775,6 +776,7 @@ export type TeacherDirectoryItem = {
   homeroom: string;
   handledClasses: string;
   totalStudents: number;
+  imageUrl: string | null;
 };
 
 export type CreateClassroomPayload = {
@@ -3681,6 +3683,7 @@ export async function listTeachersBySchool(schoolId: string): Promise<TeacherDir
           id
           email
           full_name
+          image_url
         }
       }
     }
@@ -3725,6 +3728,7 @@ export async function listTeachersBySchool(schoolId: string): Promise<TeacherDir
         homeroom: 'Belum ditentukan',
         handledClasses: 'Belum ada kelas',
         totalStudents: 0,
+        imageUrl: readNullableString(user?.image_url),
       } satisfies TeacherDirectoryItem;
     })
     .filter((item): item is TeacherDirectoryItem => item !== null);
@@ -4085,6 +4089,7 @@ export async function createTeacherForSchool(payload: CreateTeacherPayload): Pro
     homeroom: 'Belum ditentukan',
     handledClasses: 'Belum ada kelas',
     totalStudents: 0,
+    imageUrl: readNullableString(user?.image_url),
   };
 }
 
@@ -5153,6 +5158,56 @@ export async function updateMyProfile(payload: UpdateMyProfilePayload): Promise<
   });
 
   return updatedUser;
+}
+
+export type ProfilePhotoFile = {
+  uri: string;
+  name?: string;
+  type?: string;
+};
+
+// The auth service stores the photo and sets auth.users.image_url; the app
+// only ever sends a file it picked (no free-form URLs).
+export async function uploadMyProfilePhoto(file: ProfilePhotoFile): Promise<string> {
+  const formData = new FormData();
+  formData.append('photo', {
+    uri: file.uri,
+    name: file.name ?? 'profile.jpg',
+    type: file.type ?? 'image/jpeg',
+  } as unknown as Blob);
+
+  const responseBody = (await apiRequest(createAuthRequestUrl(PROFILE_PHOTO_ENDPOINT), {
+    method: 'POST',
+    requiresAuth: true,
+    body: formData,
+  })) as { data?: { image_url?: string | null } | null } | null;
+
+  const imageUrl = readNullableString(responseBody?.data?.image_url);
+  if (!imageUrl) {
+    throw new Error('Respons unggah foto tidak valid.');
+  }
+
+  setAuthSession({
+    user: {
+      ...(authSession.user ?? {}),
+      image_url: imageUrl,
+    },
+  });
+  return imageUrl;
+}
+
+export async function deleteMyProfilePhoto(): Promise<void> {
+  await apiRequest(createAuthRequestUrl(PROFILE_PHOTO_ENDPOINT), {
+    method: 'DELETE',
+    requiresAuth: true,
+  });
+
+  setAuthSession({
+    user: {
+      ...(authSession.user ?? {}),
+      image_url: null,
+    },
+  });
 }
 
 export async function updateSchoolProfile(

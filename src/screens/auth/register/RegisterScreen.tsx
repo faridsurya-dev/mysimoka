@@ -24,7 +24,6 @@ export function RegisterScreen({
 }: RegisterScreenProps) {
   const scrollRef = useRef<KeyboardAwareScrollView | null>(null);
   const [fullName, setFullName] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -54,7 +53,6 @@ export function RegisterScreen({
         email: email.trim().toLowerCase(),
         password,
         full_name: fullName.trim(),
-        image_url: imageUrl.trim().length > 0 ? imageUrl.trim() : undefined,
       });
 
       Alert.alert(
@@ -111,16 +109,6 @@ export function RegisterScreen({
         required
         textContentType="emailAddress"
         value={email}
-      />
-      <TextField
-        autoCapitalize="none"
-        autoCorrect={false}
-        helperText="Opsional. Tautan gambar untuk foto profil."
-        keyboardType="url"
-        label="URL Foto"
-        onChangeText={setImageUrl}
-        placeholder="https://example.com/photo.jpg"
-        value={imageUrl}
       />
       <TextField
         autoComplete="new-password"

@@ -260,6 +260,7 @@ function isMembershipConnected(
 
 type ProfileSettingsData = {
   fullName: string;
+  imageUrl: string | null;
   roleLabels: string;
   email: string;
   schoolId: string | null;
@@ -298,6 +299,7 @@ function buildProfileSettingsData(
   const fullName =
     readStringValue(user, ['full_name', 'fullName', 'name']) ?? 'Pengguna';
   const email = readStringValue(user, ['email']) ?? '-';
+  const imageUrl = readStringValue(user, ['image_url', 'imageUrl']);
   const allowedRoles = Array.isArray(user?.allowed_roles)
     ? user.allowed_roles
     : Array.isArray(user?.allowedRoles)
@@ -338,6 +340,7 @@ function buildProfileSettingsData(
 
   return {
     fullName,
+    imageUrl,
     roleLabels: uniqueRoles.map(toRoleLabel).join(', '),
     email,
     schoolId: activeMembership?.school_id ?? null,
@@ -1920,7 +1923,13 @@ function renderProfileStack({
 }: ProfileStackOptions) {
   switch (profileRoute) {
     case 'edit-profile':
-      return <EditProfileScreen onBack={onBackToProfile} fullName={profileData.fullName} />;
+      return (
+        <EditProfileScreen
+          fullName={profileData.fullName}
+          imageUrl={profileData.imageUrl}
+          onBack={onBackToProfile}
+        />
+      );
     case 'edit-school-profile':
       return (
         <EditSchoolProfileScreen
@@ -1955,6 +1964,7 @@ function renderProfileStack({
           canEditSchoolProfile={profileData.canEditSchoolProfile}
           email={profileData.email}
           fullName={profileData.fullName}
+          imageUrl={profileData.imageUrl}
           onEditProfile={onOpenEditProfile}
           onEditSchoolProfile={onOpenEditSchoolProfile}
           onOpenAccountSettings={onOpenAccountSettings}

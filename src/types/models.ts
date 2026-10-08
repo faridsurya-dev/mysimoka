@@ -136,6 +136,7 @@ export interface TeacherListItem {
   homeroom: string;
   handledClasses: string;
   totalStudents: number;
+  imageUrl?: string | null;
 }
 
 export interface DemographyCardItem {

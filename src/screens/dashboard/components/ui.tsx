@@ -365,8 +365,16 @@ export function TileGrid({ children }: PropsWithChildren) {
   return <View style={styles.tileGrid}>{children}</View>;
 }
 
-export function Avatar({ name, size = 44 }: { name: string; size?: number }) {
-  return <SharedAvatar name={name} size={size} />;
+export function Avatar({
+  name,
+  imageUrl,
+  size = 44,
+}: {
+  name: string;
+  imageUrl?: string | null;
+  size?: number;
+}) {
+  return <SharedAvatar imageUrl={imageUrl} name={name} size={size} />;
 }
 
 export function getInitials(name: string): string {

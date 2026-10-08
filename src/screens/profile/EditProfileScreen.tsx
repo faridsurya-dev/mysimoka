@@ -1,6 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, PermissionsAndroid, Platform, StyleSheet, View } from 'react-native';
 import {
+  launchCamera,
+  launchImageLibrary,
+  type ImagePickerResponse,
+  type OptionsCommon,
+} from 'react-native-image-picker';
+import {
+  Avatar,
   InfoCard,
   InlineAlert,
   PrimaryButton,
@@ -8,36 +15,44 @@ import {
   ScreenHeader,
   TextField,
 } from '../../shared/components';
-import { updateMyProfile } from '../../services';
-import { colors, layout, radius, spacing, typography } from '../../theme';
+import { deleteMyProfilePhoto, updateMyProfile, uploadMyProfilePhoto } from '../../services';
+import { colors, layout, spacing } from '../../theme';
 
 type EditProfileScreenProps = {
   onBack: () => void;
   fullName: string;
+  imageUrl: string | null;
 };
 
-function buildInitials(name: string) {
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+// Small JPEG: a profile photo is shown at most ~88 px, and the server caps
+// uploads at 2 MB.
+const PHOTO_PICKER_OPTIONS: OptionsCommon = {
+  mediaType: 'photo',
+  maxWidth: 512,
+  maxHeight: 512,
+  quality: 0.8,
+};
 
-  if (parts.length === 0) {
-    return 'OP';
+async function ensureCameraPermission(): Promise<boolean> {
+  // CAMERA is declared in the manifest, so launchCamera needs it granted.
+  if (Platform.OS !== 'android') {
+    return true;
   }
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
+  return result === PermissionsAndroid.RESULTS.GRANTED;
 }
 
-export function EditProfileScreen({ onBack, fullName: initialFullName }: EditProfileScreenProps) {
+export function EditProfileScreen({
+  onBack,
+  fullName: initialFullName,
+  imageUrl: initialImageUrl,
+}: EditProfileScreenProps) {
   const [fullName, setFullName] = useState(initialFullName);
+  const [imageUrl, setImageUrl] = useState(initialImageUrl);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUpdatingPhoto, setIsUpdatingPhoto] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const initials = useMemo(() => buildInitials(fullName), [fullName]);
+  const [photoErrorMessage, setPhotoErrorMessage] = useState<string | null>(null);
 
   const isSaveDisabled = useMemo(() => {
     return fullName.trim().length === 0 || isSaving || fullName.trim() === initialFullName.trim();
@@ -64,6 +79,77 @@ export function EditProfileScreen({ onBack, fullName: initialFullName }: EditPro
     }
   };
 
+  const uploadPickedPhoto = async (result: ImagePickerResponse) => {
+    if (result.didCancel) {
+      return;
+    }
+    const asset = result.assets?.[0];
+    if (result.errorCode || !asset?.uri) {
+      setPhotoErrorMessage('Foto tidak dapat dibaca. Coba pilih foto lain.');
+      return;
+    }
+
+    try {
+      setIsUpdatingPhoto(true);
+      setPhotoErrorMessage(null);
+      const uploadedUrl = await uploadMyProfilePhoto({
+        uri: asset.uri,
+        name: asset.fileName ?? 'profile.jpg',
+        type: asset.type ?? 'image/jpeg',
+      });
+      setImageUrl(uploadedUrl);
+    } catch (error) {
+      setPhotoErrorMessage(
+        error instanceof Error ? error.message : 'Gagal mengunggah foto. Silakan coba lagi.',
+      );
+    } finally {
+      setIsUpdatingPhoto(false);
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    if (!(await ensureCameraPermission())) {
+      setPhotoErrorMessage('Izin kamera ditolak. Izinkan kamera di pengaturan HP, atau pilih dari galeri.');
+      return;
+    }
+    await uploadPickedPhoto(
+      await launchCamera({ ...PHOTO_PICKER_OPTIONS, cameraType: 'front', saveToPhotos: false }),
+    );
+  };
+
+  const handlePickFromGallery = async () => {
+    await uploadPickedPhoto(await launchImageLibrary({ ...PHOTO_PICKER_OPTIONS, selectionLimit: 1 }));
+  };
+
+  const handleRemovePhoto = async () => {
+    try {
+      setIsUpdatingPhoto(true);
+      setPhotoErrorMessage(null);
+      await deleteMyProfilePhoto();
+      setImageUrl(null);
+    } catch (error) {
+      setPhotoErrorMessage(
+        error instanceof Error ? error.message : 'Gagal menghapus foto. Silakan coba lagi.',
+      );
+    } finally {
+      setIsUpdatingPhoto(false);
+    }
+  };
+
+  const openPhotoOptions = () => {
+    const options: Parameters<typeof Alert.alert>[2] = [
+      { text: 'Ambil Foto', onPress: handleTakePhoto },
+      { text: 'Pilih dari Galeri', onPress: handlePickFromGallery },
+    ];
+    if (imageUrl) {
+      options.push({ text: 'Hapus Foto', style: 'destructive', onPress: handleRemovePhoto });
+    }
+    options.push({ text: 'Batal', style: 'cancel' });
+    Alert.alert('Foto Profil', 'Foto tampil di profil Anda dan daftar guru sekolah.', options, {
+      cancelable: true,
+    });
+  };
+
   return (
     <View style={styles.container}>
       <ScreenHeader onBack={onBack} title="Ubah Profil" />
@@ -71,15 +157,16 @@ export function EditProfileScreen({ onBack, fullName: initialFullName }: EditPro
       <Screen avoidKeyboard contentContainerStyle={styles.content} withTopInset={false}>
         <InfoCard>
           <View style={styles.avatarSection}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
+            <Avatar imageUrl={imageUrl} name={fullName} ring size={88} />
             <PrimaryButton
-              label="Atur Avatar"
-              onPress={() => undefined}
+              disabled={isUpdatingPhoto || isSaving}
+              label={imageUrl ? 'Ganti Foto' : 'Atur Foto'}
+              loading={isUpdatingPhoto}
+              onPress={openPhotoOptions}
               size="sm"
               variant="secondary"
             />
+            {photoErrorMessage ? <InlineAlert message={photoErrorMessage} tone="error" /> : null}
           </View>
 
           <TextField
@@ -121,20 +208,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing[12],
     paddingVertical: spacing[8],
-  },
-  avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brand.primary100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: colors.neutral[0],
-    boxShadow: '0px 6px 16px rgba(17, 29, 42, 0.12)',
-  },
-  avatarText: {
-    ...typography.headingLg,
-    color: colors.brand.primary700,
   },
 });

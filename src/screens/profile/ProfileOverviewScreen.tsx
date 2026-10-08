@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import {
+  Avatar,
   Divider,
   EmptyState,
   Icon,
@@ -25,6 +26,7 @@ import {
   StatusPill,
   TextField,
 } from '../../shared/components';
+import { APP_VERSION } from '../../appVersion';
 import { colors, layout, radius, shadows, spacing, typography } from '../../theme';
 import { describeDeviceStatus } from '../../features/device/deviceStatus';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
@@ -40,6 +42,7 @@ type ProfileOverviewScreenProps = {
   onSwitchSchool: () => void;
   onLogout: () => void;
   fullName: string;
+  imageUrl: string | null;
   roleLabel: string;
   email: string;
   schoolName: string;
@@ -61,22 +64,6 @@ type ProfileOverviewScreenProps = {
   onDeleteAcademicYear: (academicYearId: string) => void;
 };
 
-function buildInitials(name: string): string {
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  if (parts.length === 0) {
-    return 'OP';
-  }
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
-}
 
 export function ProfileOverviewScreen({
   onEditProfile,
@@ -88,6 +75,7 @@ export function ProfileOverviewScreen({
   onSwitchSchool,
   onLogout,
   fullName,
+  imageUrl,
   roleLabel,
   email,
   schoolName,
@@ -226,9 +214,7 @@ export function ProfileOverviewScreen({
         {/* Profile hero */}
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{buildInitials(fullName)}</Text>
-            </View>
+            <Avatar imageUrl={imageUrl} name={fullName} size={64} style={styles.avatar} />
             <View style={styles.heroMeta}>
               <Text numberOfLines={2} style={styles.nameValue}>
                 {fullName}
@@ -632,7 +618,7 @@ export function ProfileOverviewScreen({
         </InfoCard>
 
         <View style={styles.appInfoRow}>
-          <Text style={styles.appInfoText}>MySimoka · Versi 0.0.1</Text>
+          <Text style={styles.appInfoText}>MySimoka · Versi {APP_VERSION}</Text>
         </View>
       </Screen>
     </View>
@@ -680,10 +666,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 3,
     borderColor: colors.brand.primary50,
-  },
-  avatarText: {
-    ...typography.headingLg,
-    color: colors.brand.primary700,
   },
   heroMeta: {
     flex: 1,

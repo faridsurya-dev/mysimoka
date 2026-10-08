@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { colors, typography } from '../../theme';
 
@@ -25,6 +25,9 @@ export function getInitials(name: string, fallback = 'OP'): string {
 
 export function Avatar({ name, imageUrl, size = 48, ring = false, style }: AvatarProps) {
   const [hasImageError, setHasImageError] = useState(false);
+  useEffect(() => {
+    setHasImageError(false);
+  }, [imageUrl]);
   const showImage = Boolean(imageUrl) && !hasImageError;
   const dimension = { width: size, height: size, borderRadius: size / 2 };
 

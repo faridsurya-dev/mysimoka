@@ -228,7 +228,7 @@ export function TeacherListScreen({
           {filteredTeachers.map(item => (
             <ListItem
               key={item.id}
-              leading={<Avatar name={item.name} />}
+              leading={<Avatar imageUrl={item.imageUrl} name={item.name} />}
               onPress={() => openDetail(item)}
               subtitle={item.email !== '-' ? item.email : 'Email belum tersedia'}
               title={item.name}
