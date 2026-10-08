@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, StyleSheet, Text } from 'react-native';
-import { Icon, PrimaryButton, TextField, TextLink } from '../../../shared/components';
+import React from 'react';
+import { Linking, StyleSheet, Text } from 'react-native';
+import { InlineAlert, PrimaryButton, TextLink } from '../../../shared/components';
 import { colors, typography } from '../../../theme';
 import { AuthLayout } from '../AuthLayout';
 
@@ -8,50 +8,32 @@ type ForgotPasswordScreenProps = {
   onBackToLogin: () => void;
 };
 
+const SUPPORT_EMAIL = 'info@mysimoka.id';
+
+// There is no self-service reset yet (no reset endpoint or mail delivery on the
+// backend), so this screen says how to get help instead of pretending to send a link.
 export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProps) {
-  const [email, setEmail] = useState('');
-
-  const canSubmit = useMemo(() => email.trim().length > 0, [email]);
-
-  const handleSubmit = () => {
-    Alert.alert(
-      'Link reset dikirim',
-      'Silakan cek email kamu untuk lanjut reset password.',
-      [{ text: 'OK', onPress: onBackToLogin }],
-    );
+  const handleContact = () => {
+    const subject = encodeURIComponent('Reset password MySimoka');
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}`).catch(() => undefined);
   };
 
   return (
     <AuthLayout
-      title="Reset password"
-      subtitle="Masukkan email akun kamu. Kami akan kirim link untuk membuat password baru."
+      title="Lupa password"
+      subtitle="Reset password belum bisa dilakukan sendiri lewat aplikasi."
       footer={
         <>
           <Text style={styles.footerText}>Ingat password?</Text>
           <TextLink label="Kembali ke login" onPress={onBackToLogin} />
         </>
       }>
-      <TextField
-        autoCapitalize="none"
-        autoComplete="email"
-        autoCorrect={false}
-        keyboardType="email-address"
-        label="Email"
-        leftIcon={<Icon color={colors.text.muted} name="mail" size={18} />}
-        onChangeText={setEmail}
-        onSubmitEditing={canSubmit ? handleSubmit : undefined}
-        placeholder="nama@sekolah.sch.id"
-        returnKeyType="send"
-        textContentType="emailAddress"
-        value={email}
+      <InlineAlert
+        message={`Hubungi admin sekolah Anda, atau kirim email ke ${SUPPORT_EMAIL} dari alamat email akun Anda. Kami akan membantu mengatur ulang password.`}
+        tone="info"
       />
 
-      <PrimaryButton
-        disabled={!canSubmit}
-        fullWidth
-        label="Kirim Link Reset"
-        onPress={handleSubmit}
-      />
+      <PrimaryButton fullWidth label={`Email ${SUPPORT_EMAIL}`} onPress={handleContact} />
     </AuthLayout>
   );
 }

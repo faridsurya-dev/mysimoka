@@ -52,7 +52,7 @@ export function VerifyEmailScreen({
   return (
     <AuthLayout
       title="Verifikasi Email"
-      subtitle="Masukkan token verifikasi dari response register untuk mengaktifkan akun."
+      subtitle="Satu langkah lagi. Tekan Verifikasi untuk mengaktifkan akun Anda."
       footer={
         <>
           <Text style={styles.footerText}>Sudah punya akun aktif?</Text>
@@ -62,11 +62,11 @@ export function VerifyEmailScreen({
       <TextField
         autoCapitalize="none"
         autoCorrect={false}
-        label="Token Verifikasi"
+        label="Kode verifikasi"
         leftIcon={<Icon color={colors.text.muted} name="key" size={18} />}
         onChangeText={setToken}
         onSubmitEditing={handleSubmit}
-        placeholder="Tempel token verifikasi"
+        placeholder="Kode verifikasi"
         returnKeyType="done"
         value={token}
       />
