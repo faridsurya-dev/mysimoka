@@ -13,6 +13,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useHardwareBack } from '../../navigation/hardwareBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Camera as VisionCamera,
@@ -215,6 +216,16 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
   const faceSliderRef = useRef<FlatList<CapturedFaceCrop> | null>(null);
   const pinchStartDistanceRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef(1);
+
+  // Hardware back on the pairing step returns to the camera step, like the
+  // on-screen Kembali button, instead of leaving the screen.
+  useHardwareBack(() => {
+    if (step === 2) {
+      setStep(1);
+      return true;
+    }
+    return false;
+  });
 
   useEffect(() => {
     if (hasPermission) {

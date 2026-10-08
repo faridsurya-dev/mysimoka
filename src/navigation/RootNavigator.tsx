@@ -1,7 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  BackHandler,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  ToastAndroid,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { runScreenBackHandlers } from './hardwareBack';
 import { ForgotPasswordScreen } from '../screens/auth/forgot-password/ForgotPasswordScreen';
 import { LoginScreen } from '../screens/auth/login/LoginScreen';
 import { RegisterScreen } from '../screens/auth/register/RegisterScreen';
@@ -411,6 +421,110 @@ export function RootNavigator() {
   const [academicYearActionError, setAcademicYearActionError] = useState<string | null>(null);
   const sessionUser = asObject(getAuthSession().user);
   const profileData = buildProfileSettingsData(sessionUser, schoolMemberships, currentSchoolId);
+
+  // Android hardware back mirrors each screen's on-screen back button. Rebuilt
+  // every render so it always sees the current routes; the listener reads it
+  // through a ref and is registered once.
+  const lastExitPressRef = useRef(0);
+  const hardwareBackRef = useRef<() => boolean>(() => false);
+  hardwareBackRef.current = () => {
+    if (isBootstrappingAuth) {
+      return false;
+    }
+
+    if (!isAuthenticated) {
+      if (authRoute === 'register' || authRoute === 'forgot-password') {
+        setAuthRoute('login');
+        return true;
+      }
+      if (authRoute === 'verify-email') {
+        setPendingVerificationToken(null);
+        setAuthRoute('login');
+        return true;
+      }
+      return false;
+    }
+
+    if (isSchoolSelectionVisible) {
+      return false;
+    }
+
+    if (activeTab === 'dashboard') {
+      switch (dashboardRoute) {
+        case 'class-list':
+        case 'student-list':
+        case 'teacher-list':
+        case 'student-search-results':
+          setDashboardRoute('dashboard');
+          return true;
+        case 'teacher-detail':
+          setDashboardRoute('teacher-list');
+          return true;
+        case 'class-detail':
+          setDashboardRoute('class-list');
+          return true;
+        case 'face-registration':
+          setDashboardRoute('class-detail');
+          return true;
+        case 'student-profile':
+          setDashboardRoute(studentProfileBackRoute);
+          return true;
+        case 'dashboard':
+        default:
+          break;
+      }
+    } else if (activeTab === 'measurement') {
+      switch (measurementRoute) {
+        case 'face-identification':
+        case 'height-pose':
+        case 'face-crop-preview':
+        case 'batch':
+          setMeasurementRoute('manual');
+          return true;
+        case 'create-session':
+        case 'manual':
+        case 'student-search':
+        case 'immunization-manual':
+          setMeasurementRoute('session-list');
+          return true;
+        case 'session-list':
+        default:
+          setActiveTab('dashboard');
+          return true;
+      }
+    } else if (activeTab === 'profile') {
+      if (profileRoute !== 'profile-overview') {
+        setProfileRoute('profile-overview');
+        return true;
+      }
+      setActiveTab('dashboard');
+      return true;
+    } else {
+      setActiveTab('dashboard');
+      return true;
+    }
+
+    // Dashboard root: a second press within 2 s leaves the app.
+    const now = Date.now();
+    if (now - lastExitPressRef.current < 2000) {
+      return false;
+    }
+    lastExitPressRef.current = now;
+    if (Platform.OS === 'android') {
+      ToastAndroid.show('Tekan sekali lagi untuk keluar', ToastAndroid.SHORT);
+    }
+    return true;
+  };
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (runScreenBackHandlers()) {
+        return true;
+      }
+      return hardwareBackRef.current();
+    });
+    return () => subscription.remove();
+  }, []);
   const activeSchoolRole = normalizeRoleKey(
     profileData.activeSchoolRole ??
       readStringValue(sessionUser, ['active_school_role', 'default_role', 'defaultRole']) ??
