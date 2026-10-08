@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { Linking, PermissionsAndroid, Platform } from 'react-native';
 import { BleManager, Device, State } from 'react-native-ble-plx';
 
 export const BLE_UNAVAILABLE_MESSAGE =
@@ -63,6 +63,65 @@ export async function requestBlePermissions() {
   } catch {
     return false;
   }
+}
+
+export type BlePermissionStatus = 'granted' | 'denied' | 'blocked';
+
+/**
+ * Shows the system permission prompt. 'blocked' means the user chose
+ * "don't ask again", so only the app settings page can grant it now.
+ */
+export async function requestBlePermissionStatus(): Promise<BlePermissionStatus> {
+  if (Platform.OS !== 'android') {
+    return 'granted';
+  }
+
+  try {
+    const permissions =
+      Platform.Version >= 31
+        ? [
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          ]
+        : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+    const result = await PermissionsAndroid.requestMultiple(permissions);
+    const values = permissions.map(permission => result[permission]);
+
+    if (values.every(value => value === PermissionsAndroid.RESULTS.GRANTED)) {
+      return 'granted';
+    }
+    if (values.some(value => value === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN)) {
+      return 'blocked';
+    }
+    return 'denied';
+  } catch {
+    return 'denied';
+  }
+}
+
+/**
+ * Asks the system to turn Bluetooth on. On Android this shows the
+ * "an app wants to turn on Bluetooth" dialog; when that intent is unavailable
+ * (or on iOS) it opens the Bluetooth / app settings instead. Callers should
+ * watch the BLE state afterwards rather than trust the return value.
+ */
+export async function requestBluetoothEnable(): Promise<void> {
+  if (Platform.OS === 'android') {
+    try {
+      await Linking.sendIntent('android.bluetooth.adapter.action.REQUEST_ENABLE');
+      return;
+    } catch {
+      // fall through to the settings page
+    }
+    try {
+      await Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS');
+      return;
+    } catch {
+      // fall through to the app settings page
+    }
+  }
+
+  await Linking.openSettings().catch(() => undefined);
 }
 
 export async function ensureBlePoweredOn() {
