@@ -76,6 +76,7 @@ import type {
   MeasurementSessionListItem,
 } from '../types';
 import type { TeacherListItem } from '../types';
+import { usePendingSync } from '../features/offline';
 import {
   DashboardRoute,
   FaceCropPreviewPayload,
@@ -368,6 +369,8 @@ export function RootNavigator() {
     startAutoReconnect();
     return () => stopAutoReconnect();
   }, [isAuthenticated]);
+  // Records saved offline while measuring: send them when a connection is back.
+  usePendingSync(isAuthenticated);
   const [currentSchool, setCurrentSchool] = useState(DEFAULT_SCHOOL_NAME);
   const [currentSchoolId, setCurrentSchoolId] = useState<string | null>(null);
   const [schoolMemberships, setSchoolMemberships] = useState<

@@ -725,6 +725,8 @@ export type SaveStudentMeasurementRecordPayload = {
   deviceName?: string | null;
   devicePayload?: Record<string, unknown> | null;
   clientRecordId?: string | null;
+  /** ISO time the student was measured; defaults to now. Set when a record queued offline is sent later. */
+  measuredAt?: string | null;
 };
 
 export type CreateImmunizationSessionPayload = {
@@ -751,6 +753,8 @@ export type SaveStudentImmunizationRecordPayload = {
   notes?: string | null;
   adverseEventNotes?: string | null;
   clientRecordId?: string | null;
+  /** ISO time of the immunization; defaults to now. Set when a record queued offline is sent later. */
+  administeredAt?: string | null;
 };
 
 export type DashboardMeasurementAnalytics = {
@@ -1792,13 +1796,13 @@ function normalizeImmunizationSessionStatus(value: unknown): ImmunizationSession
   return 'active';
 }
 
-function buildMeasurementText(heightCm: string, weightKg: string): string {
+export function buildMeasurementText(heightCm: string, weightKg: string): string {
   const heightDisplay = heightCm.length > 0 ? heightCm : '-';
   const weightDisplay = weightKg.length > 0 ? weightKg : '-';
   return `TB ${heightDisplay} cm • BB ${weightDisplay} kg`;
 }
 
-function formatMeasurementTimestamp(value: string | null): string {
+export function formatMeasurementTimestamp(value: string | null): string {
   if (!value) {
     return 'Belum diukur';
   }
@@ -1817,7 +1821,7 @@ function formatMeasurementTimestamp(value: string | null): string {
   }).format(date)}`;
 }
 
-function buildImmunizationText(vaccineName: string, doseLabel: string | null, status = 'given') {
+export function buildImmunizationText(vaccineName: string, doseLabel: string | null, status = 'given') {
   const statusLabel =
     status === 'given'
       ? 'Lengkap'
@@ -2500,7 +2504,7 @@ export async function saveStudentImmunizationRecord(
     }
   `;
 
-  const administeredAt = new Date().toISOString();
+  const administeredAt = payload.administeredAt || new Date().toISOString();
   const responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,
@@ -2974,7 +2978,7 @@ export async function saveStudentMeasurementRecord(
     }
   `;
 
-  const measuredAt = new Date().toISOString();
+  const measuredAt = payload.measuredAt || new Date().toISOString();
   const responseBody = (await apiRequest(GRAPHQL_URL, {
     method: 'POST',
     requiresAuth: true,

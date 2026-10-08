@@ -13,7 +13,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // never pulls the BLE stack in.
 import { describeSensorSummary, getDeviceDisplayName } from '../../features/device/deviceStatus';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
-import { listMeasurementStudents, saveStudentMeasurementRecord } from '../../services';
+import { saveStudentMeasurementRecord, type SaveStudentMeasurementRecordPayload } from '../../services';
+import {
+  OfflineDataBanner,
+  PendingSyncBanner,
+  SAVE_TIMEOUT_MS,
+  enqueueMeasurement,
+  isNetworkError,
+  loadSessionStudents,
+  pendingForCurrentUser,
+  removePendingRecord,
+  syncPendingRecords,
+  toPendingStudent,
+  usePendingRecords,
+  withTimeout,
+  type PendingRecord,
+} from '../../features/offline';
 import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
 import {
   Avatar,
@@ -108,6 +123,18 @@ export function StudentMeasurementScreen({
   const [isSavingMeasurement, setIsSavingMeasurement] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
+  const [lastSavedOffline, setLastSavedOffline] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const { records: pendingRecords } = usePendingRecords();
+  const pendingStudentIds = useMemo(
+    () =>
+      new Set(
+        pendingForCurrentUser(pendingRecords)
+          .filter(record => record.kind === 'measurement' && record.sessionId === sessionId)
+          .map(record => record.studentId),
+      ),
+    [pendingRecords, sessionId],
+  );
   const [isDeviceSheetOpen, setIsDeviceSheetOpen] = useState(false);
   // Reading already saved for a previous student: never pre-fill it again.
   const [consumedReadingAt, setConsumedReadingAt] = useState<string | null>(null);
@@ -158,10 +185,11 @@ export function StudentMeasurementScreen({
     setIsLoadingStudents(true);
     setStudentLoadError(null);
 
-    listMeasurementStudents(sessionId)
-      .then(rows => {
+    loadSessionStudents('measurement', sessionId)
+      .then(result => {
         if (isMounted) {
-          setStudents(rows);
+          setStudents(result.value);
+          setCachedAt(result.cachedAt);
         }
       })
       .catch(error => {
@@ -280,51 +308,82 @@ export function StudentMeasurementScreen({
     setIsSavingMeasurement(true);
     setSaveError(null);
 
+    const payload: SaveStudentMeasurementRecordPayload = {
+      sessionId,
+      studentId: savedStudentId,
+      studentEnrollmentId: selectedStudent.studentEnrollmentId,
+      captureMethod: isAuto ? 'automatic' : 'manual',
+      captureSource: isAuto ? 'device_ble' : 'manual_form',
+      heightCm: heightNumber,
+      weightKg: weightNumber,
+      deviceId: isAuto ? deviceSession.connectedDeviceId : null,
+      deviceName: isAuto ? deviceSession.connectedDeviceName : null,
+      devicePayload: isAuto
+        ? {
+            source: deviceSession.latestReadingSource,
+            latestWeightKg: deviceSession.latestWeightKg,
+            latestWeightAt: deviceSession.latestWeightAt,
+            latestHeightCm: deviceSession.latestHeightCm,
+            latestHeightAt: deviceSession.latestHeightAt,
+            stable: deviceSession.latestReadingStable,
+            readingAt: deviceSession.latestReadingAt,
+            sequence: deviceSession.latestSequence,
+            batteryPct: deviceSession.latestBatteryPct,
+            rawHex: deviceSession.latestRawHex,
+          }
+        : null,
+    };
+
+    // Saved to the server, or (no / weak connection) queued on the phone.
+    let savedStudent: StudentMeasurementItem | null = null;
+    let savedOffline = false;
     try {
-      const savedRecord = await saveStudentMeasurementRecord({
-        sessionId,
-        studentId: savedStudentId,
-        studentEnrollmentId: selectedStudent.studentEnrollmentId,
-        captureMethod: isAuto ? 'automatic' : 'manual',
-        captureSource: isAuto ? 'device_ble' : 'manual_form',
-        heightCm: heightNumber,
-        weightKg: weightNumber,
-        deviceId: isAuto ? deviceSession.connectedDeviceId : null,
-        deviceName: isAuto ? deviceSession.connectedDeviceName : null,
-        devicePayload: isAuto
-          ? {
-              source: deviceSession.latestReadingSource,
-              latestWeightKg: deviceSession.latestWeightKg,
-              latestWeightAt: deviceSession.latestWeightAt,
-              latestHeightCm: deviceSession.latestHeightCm,
-              latestHeightAt: deviceSession.latestHeightAt,
-              stable: deviceSession.latestReadingStable,
-              readingAt: deviceSession.latestReadingAt,
-              sequence: deviceSession.latestSequence,
-              batteryPct: deviceSession.latestBatteryPct,
-              rawHex: deviceSession.latestRawHex,
-            }
-          : null,
-      });
+      const savedRecord = await withTimeout(saveStudentMeasurementRecord(payload), SAVE_TIMEOUT_MS);
+      // An older queued value for this student is superseded by this save.
+      await removePendingRecord('measurement', sessionId, savedStudentId);
+      syncPendingRecords().catch(() => undefined);
+      savedStudent = {
+        ...selectedStudent,
+        recordId: savedRecord.recordId,
+        measurement: savedRecord.measurement,
+        timestamp: savedRecord.timestamp,
+        checked: savedRecord.checked,
+        syncStatus: 'synced' as const,
+        heightCm: savedRecord.heightCm,
+        weightKg: savedRecord.weightKg,
+      };
+    } catch (error) {
+      if (!isNetworkError(error)) {
+        setSaveError(toRecordingErrorMessage(error, 'Gagal menyimpan hasil pengukuran.'));
+        setIsSavingMeasurement(false);
+        return;
+      }
+      try {
+        const measuredAt = new Date().toISOString();
+        await enqueueMeasurement({ ...payload, measuredAt });
+        savedStudent = toPendingStudent(selectedStudent, {
+          kind: 'measurement',
+          payload: { ...payload, measuredAt },
+          queuedAt: measuredAt,
+        } as PendingRecord);
+        savedOffline = true;
+      } catch (queueError) {
+        setSaveError(toRecordingErrorMessage(queueError, 'Gagal menyimpan di HP.'));
+        setIsSavingMeasurement(false);
+        return;
+      }
+    }
+
+    try {
       if (isAuto && deviceSession.latestReadingAt) {
         setConsumedReadingAt(deviceSession.latestReadingAt);
       }
 
       const updatedStudents = students.map(student =>
-        student.id === savedStudentId
-          ? {
-              ...student,
-              recordId: savedRecord.recordId,
-              measurement: savedRecord.measurement,
-              timestamp: savedRecord.timestamp,
-              checked: savedRecord.checked,
-              syncStatus: 'synced' as const,
-              heightCm: savedRecord.heightCm,
-              weightKg: savedRecord.weightKg,
-            }
-          : student,
+        student.id === savedStudentId ? { ...student, ...savedStudent, name: student.name } : student,
       );
       setStudents(updatedStudents);
+      setLastSavedOffline(savedOffline);
       setLastSavedName(savedStudentName);
 
       // Continue with the next student that still has no complete record.
@@ -424,8 +483,17 @@ export function StudentMeasurementScreen({
 
       <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <DeviceStatusCard />
+        <OfflineDataBanner cachedAt={cachedAt} onRetry={() => setReloadToken(value => value + 1)} />
+        <PendingSyncBanner />
         {lastSavedName ? (
-          <InlineAlert tone="success" message={`Data ${lastSavedName} tersimpan.`} />
+          <InlineAlert
+            tone={lastSavedOffline ? 'info' : 'success'}
+            message={
+              lastSavedOffline
+                ? `Tidak ada koneksi. Data ${lastSavedName} disimpan di HP dan dikirim otomatis saat online.`
+                : `Data ${lastSavedName} tersimpan.`
+            }
+          />
         ) : null}
 
         <View style={styles.sessionCard}>
@@ -485,7 +553,9 @@ export function StudentMeasurementScreen({
                 </View>
                 <StatusPill
                   label={
-                    student.checked
+                    pendingStudentIds.has(student.id)
+                      ? 'Belum terkirim'
+                      : student.checked
                       ? 'Lengkap'
                       : student.heightCm || student.weightKg
                         ? 'Sebagian'

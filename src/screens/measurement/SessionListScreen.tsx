@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { listImmunizationSessions, listMeasurementSessions } from '../../services';
+import {
+  OfflineDataBanner,
+  PendingSyncBanner,
+  loadImmunizationSessions,
+  loadMeasurementSessions,
+} from '../../features/offline';
 import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
 import {
   EmptyState,
@@ -124,6 +129,7 @@ export function SessionListScreen({
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!schoolId) {
@@ -139,12 +145,13 @@ export function SessionListScreen({
 
     const request =
       mode === 'measurement'
-        ? listMeasurementSessions(schoolId)
-        : listImmunizationSessions(schoolId);
+        ? loadMeasurementSessions(schoolId)
+        : loadImmunizationSessions(schoolId);
 
     request
-      .then(rows => {
+      .then(({ value: rows, cachedAt: rowsCachedAt }) => {
         if (isMounted) {
+          setCachedAt(rowsCachedAt);
           if (mode === 'measurement') {
             setMeasurementSessions(rows as MeasurementSessionListItem[]);
           } else {
@@ -207,6 +214,8 @@ export function SessionListScreen({
           onChange={onSwitchMode}
         />
 
+        <OfflineDataBanner cachedAt={cachedAt} onRetry={() => setReloadToken(value => value + 1)} />
+        <PendingSyncBanner />
         {mode === 'measurement' ? <DeviceStatusCard /> : null}
 
         <PrimaryButton

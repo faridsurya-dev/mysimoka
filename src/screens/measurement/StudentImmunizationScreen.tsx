@@ -8,9 +8,23 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { listImmunizationStudents, saveStudentImmunizationRecord } from '../../services';
+import { saveStudentImmunizationRecord, type SaveStudentImmunizationRecordPayload } from '../../services';
+import {
+  OfflineDataBanner,
+  PendingSyncBanner,
+  SAVE_TIMEOUT_MS,
+  enqueueImmunization,
+  isNetworkError,
+  loadSessionStudents,
+  pendingForCurrentUser,
+  removePendingRecord,
+  syncPendingRecords,
+  toPendingStudent,
+  usePendingRecords,
+  withTimeout,
+  type PendingRecord,
+} from '../../features/offline';
 import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
-import type { SaveStudentImmunizationRecordPayload } from '../../services';
 import {
   Avatar,
   EmptyState,
@@ -98,6 +112,18 @@ export function StudentImmunizationScreen({
   const [isSavingRecord, setIsSavingRecord] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
+  const [lastSavedOffline, setLastSavedOffline] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const { records: pendingRecords } = usePendingRecords();
+  const pendingStudentIds = useMemo(
+    () =>
+      new Set(
+        pendingForCurrentUser(pendingRecords)
+          .filter(record => record.kind === 'immunization' && record.sessionId === sessionId)
+          .map(record => record.studentId),
+      ),
+    [pendingRecords, sessionId],
+  );
 
   const selectedStudentIndex = selectedStudentId
     ? students.findIndex(student => student.id === selectedStudentId)
@@ -128,10 +154,11 @@ export function StudentImmunizationScreen({
     setIsLoadingStudents(true);
     setStudentLoadError(null);
 
-    listImmunizationStudents(sessionId)
-      .then(rows => {
+    loadSessionStudents('immunization', sessionId)
+      .then(result => {
         if (isMounted) {
-          setStudents(rows);
+          setStudents(result.value);
+          setCachedAt(result.cachedAt);
         }
       })
       .catch(error => {
@@ -199,31 +226,61 @@ export function StudentImmunizationScreen({
     setIsSavingRecord(true);
     setSaveError(null);
 
-    try {
-      const savedRecord = await saveStudentImmunizationRecord({
-        sessionId,
-        studentId: savedStudentId,
-        studentEnrollmentId: selectedStudent.studentEnrollmentId,
-        vaccineName: sessionImmunizationType,
-        doseLabel: sessionImmunizationDose,
-        officerName,
-        status: recordStatus,
-        notes: notes.trim() || null,
-      });
+    const payload: SaveStudentImmunizationRecordPayload = {
+      sessionId,
+      studentId: savedStudentId,
+      studentEnrollmentId: selectedStudent.studentEnrollmentId,
+      vaccineName: sessionImmunizationType,
+      doseLabel: sessionImmunizationDose,
+      officerName,
+      status: recordStatus,
+      notes: notes.trim() || null,
+    };
 
+    // Saved to the server, or (no / weak connection) queued on the phone.
+    let savedStudent: StudentMeasurementItem | null = null;
+    let savedOffline = false;
+    try {
+      const savedRecord = await withTimeout(saveStudentImmunizationRecord(payload), SAVE_TIMEOUT_MS);
+      // An older queued value for this student is superseded by this save.
+      await removePendingRecord('immunization', sessionId, savedStudentId);
+      syncPendingRecords().catch(() => undefined);
+      savedStudent = {
+        ...selectedStudent,
+        recordId: savedRecord.recordId,
+        measurement: savedRecord.measurement,
+        timestamp: savedRecord.timestamp,
+        checked: true,
+        syncStatus: 'synced' as const,
+      };
+    } catch (error) {
+      if (!isNetworkError(error)) {
+        setSaveError(toRecordingErrorMessage(error, 'Gagal menyimpan data imunisasi.'));
+        setIsSavingRecord(false);
+        return;
+      }
+      try {
+        const administeredAt = new Date().toISOString();
+        await enqueueImmunization({ ...payload, administeredAt });
+        savedStudent = toPendingStudent(selectedStudent, {
+          kind: 'immunization',
+          payload: { ...payload, administeredAt },
+          queuedAt: administeredAt,
+        } as PendingRecord);
+        savedOffline = true;
+      } catch (queueError) {
+        setSaveError(toRecordingErrorMessage(queueError, 'Gagal menyimpan di HP.'));
+        setIsSavingRecord(false);
+        return;
+      }
+    }
+
+    try {
       const updatedStudents = students.map(student =>
-        student.id === savedStudentId
-          ? {
-              ...student,
-              recordId: savedRecord.recordId,
-              measurement: savedRecord.measurement,
-              timestamp: savedRecord.timestamp,
-              checked: true,
-              syncStatus: 'synced' as const,
-            }
-          : student,
+        student.id === savedStudentId ? { ...student, ...savedStudent, name: student.name } : student,
       );
       setStudents(updatedStudents);
+      setLastSavedOffline(savedOffline);
       setLastSavedName(savedStudentName);
 
       const currentIndex = updatedStudents.findIndex(student => student.id === savedStudentId);
@@ -306,8 +363,17 @@ export function StudentImmunizationScreen({
       </View>
 
       <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <OfflineDataBanner cachedAt={cachedAt} onRetry={() => setReloadToken(value => value + 1)} />
+        <PendingSyncBanner />
         {lastSavedName ? (
-          <InlineAlert tone="success" message={`Data imunisasi ${lastSavedName} tersimpan.`} />
+          <InlineAlert
+            tone={lastSavedOffline ? 'info' : 'success'}
+            message={
+              lastSavedOffline
+                ? `Tidak ada koneksi. Data imunisasi ${lastSavedName} disimpan di HP dan dikirim otomatis saat online.`
+                : `Data imunisasi ${lastSavedName} tersimpan.`
+            }
+          />
         ) : null}
 
         <View style={styles.sessionCard}>
@@ -341,7 +407,9 @@ export function StudentImmunizationScreen({
         {listState ?? (
           <View style={styles.list}>
             {filteredStudents.map(student => {
-              const status = getRecordTone(student);
+              const status = pendingStudentIds.has(student.id)
+                ? { label: 'Belum terkirim', tone: 'warning' as const }
+                : getRecordTone(student);
               return (
                 <Pressable
                   accessibilityRole="button"
