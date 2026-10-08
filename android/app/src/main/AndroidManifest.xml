@@ -31,6 +31,15 @@
         android:name="android.permission.ACCESS_COARSE_LOCATION"
         android:maxSdkVersion="30"
         tools:node="replace" />
+    <!-- The library also declares both as <uses-permission-sdk-23> without
+      maxSdkVersion; Play rejects the duplicate with different maxSdkVersion.
+      minSdk is 26, so the capped <uses-permission> above is equivalent. -->
+    <uses-permission-sdk-23
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        tools:node="remove" />
+    <uses-permission-sdk-23
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        tools:node="remove" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application
