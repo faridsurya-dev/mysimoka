@@ -377,7 +377,7 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
               value={autoReconnectEnabled}
             />
           </View>
-          {measurementLogs.length > 0 ? (
+          {technicianMode && measurementLogs.length > 0 ? (
             <View style={styles.debugLogContainer}>
               <Text style={styles.debugLogTitle}>Log BLE Timbangan (raw)</Text>
               {measurementLogs.map((logItem, logIndex) => (
