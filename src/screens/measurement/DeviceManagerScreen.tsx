@@ -32,6 +32,7 @@ import {
   type DeviceCalibrationStatus,
 } from '../../features/device/calibration';
 import { getRegisteredDevice } from '../../features/device/deviceRegistry';
+import { runSmartGrowthCalibration } from '../../features/device/smartGrowthCalibration';
 import { resolveDeviceKey } from '../../features/device/deviceRegistryPayload';
 import { disableTechnicianMode, useTechnicianModeActive } from '../../features/device/technicianMode';
 import { fetchCalibrationExtras, fetchDeviceCalibrationChecks } from '../../services/auth';
@@ -164,6 +165,41 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     calibrationStatusKey,
   );
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
+
+  // Quick tare respects the device's "platform empty" guard so a child on the
+  // scale is never zeroed; only technicians may force it (e.g. after assembly).
+  const [tareBusy, setTareBusy] = useState(false);
+  const [tareFeedback, setTareFeedback] = useState<{
+    message: string;
+    tone: 'success' | 'warning' | 'error';
+    offerForce: boolean;
+  } | null>(null);
+  const runTare = async (force: boolean) => {
+    setTareBusy(true);
+    setTareFeedback(null);
+    try {
+      const outcome = await runSmartGrowthCalibration({ type: 'tare', force });
+      if (outcome.ok) {
+        setTareFeedback({ message: 'Berat dinol-kan.', tone: 'success', offerForce: false });
+      } else if (outcome.result === 'platform_not_empty') {
+        setTareFeedback({
+          message: technicianMode
+            ? 'Alat menolak: timbangan terbaca tidak kosong. Kalau pijakan memang kosong (misalnya setelah alat dirakit), nol-kan paksa.'
+            : 'Timbangan belum kosong. Turunkan anak/barang dari timbangan, lalu coba lagi.',
+          tone: 'warning',
+          offerForce: technicianMode,
+        });
+      } else {
+        setTareFeedback({
+          message: `Tare gagal (${outcome.result}). Coba lagi.`,
+          tone: 'error',
+          offerForce: false,
+        });
+      }
+    } finally {
+      setTareBusy(false);
+    }
+  };
 
   // BLE scan/connection is owned by the device manager and survives this screen
   // unmounting; the screen only renders state and collects the raw log.
@@ -505,13 +541,28 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                         {calibrationStatus ? (
                           <CalibrationStatusNotice status={calibrationStatus} />
                         ) : null}
+                        {tareFeedback ? (
+                          <InlineAlert
+                            actionLabel={
+                              tareFeedback.offerForce ? 'Nol-kan paksa' : undefined
+                            }
+                            message={tareFeedback.message}
+                            onAction={
+                              tareFeedback.offerForce
+                                ? () => {
+                                    runTare(true).catch(() => undefined);
+                                  }
+                                : undefined
+                            }
+                            tone={tareFeedback.tone}
+                          />
+                        ) : null}
                         <View style={styles.controlButtons}>
                           <PrimaryButton
                             label="Tare (nol-kan)"
+                            loading={tareBusy}
                             onPress={() => {
-                              sendSmartGrowthControl(SMARTGROWTH_COMMANDS.tare).catch(
-                                () => undefined,
-                              );
+                              runTare(false).catch(() => undefined);
                             }}
                             size="sm"
                             variant="outline"

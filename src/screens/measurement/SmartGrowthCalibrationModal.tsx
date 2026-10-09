@@ -477,7 +477,7 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
                       label="Tare (nol-kan)"
                       loading={adjusting === 'tare'}
                       onPress={() => {
-                        runAdjust({ type: 'tare' }, 'Tare').catch(() => undefined);
+                        runAdjust({ type: 'tare', force: true }, 'Tare').catch(() => undefined);
                       }}
                       size="sm"
                       variant="outline"

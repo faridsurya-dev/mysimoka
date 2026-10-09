@@ -66,7 +66,8 @@ export async function readSmartGrowthCalibration(): Promise<SmartGrowthCalibrati
 }
 
 export type CalibrationAction =
-  | { type: 'tare' }
+  /** force skips the device's "platform empty" check (technician only). */
+  | { type: 'tare'; force: boolean }
   | { type: 'weight'; referenceKg: number }
   | { type: 'height'; referenceCm: number }
   | { type: 'reset' };
@@ -82,7 +83,10 @@ export type CalibrationCommandResult = {
 function commandFor(action: CalibrationAction): { command: number; params: number[] } {
   switch (action.type) {
     case 'tare':
-      return { command: SMARTGROWTH_COMMANDS.tare, params: [SMARTGROWTH_TARE_FORCE] };
+      return {
+        command: SMARTGROWTH_COMMANDS.tare,
+        params: action.force ? [SMARTGROWTH_TARE_FORCE] : [],
+      };
     case 'weight':
       return {
         command: SMARTGROWTH_COMMANDS.calibrateWeight,
