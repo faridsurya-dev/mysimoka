@@ -358,20 +358,26 @@ static bool hx711Ready() {
 
 // Reads one 24-bit sample (channel A, gain 128). Call only when hx711Ready().
 // SCK high must stay < 60 us or the HX711 powers down, hence the critical section.
+// The pull-up is dropped while clocking: on the SmartGrowth PCB the HX711 DOUT
+// (5 V module, 10k series resistor to D18) sinks too weakly to pull the line LOW
+// against the internal pull-up between bits, which read as 0..01..1 garbage.
+// Each bit is sampled at the end of a 5 us low phase so the weak edge settles.
 static int32_t hx711ReadRaw() {
   uint32_t value = 0;
+  pinMode(HX711_DT_PIN, INPUT);
   portENTER_CRITICAL(&hx711Mux);
   for (int i = 0; i < 24; i++) {
     digitalWrite(HX711_SCK_PIN, HIGH);
-    delayMicroseconds(1);
-    value = (value << 1) | (digitalRead(HX711_DT_PIN) ? 1 : 0);
+    delayMicroseconds(5);
     digitalWrite(HX711_SCK_PIN, LOW);
-    delayMicroseconds(1);
+    delayMicroseconds(5);
+    value = (value << 1) | (digitalRead(HX711_DT_PIN) ? 1 : 0);
   }
   digitalWrite(HX711_SCK_PIN, HIGH);  // 25th pulse: next sample channel A, gain 128
-  delayMicroseconds(1);
+  delayMicroseconds(5);
   digitalWrite(HX711_SCK_PIN, LOW);
   portEXIT_CRITICAL(&hx711Mux);
+  pinMode(HX711_DT_PIN, INPUT_PULLUP);
   if (value & 0x800000) value |= 0xFF000000;  // sign-extend
   return (int32_t)value;
 }
