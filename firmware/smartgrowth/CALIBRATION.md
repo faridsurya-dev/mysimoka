@@ -12,7 +12,7 @@ Tanggal: 2026-10-11, firmware 2.2.0.
 | --- | --- | --- |
 | Faktor berat | 23357.62 | `t` lalu `c 92.6`, pembanding timbangan Mijia S400 (92,6 kg, orang dewasa) |
 | Offset tinggi | 204.3 cm | sensor di atas menghadap ke bawah; cek orang 181 cm terbaca 180,5–180,9 |
-| Zero (tare) | ≈1454678 | berubah tiap tare, tare otomatis saat boot bila platform kosong |
+| Zero (tare) | ≈1453138 | berubah tiap tare, tare otomatis saat boot bila platform kosong. Tare HANYA saat alat berdiri tegak: tiang + rangka atas ≈5,3 kg ikut ditimbang, tare saat alat ditidurkan membuat semua berat +5,3 kg |
 
 Hasil sebelum kalibrasi berat: faktor 23666 membaca 91,4 kg untuk 92,6 kg (−1,3%).
 
