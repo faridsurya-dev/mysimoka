@@ -20,7 +20,7 @@
  * Board: "ESP32 Dev Module" (ESP32 DevKit V1, ESP32-WROOM-32).
  * Libraries (Arduino Library Manager):
  *   - NimBLE-Arduino (h2zero) 2.x
- *   - Adafruit_VL53L0X
+ *   - VL53L0X (Pololu)
  * The HX711 is read directly (no library): the common HX711 libraries block
  * forever in begin()/read() when no HX711 is connected.
  *
@@ -39,7 +39,7 @@
 #include <NimBLEDevice.h>
 #include <Preferences.h>
 #include <Wire.h>
-#include <Adafruit_VL53L0X.h>
+#include <VL53L0X.h>  // Pololu VL53L0X
 
 // ---------------------------------------------------------------------------
 // Hardware configuration (match the PCB)
@@ -75,12 +75,13 @@
 // -1 = not fitted.
 #define SHARP_ADC_PIN 34  // PCB connector GP-2Y02 -> D34
 
-// Mounting (v1.1 geometry: sensor on the platform pointing UP at a board held
-// on the child's head, height = distance + offset). Use HEIGHT_MOUNT_DOWN for
-// a sensor above the child pointing down (height = offset - distance).
+// Mounting. SmartGrowth hardware: sensor on the frame above the child pointing
+// DOWN at the head board (height = offset - distance; offset = sensor height
+// above the platform, set by height calibration). HEIGHT_MOUNT_UP is the v1.1
+// geometry: sensor on the platform pointing up (height = distance + offset).
 #define HEIGHT_MOUNT_UP 0
 #define HEIGHT_MOUNT_DOWN 1
-#define HEIGHT_MOUNT HEIGHT_MOUNT_UP
+#define HEIGHT_MOUNT HEIGHT_MOUNT_DOWN
 
 // Optional battery sense through a divider on an ADC1 pin. -1 = none.
 #define BATTERY_ADC_PIN -1
@@ -99,8 +100,8 @@
 // ---------------------------------------------------------------------------
 
 #define FW_MAJOR 2
-#define FW_MINOR 1
-#define FW_PATCH 0
+#define FW_MINOR 2
+#define FW_PATCH 1
 // Serial number in Device Info. Empty = "SG-" + last 3 bytes of the MAC.
 #define SERIAL_NUMBER ""
 
@@ -178,11 +179,12 @@
 #define WEIGHT_WINDOW 8           // ~0.8 s at the HX711 default 10 SPS
 #define HEIGHT_WINDOW 5
 #define WEIGHT_STABLE_TOL_KG 0.05f
-#define HEIGHT_STABLE_TOL_CM 0.5f
+#define HEIGHT_STABLE_TOL_CM 1.0f  // VL53L0X high-accuracy noise is a few mm; 0.5 cm rarely held
 #define MEASURING_NOTIFY_MS 200   // <= 5 Hz
 #define HOLD_REPEAT_MS 1000       // repeat the held result at most 1x/s
-#define HEIGHT_TIMEOUT_MS 3000    // then send weight only
+#define HEIGHT_TIMEOUT_MS 5000    // then send weight only
 #define HX711_TIMEOUT_MS 1000
+#define DISTANCE_FRESH_MS 1000    // an older distance is no longer used as height
 
 // ---------------------------------------------------------------------------
 // State
@@ -192,7 +194,8 @@ enum State { STATE_EMPTY, STATE_MEASURING, STATE_HOLD };
 
 enum HeightSource { HEIGHT_NONE, HEIGHT_VL53L0X, HEIGHT_SHARP };
 
-Adafruit_VL53L0X tof;
+#define VL53L0X_I2C_ADDR 0x29
+VL53L0X tof;
 Preferences prefs;
 
 HeightSource heightSource = HEIGHT_NONE;
@@ -245,6 +248,7 @@ float heightWindow[HEIGHT_WINDOW];
 uint8_t heightCount = 0;
 float lastWeightKg = NAN;
 float lastDistanceCm = NAN;
+bool distancePending = false;  // new distance not yet pushed into the height window
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -421,16 +425,42 @@ static bool tare() {
   return tareWithRaw(readRawAverage(20));
 }
 
+// Reads one VL53L0X register; -1 when the transfer fails.
+static int readTofRegister(uint8_t reg) {
+  Wire.beginTransmission(VL53L0X_I2C_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return -1;
+  if (Wire.requestFrom((uint8_t)VL53L0X_I2C_ADDR, (uint8_t)1) != 1) return -1;
+  return Wire.read();
+}
+
 static void setupHeightSensor() {
 #if HEIGHT_SENSOR == HEIGHT_SENSOR_AUTO
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-  if (tof.begin(VL53L0X_I2C_ADDR, false, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_LONG_RANGE)) {
-    tof.startRangeContinuous(50);
-    heightSource = HEIGHT_VL53L0X;
-    Serial.println("height: VL53L0X (long range)");
-    return;
+  // 50 kHz: the sensor sits at the top of the pole on a long cable with only
+  // the module's pull-ups, which is marginal at the default 100 kHz.
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 50000);
+  // Pololu driver: it takes the reference SPAD setup from the sensor's NVM.
+  // The ST/Adafruit driver re-measures it (PerformRefSpadManagement) and fails
+  // with -7 once the sensor sits in its housing on the pole.
+  tof.setBus(&Wire);
+  tof.setTimeout(500);
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    if (tof.init()) {
+      // High accuracy (200 ms timing budget): a few mm of noise within ~1.2 m,
+      // where long-range mode jittered by several cm and height never passed
+      // the stability window.
+      tof.setMeasurementTimingBudget(200000);
+      tof.startContinuous(0);
+      heightSource = HEIGHT_VL53L0X;
+      Serial.printf("height: VL53L0X (high accuracy, attempt %d)\n", attempt);
+      return;
+    }
+    delay(100);
   }
-  Serial.println("height: VL53L0X not found");
+  // Diagnostic for the field: model id register 0xC0 reads 0xEE on a VL53L0X.
+  Wire.beginTransmission(VL53L0X_I2C_ADDR);
+  uint8_t ack = Wire.endTransmission();
+  Serial.printf("height: VL53L0X not found (ack=%u, id=0x%02X)\n", ack, readTofRegister(0xC0) & 0xFF);
 #endif
 #if HEIGHT_SENSOR == HEIGHT_SENSOR_AUTO || HEIGHT_SENSOR == HEIGHT_SENSOR_SHARP
   if (SHARP_ADC_PIN >= 0) {
@@ -448,9 +478,10 @@ static void setupHeightSensor() {
 static float readDistanceCm() {
   switch (heightSource) {
     case HEIGHT_VL53L0X: {
-      if (!tof.isRangeComplete()) return NAN;
-      uint16_t mm = tof.readRangeResult();
-      if (tof.readRangeStatus() != 0 || mm == 0 || mm >= 8190) return NAN;
+      // Non-blocking: a new range is ready when the interrupt status is set.
+      if ((tof.readReg(VL53L0X::RESULT_INTERRUPT_STATUS) & 0x07) == 0) return NAN;
+      uint16_t mm = tof.readRangeContinuousMillimeters();
+      if (tof.timeoutOccurred() || mm == 0 || mm >= 8190) return NAN;
       return mm / 10.0f;
     }
     case HEIGHT_SHARP: {
@@ -990,6 +1021,7 @@ void loop() {
   if (!isnan(distance)) {
     lastDistanceCm = distance;
     lastDistanceMs = millis();
+    distancePending = true;
   }
   updateStatus();
   float sample = readWeightKg();
@@ -1006,7 +1038,13 @@ void loop() {
 
   float weight = pushMedian(sample);
   lastWeightKg = weight;
-  float height = distanceToHeightCm(distance);
+  // The distance sensor and the HX711 become ready at different moments; a
+  // distance read in an iteration without a weight sample is kept instead of
+  // dropped (dropping it starved the height window, so hold had no height).
+  bool distanceFresh = lastDistanceMs != 0 && millis() - lastDistanceMs < DISTANCE_FRESH_MS;
+  float height = distanceFresh ? distanceToHeightCm(lastDistanceCm) : NAN;
+  bool newHeight = distancePending;
+  distancePending = false;
 
   switch (state) {
     case STATE_EMPTY:
@@ -1023,7 +1061,7 @@ void loop() {
         break;
       }
       pushWindow(weightWindow, WEIGHT_WINDOW, weightCount, weight);
-      if (!isnan(height) && height >= HEIGHT_MIN_CM && height <= HEIGHT_MAX_CM) {
+      if (newHeight && !isnan(height) && height >= HEIGHT_MIN_CM && height <= HEIGHT_MAX_CM) {
         pushWindow(heightWindow, HEIGHT_WINDOW, heightCount, height);
       }
 
@@ -1062,6 +1100,6 @@ void loop() {
   static unsigned long lastLog = 0;
   if (millis() - lastLog > 1000) {
     lastLog = millis();
-    Serial.printf("kg=%.2f d=%.1f h=%.1f\n", weight, distance, height);
+    Serial.printf("kg=%.2f d=%.1f h=%.1f\n", weight, distanceFresh ? lastDistanceCm : NAN, height);
   }
 }

@@ -12,7 +12,7 @@ Pin mengikuti PCB `Esp32_Sensorjarak`: HX711 DT 16 / SCK 4, Sharp GP2Y0A02 di GP
 ## Build
 
 1. Arduino IDE → Boards Manager: **esp32** (Espressif). Board: **ESP32 Dev Module**.
-2. Library Manager: **NimBLE-Arduino** 2.x, **Adafruit_VL53L0X**. HX711 dibaca langsung tanpa library (library HX711 umum macet selamanya bila HX711 tidak terpasang).
+2. Library Manager: **NimBLE-Arduino** 2.x, **VL53L0X** (Pololu, 1.3.x). HX711 dibaca langsung tanpa library (library HX711 umum macet selamanya bila HX711 tidak terpasang).
 3. Buka `smartgrowth.ino`, sesuaikan blok *Hardware configuration* dengan PCB, upload.
 
 ## Sensor tinggi
@@ -21,9 +21,10 @@ Pin mengikuti PCB `Esp32_Sensorjarak`: HX711 DT 16 / SCK 4, Sharp GP2Y0A02 di GP
 GP2Y0A02 bila `SHARP_ADC_PIN` diisi (pin ADC1, GPIO 32–39); kalau tidak ada keduanya, alat
 tetap jalan sebagai timbangan saja. Sensor rusak/lepas tidak lagi membuat alat macet.
 
-Pemasangan default sama dengan v1.1: sensor di platform menghadap **ke atas** ke papan di
-kepala anak (`tinggi = jarak + offset`). Sensor di atas menghadap ke bawah: set
-`HEIGHT_MOUNT HEIGHT_MOUNT_DOWN` (`tinggi = offset − jarak`).
+Pemasangan default (sejak 2.2.0): sensor di rangka atas menghadap **ke bawah** ke papan
+kepala (`HEIGHT_MOUNT HEIGHT_MOUNT_DOWN`, `tinggi = offset − jarak`; offset diisi oleh
+kalibrasi tinggi). Geometri v1.1 (sensor di platform menghadap ke atas, `tinggi = jarak +
+offset`): set `HEIGHT_MOUNT HEIGHT_MOUNT_UP`. VL53L0X memakai mode high accuracy (±1,2 m).
 
 ## Kalibrasi (Serial Monitor 115200, akhir baris "Newline")
 
