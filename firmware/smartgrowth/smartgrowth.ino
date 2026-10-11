@@ -101,7 +101,7 @@
 
 #define FW_MAJOR 2
 #define FW_MINOR 2
-#define FW_PATCH 1
+#define FW_PATCH 2
 // Serial number in Device Info. Empty = "SG-" + last 3 bytes of the MAC.
 #define SERIAL_NUMBER ""
 
@@ -177,7 +177,7 @@
 #define AUTO_TARE_MAX_KG 3.0f     // boot auto-tare only when the reading is this close to zero
 #define MEDIAN_SIZE 5             // spike filter before the stability check
 #define WEIGHT_WINDOW 8           // ~0.8 s at the HX711 default 10 SPS
-#define HEIGHT_WINDOW 5
+#define HEIGHT_WINDOW 10          // ~2 s at ~5 Hz: a head board paused briefly is not "stable"
 #define WEIGHT_STABLE_TOL_KG 0.05f
 #define HEIGHT_STABLE_TOL_CM 1.0f  // VL53L0X high-accuracy noise is a few mm; 0.5 cm rarely held
 #define MEASURING_NOTIFY_MS 200   // <= 5 Hz
@@ -185,6 +185,13 @@
 #define HEIGHT_TIMEOUT_MS 5000    // then send weight only
 #define HX711_TIMEOUT_MS 1000
 #define DISTANCE_FRESH_MS 1000    // an older distance is no longer used as height
+// After hold, a new stable value replaces the held one for this long (restarted
+// by every update): the head board is often still being adjusted. Later changes
+// (board lifted away, child stepping off) never touch the result.
+#define HOLD_REFINE_MS 5000
+#define HOLD_REFINE_KG 0.1f       // update when the stable weight moved more than this
+#define HOLD_REFINE_MAX_KG 3.0f   // ...but not more than this (stepping off, leaning)
+#define HOLD_REFINE_CM 0.5f
 
 // ---------------------------------------------------------------------------
 // State
@@ -236,6 +243,7 @@ uint16_t sequenceNumber = 0;
 unsigned long stateSinceMs = 0;
 unsigned long lastMeasuringNotifyMs = 0;
 unsigned long lastHoldNotifyMs = 0;
+unsigned long holdRefineSinceMs = 0;
 unsigned long lastWeightReadyMs = 0;
 float heldWeightKg = NAN;
 float heldHeightCm = NAN;
@@ -1072,6 +1080,7 @@ void loop() {
 
       if (weightStable && (heightStable || !heightPending)) {
         enterState(STATE_HOLD);
+        holdRefineSinceMs = millis();
         heldWeightKg = windowAverage(weightWindow, weightCount);
         heldHeightCm = heightStable ? windowAverage(heightWindow, heightCount) : NAN;
         Serial.printf("hold: %.2f kg, %.1f cm\n", heldWeightKg, heldHeightCm);
@@ -1088,7 +1097,36 @@ void loop() {
       if (weight < EMPTY_KG) {
         resetFilters();
         enterState(STATE_EMPTY);
-      } else if (lastHoldNotifyMs == 0 || millis() - lastHoldNotifyMs >= HOLD_REPEAT_MS) {
+        break;
+      }
+      if (millis() - holdRefineSinceMs < HOLD_REFINE_MS) {
+        pushWindow(weightWindow, WEIGHT_WINDOW, weightCount, weight);
+        if (newHeight && !isnan(height) && height >= HEIGHT_MIN_CM && height <= HEIGHT_MAX_CM) {
+          pushWindow(heightWindow, HEIGHT_WINDOW, heightCount, height);
+        }
+        bool updated = false;
+        if (windowStable(weightWindow, WEIGHT_WINDOW, weightCount, WEIGHT_STABLE_TOL_KG)) {
+          float avg = windowAverage(weightWindow, weightCount);
+          float diff = fabsf(avg - heldWeightKg);
+          if (diff > HOLD_REFINE_KG && diff <= HOLD_REFINE_MAX_KG) {
+            heldWeightKg = avg;
+            updated = true;
+          }
+        }
+        if (windowStable(heightWindow, HEIGHT_WINDOW, heightCount, HEIGHT_STABLE_TOL_CM)) {
+          float avg = windowAverage(heightWindow, heightCount);
+          if (isnan(heldHeightCm) || fabsf(avg - heldHeightCm) > HOLD_REFINE_CM) {
+            heldHeightCm = avg;
+            updated = true;
+          }
+        }
+        if (updated) {
+          holdRefineSinceMs = millis();
+          Serial.printf("hold update: %.2f kg, %.1f cm\n", heldWeightKg, heldHeightCm);
+          lastHoldNotifyMs = 0;  // send the new result now
+        }
+      }
+      if (lastHoldNotifyMs == 0 || millis() - lastHoldNotifyMs >= HOLD_REPEAT_MS) {
         // Repeat the held result at most 1x/s (protocol section 7), so a phone
         // that connected or subscribed late still receives it.
         notifyMeasurement(heldWeightKg, heldHeightCm, true);

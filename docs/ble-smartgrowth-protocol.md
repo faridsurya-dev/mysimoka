@@ -215,7 +215,12 @@ cek tinggi butuh beban ≥ 2 kg di platform (mis. balok acuan yang cukup berat).
 - Saat stabil: kirim **satu** frame bit2 = 1 (+ indicate `0x2A9D`). Jangan ulang frame
   stabil yang sama terus-menerus; boleh ulang maks 1×/detik bila nilainya tetap.
 - Stabil berat: 5 pembacaan berturut-turut dalam ±0,05 kg. Stabil tinggi: 5 pembacaan
-  dalam ±0,5 cm.
+  dalam ±0,5 cm. (Firmware 2.2.2: berat 8 bacaan ±0,05 kg ≈ 0,8 s, tinggi 10 bacaan ±1 cm
+  ≈ 2 s; nilai yang ditahan = rata-rata jendela itu.)
+- Penyempurnaan hasil (firmware 2.2.2): selama 5 s setelah frame stabil, nilai stabil baru
+  yang berbeda > 0,1 kg (maks 3 kg) atau > 0,5 cm **mengganti** hasil dan langsung dikirim
+  sebagai frame stabil baru; tiap penggantian memulai ulang 5 s. Aplikasi memakai frame
+  stabil **terakhir**.
 - Siklus baru setelah beban turun < 1 kg (anak turun) atau perintah `0x02`.
 - Unit dengan berat + tinggi: kirim frame stabil saat **keduanya** stabil; bila sensor tinggi
   gagal/time-out > 3 s, kirim berat stabil saja (bit1 = 0).
