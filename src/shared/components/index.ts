@@ -16,3 +16,4 @@ export * from './TextLink';
 export * from './SegmentedControl';
 export * from './ListRow';
 export * from './ModalSafeArea';
+export * from './PaginationDots';

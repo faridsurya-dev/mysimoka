@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { runScreenBackHandlers } from './hardwareBack';
 import { ForgotPasswordScreen } from '../screens/auth/forgot-password/ForgotPasswordScreen';
+import { IntroScreen } from '../screens/auth/intro/IntroScreen';
 import { LoginScreen } from '../screens/auth/login/LoginScreen';
 import { RegisterScreen } from '../screens/auth/register/RegisterScreen';
 import { SchoolConnectionScreen } from '../screens/auth/school-connection/SchoolConnectionScreen';
@@ -77,6 +78,7 @@ import type {
 } from '../types';
 import type { TeacherListItem } from '../types';
 import { usePendingSync } from '../features/offline';
+import { hasSeenIntro, markIntroSeen } from '../features/intro';
 import {
   DashboardRoute,
   FaceCropPreviewPayload,
@@ -378,7 +380,7 @@ export function RootNavigator() {
   >([]);
   const [isSchoolSelectionVisible, setIsSchoolSelectionVisible] = useState(false);
   const [authRoute, setAuthRoute] = useState<
-    'login' | 'register' | 'verify-email' | 'forgot-password' | 'school-connection'
+    'intro' | 'login' | 'register' | 'verify-email' | 'forgot-password' | 'school-connection'
   >('login');
   const [pendingVerificationToken, setPendingVerificationToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<MainTab>('dashboard');
@@ -736,6 +738,10 @@ export function RootNavigator() {
         }
 
         const hasActiveSession = Boolean(restoredSession.accessToken);
+        // First launch while signed out: show the intro slides before Login.
+        if (!hasActiveSession && !(await hasSeenIntro()) && isMounted) {
+          setAuthRoute('intro');
+        }
         let hasSchoolMembership = false;
         let memberships: Awaited<ReturnType<typeof listMemberships>> = [];
         if (hasActiveSession) {
@@ -851,6 +857,17 @@ export function RootNavigator() {
   }
 
   if (!isAuthenticated) {
+    if (authRoute === 'intro') {
+      return (
+        <IntroScreen
+          onFinish={() => {
+            markIntroSeen().catch(() => undefined);
+            setAuthRoute('login');
+          }}
+        />
+      );
+    }
+
     if (authRoute === 'register') {
       return (
         <RegisterScreen
