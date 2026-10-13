@@ -28,6 +28,8 @@ import {
   registerStudentFacesBulk,
   type DashboardStudentListItem,
 } from '../../services';
+import type { FaceBulkImage } from '../../services/auth';
+import { cropFaceToBase64 } from '../../features/face/cropFace';
 import {
   Avatar,
   EmptyState,
@@ -683,6 +685,43 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
     [students],
   );
 
+  /**
+   * Upload image for one face: only that face (cut on the phone), so in a
+   * group photo every student is enrolled with their own face. A single-face
+   * photo may fall back to the full image if cutting fails.
+   */
+  const buildFaceImage = async (crop: CapturedFaceCrop): Promise<FaceBulkImage> => {
+    if (!capturedPhoto) {
+      throw new Error('Foto belum diambil.');
+    }
+    const croppedBase64 =
+      capturedPhoto.rotation === 0
+        ? await cropFaceToBase64(capturedPhoto.imageUri, crop.crop, {
+            width: capturedPhoto.imageWidth,
+            height: capturedPhoto.imageHeight,
+          })
+        : null;
+    if (croppedBase64) {
+      return {
+        uri: capturedPhoto.imageUri,
+        base64: croppedBase64,
+        name: `${crop.id}.jpg`,
+        type: 'image/jpeg',
+      };
+    }
+    if (faceCrops.length > 1) {
+      throw new Error(
+        'Wajah tidak bisa dipisahkan dari foto rombongan ini. Ambil foto satu siswa saja, lalu coba lagi.',
+      );
+    }
+    return {
+      uri: capturedPhoto.imageUri,
+      base64: capturedPhoto.imageBase64,
+      name: capturedPhoto.fileName ?? `${crop.id}.jpg`,
+      type: capturedPhoto.mimeType ?? 'image/jpeg',
+    };
+  };
+
   const confirmConsentFirst = () => {
     Alert.alert(
       'Persetujuan orang tua/wali',
@@ -709,14 +748,7 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
     try {
       setUploadingCropId(selectedCrop.id);
       await registerStudentFacesBulk({
-        images: [
-          {
-            uri: capturedPhoto.imageUri,
-            base64: capturedPhoto.imageBase64,
-            name: capturedPhoto.fileName ?? `${selectedCrop.id}.jpg`,
-            type: capturedPhoto.mimeType ?? 'image/jpeg',
-          },
-        ],
+        images: [await buildFaceImage(selectedCrop)],
         studentIds: [studentId],
       });
       setUploadedByCropId(previous => ({
@@ -775,13 +807,12 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
 
     try {
       setIsUploadingAll(true);
+      const images: FaceBulkImage[] = [];
+      for (const { crop } of pendingPairs) {
+        images.push(await buildFaceImage(crop));
+      }
       await registerStudentFacesBulk({
-        images: pendingPairs.map(({ crop }) => ({
-          uri: capturedPhoto.imageUri,
-          base64: capturedPhoto.imageBase64,
-          name: capturedPhoto.fileName ?? `${crop.id}.jpg`,
-          type: capturedPhoto.mimeType ?? 'image/jpeg',
-        })),
+        images,
         studentIds: pendingPairs.map(({ studentId }) => studentId),
       });
       setUploadedByCropId(previous => {
