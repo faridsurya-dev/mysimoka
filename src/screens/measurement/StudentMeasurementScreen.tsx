@@ -846,6 +846,7 @@ export function StudentMeasurementScreen({
       <Modal
         animationType="slide"
         presentationStyle="fullScreen"
+        statusBarTranslucent
         visible={selectedStudent !== null}
         onRequestClose={closeMeasurementForm}
       >

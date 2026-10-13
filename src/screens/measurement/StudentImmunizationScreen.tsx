@@ -438,6 +438,7 @@ export function StudentImmunizationScreen({
       <Modal
         animationType="slide"
         presentationStyle="fullScreen"
+        statusBarTranslucent
         visible={selectedStudent !== null}
         onRequestClose={closeModal}>
         <ModalSafeArea style={styles.modalContainer}>

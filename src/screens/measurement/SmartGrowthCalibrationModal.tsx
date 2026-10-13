@@ -335,7 +335,11 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
   const unit = unitFor(measure);
 
   return (
-    <Modal animationType="slide" onRequestClose={handleClose} visible={visible}>
+    <Modal
+      animationType="slide"
+      onRequestClose={handleClose}
+      statusBarTranslucent
+      visible={visible}>
       <ModalSafeArea style={styles.container}>
         <TopInsetView extraTop={spacing[8]} style={styles.header}>
           <Text style={styles.headerTitle}>Cek akurasi & kalibrasi</Text>

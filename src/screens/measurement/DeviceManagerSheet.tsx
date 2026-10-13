@@ -20,6 +20,7 @@ export function DeviceManagerSheet({ visible, onClose }: DeviceManagerSheetProps
     <Modal
       animationType="slide"
       presentationStyle="fullScreen"
+      statusBarTranslucent
       visible={visible}
       onRequestClose={onClose}>
       {visible ? (
