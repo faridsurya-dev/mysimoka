@@ -409,6 +409,8 @@ export function RootNavigator() {
   const [activeImmunizationSession, setActiveImmunizationSession] =
     useState<ImmunizationSessionListItem | null>(null);
   const [identifiedStudentName, setIdentifiedStudentName] = useState<string | null>(null);
+  // Student recognised by face: StudentMeasurementScreen opens their form once.
+  const [faceIdentifiedStudentId, setFaceIdentifiedStudentId] = useState<string | null>(null);
   const [faceCropPreview, setFaceCropPreview] = useState<FaceCropPreviewPayload | null>(null);
   const [faceCameraFacing, setFaceCameraFacing] = useState<'back' | 'front'>('back');
   const [createSessionClassPreset, setCreateSessionClassPreset] = useState<{
@@ -1252,14 +1254,12 @@ export function RootNavigator() {
               setActiveSessionDate(session.sessionDate);
               setMeasurementRoute('immunization-manual');
             },
-            onFaceCropReady: payload => {
-              setFaceCropPreview(payload);
-              setMeasurementRoute('face-crop-preview');
+            onFaceIdentificationMatched: studentId => {
+              setFaceIdentifiedStudentId(studentId);
+              setMeasurementRoute('manual');
             },
-            onFaceIdentificationMatched: studentName => {
-              setIdentifiedStudentName(studentName);
-              setMeasurementRoute('batch');
-            },
+            faceIdentifiedStudentId,
+            onFaceIdentifiedStudentOpened: () => setFaceIdentifiedStudentId(null),
             onOpenManual: () => setMeasurementRoute('manual'),
             onOpenImmunizationManual: () => setMeasurementRoute('immunization-manual'),
             activeImmunizationType,
@@ -1754,8 +1754,10 @@ type MeasurementStackOptions = {
   onOpenFaceIdentification: () => void;
   onOpenMeasurementSession: (session: MeasurementSessionListItem) => void;
   onOpenImmunizationSession: (session: ImmunizationSessionListItem) => void;
-  onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
-  onFaceIdentificationMatched: (studentName: string) => void;
+  /** A session student was recognised by face (their id). */
+  onFaceIdentificationMatched: (studentId: string) => void;
+  faceIdentifiedStudentId: string | null;
+  onFaceIdentifiedStudentOpened: () => void;
   onOpenManual: () => void;
   onOpenImmunizationManual: () => void;
   faceCropPreview: FaceCropPreviewPayload | null;
@@ -1782,8 +1784,9 @@ function renderMeasurementStack({
   onOpenFaceIdentification,
   onOpenMeasurementSession,
   onOpenImmunizationSession,
-  onFaceCropReady,
   onFaceIdentificationMatched,
+  faceIdentifiedStudentId,
+  onFaceIdentifiedStudentOpened,
   onOpenManual,
   onOpenImmunizationManual,
   faceCropPreview,
@@ -1805,11 +1808,11 @@ function renderMeasurementStack({
       if (!faceCropPreview) {
         return (
           <FaceIdentificationScreen
+            sessionId={activeMeasurementSession?.id ?? null}
             onBack={onOpenManual}
             cameraFacing={faceCameraFacing}
             onCameraFacingChange={onFaceCameraFacingChange}
-            onFaceCropReady={onFaceCropReady}
-            onIdentificationSuccess={onFaceIdentificationMatched}
+            onStudentIdentified={onFaceIdentificationMatched}
           />
         );
       }
@@ -1824,11 +1827,11 @@ function renderMeasurementStack({
     case 'face-identification':
       return (
         <FaceIdentificationScreen
+          sessionId={activeMeasurementSession?.id ?? null}
           onBack={onOpenManual}
           cameraFacing={faceCameraFacing}
           onCameraFacingChange={onFaceCameraFacingChange}
-          onFaceCropReady={onFaceCropReady}
-          onIdentificationSuccess={onFaceIdentificationMatched}
+          onStudentIdentified={onFaceIdentificationMatched}
         />
       );
     case 'height-pose':
@@ -1856,6 +1859,8 @@ function renderMeasurementStack({
           className={activeMeasurementSession?.className}
           schoolId={activeMeasurementSession?.schoolId ?? null}
           classId={activeMeasurementSession?.classId ?? null}
+          openStudentId={faceIdentifiedStudentId}
+          onOpenStudentHandled={onFaceIdentifiedStudentOpened}
           onBack={onBackToSessionList}
           onOpenFaceIdentification={onOpenFaceIdentification}
         />

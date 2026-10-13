@@ -22,7 +22,13 @@ import {
   FrameFaceDetectionOptions,
 } from 'react-native-vision-camera-face-detector';
 import type { Frame } from 'react-native-vision-camera';
-import { FaceCropPreviewPayload } from '../../navigation/types';
+import {
+  FACE_SEARCH_THRESHOLD,
+  decideFaceMatch,
+  type FaceMatchDecision,
+} from '../../features/face/faceMatch';
+import { isNetworkError, loadSessionStudents } from '../../features/offline';
+import { searchStudentFaces, type FaceSearchMatch } from '../../services/auth';
 import {
   EmptyState,
   Icon,
@@ -42,19 +48,42 @@ const GUIDE_CORNER = 28;
 const GUIDE_STROKE = 3;
 
 type FaceIdentificationScreenProps = {
+  /** Measurement session whose students may be opened. */
+  sessionId: string | null;
   onBack: () => void;
   cameraFacing: 'back' | 'front';
   onCameraFacingChange: (facing: 'back' | 'front') => void;
-  onFaceCropReady: (payload: FaceCropPreviewPayload) => void;
-  onIdentificationSuccess: (studentName: string) => void;
+  /** A session student was recognised (and confirmed): open their form. */
+  onStudentIdentified: (studentId: string) => void;
 };
 
+type SearchState =
+  | { kind: 'idle' }
+  | { kind: 'searching' }
+  | { kind: 'result'; decision: FaceMatchDecision }
+  | { kind: 'error'; message: string };
+
+function similarityLabel(match: FaceSearchMatch) {
+  return `Kemiripan ${Math.round(match.similarity * 100)}%`;
+}
+
+function toSearchErrorMessage(error: unknown) {
+  if (isNetworkError(error)) {
+    return 'Butuh koneksi internet untuk mencocokkan wajah. Cari siswa manual bila tidak ada sinyal.';
+  }
+  const message = error instanceof Error ? error.message : '';
+  if (/no face|wajah tidak|not detected/i.test(message)) {
+    return 'Wajah tidak terlihat jelas. Hadapkan wajah lurus ke kamera dengan cahaya cukup, lalu ulangi.';
+  }
+  return message || 'Gagal mencocokkan wajah. Coba lagi.';
+}
+
 export function FaceIdentificationScreen({
+  sessionId,
   onBack,
   cameraFacing,
   onCameraFacingChange,
-  onFaceCropReady,
-  onIdentificationSuccess: _onIdentificationSuccess,
+  onStudentIdentified,
 }: FaceIdentificationScreenProps) {
   const insets = useSafeAreaInsets();
   const backDevice = useCameraDevice('back');
@@ -77,6 +106,33 @@ export function FaceIdentificationScreen({
   const latestFrameSizeRef = useRef({ width: 1, height: 1 });
   const lastFacesUpdateAtRef = useRef(0);
   const isCameraReady = hasPermission && !!device && isAppActive;
+  const [search, setSearch] = useState<SearchState>({ kind: 'idle' });
+  // Students of the session: only they can be opened from a face match.
+  const [sessionStudentIds, setSessionStudentIds] = useState<ReadonlySet<string>>(new Set());
+
+  useEffect(() => {
+    if (!sessionId) {
+      return undefined;
+    }
+    let isMounted = true;
+    loadSessionStudents('measurement', sessionId)
+      .then(result => {
+        if (isMounted) {
+          setSessionStudentIds(new Set(result.value.map(student => student.id)));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionId]);
+
+  /** Back to the live camera; the next clear frontal face is captured again. */
+  const retry = useCallback(() => {
+    setSearch({ kind: 'idle' });
+    setCameraErrorText(null);
+    hasCapturedFaceRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (hasPermission) {
@@ -174,40 +230,40 @@ export function FaceIdentificationScreen({
     [previewSize.height, previewSize.width],
   );
 
-  const captureFaceSnapshot = useCallback(
-    async (crop: FaceCropPreviewPayload['crop']) => {
-      if (!cameraRef.current) {
-        return;
-      }
+  const captureFaceSnapshot = useCallback(async () => {
+    if (!cameraRef.current) {
+      return;
+    }
 
-      setIsCapturingFace(true);
-      setCameraErrorText(null);
+    setIsCapturingFace(true);
+    setCameraErrorText(null);
 
-      try {
-        const snapshot = await cameraRef.current.takeSnapshot({ quality: 95 });
-        const imageUri = snapshot.path.startsWith('file://')
-          ? snapshot.path
-          : `file://${snapshot.path}`;
+    let imageUri: string;
+    try {
+      const snapshot = await cameraRef.current.takeSnapshot({ quality: 95 });
+      imageUri = snapshot.path.startsWith('file://') ? snapshot.path : `file://${snapshot.path}`;
+      hasCapturedFaceRef.current = true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Gagal mengambil snapshot.';
+      setCameraErrorText(errorMessage);
+      return;
+    } finally {
+      isCapturingFaceRef.current = false;
+      setIsCapturingFace(false);
+    }
 
-        hasCapturedFaceRef.current = true;
-        onFaceCropReady({
-          imageUri,
-          imageWidth: Math.max(snapshot.width, 1),
-          imageHeight: Math.max(snapshot.height, 1),
-          previewWidth: previewSize.width,
-          previewHeight: previewSize.height,
-          crop,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Gagal mengambil snapshot.';
-        setCameraErrorText(errorMessage);
-      } finally {
-        isCapturingFaceRef.current = false;
-        setIsCapturingFace(false);
-      }
-    },
-    [onFaceCropReady, previewSize.height, previewSize.width],
-  );
+    // The same full photo as at enrollment: the face service finds and aligns the face.
+    setSearch({ kind: 'searching' });
+    try {
+      const matches = await searchStudentFaces(imageUri, {
+        topK: 5,
+        threshold: FACE_SEARCH_THRESHOLD,
+      });
+      setSearch({ kind: 'result', decision: decideFaceMatch(matches, sessionStudentIds) });
+    } catch (error) {
+      setSearch({ kind: 'error', message: toSearchErrorMessage(error) });
+    }
+  }, [sessionStudentIds]);
 
   const handleFacesDetected = useCallback((faces: Face[], frame: Frame) => {
     const now = Date.now();
@@ -263,24 +319,12 @@ export function FaceIdentificationScreen({
       return;
     }
 
-    const cropX = Math.max(projectedBounds.x, 0);
-    const cropY = Math.max(projectedBounds.y, 0);
-    const cropWidth = Math.max(Math.min(projectedBounds.width, previewSize.width - cropX), 1);
-    const cropHeight = Math.max(Math.min(projectedBounds.height, previewSize.height - cropY), 1);
-
     isCapturingFaceRef.current = true;
-    captureFaceSnapshot({
-      x: cropX,
-      y: cropY,
-      width: cropWidth,
-      height: cropHeight,
-    });
+    captureFaceSnapshot().catch(() => undefined);
   }, [
     captureFaceSnapshot,
     isCameraInitialized,
     isCameraReady,
-    previewSize.height,
-    previewSize.width,
     projectBoundsToPreview,
   ]);
 
@@ -358,6 +402,106 @@ export function FaceIdentificationScreen({
       : detectedFaces.length > 0
         ? 'info'
         : 'neutral';
+
+  const renderSearchResult = () => {
+    const retryButton = (
+      <PrimaryButton
+        fullWidth
+        label="Foto Ulang"
+        onPress={retry}
+        size="md"
+        variant="outline"
+      />
+    );
+    const manualButton = (
+      <PrimaryButton fullWidth label="Cari Siswa Manual" onPress={onBack} size="md" variant="ghost" />
+    );
+
+    if (search.kind === 'searching') {
+      return (
+        <View accessibilityLiveRegion="polite" style={styles.statusRow}>
+          <ActivityIndicator color={colors.brand.primary600} size="small" />
+          <Text style={styles.statusText}>Mencocokkan wajah...</Text>
+        </View>
+      );
+    }
+
+    if (search.kind === 'error') {
+      return (
+        <>
+          <InlineAlert message={search.message} tone="error" />
+          {retryButton}
+          {manualButton}
+        </>
+      );
+    }
+
+    if (search.kind !== 'result') {
+      return null;
+    }
+    const { decision } = search;
+
+    if (decision.kind === 'matched') {
+      return (
+        <>
+          <View accessibilityLiveRegion="polite" style={styles.resultBlock}>
+            <Text style={styles.resultEyebrow}>Siswa dikenali</Text>
+            <Text style={styles.resultName}>{decision.match.name}</Text>
+            <Text style={styles.resultMeta}>{similarityLabel(decision.match)}</Text>
+          </View>
+          <PrimaryButton
+            fullWidth
+            label={`Ukur ${decision.match.name}`}
+            onPress={() => onStudentIdentified(decision.match.studentId)}
+          />
+          <PrimaryButton
+            fullWidth
+            label="Bukan Dia, Foto Ulang"
+            onPress={retry}
+            size="md"
+            variant="outline"
+          />
+        </>
+      );
+    }
+
+    if (decision.kind === 'choose') {
+      return (
+        <>
+          <View accessibilityLiveRegion="polite" style={styles.resultBlock}>
+            <Text style={styles.resultEyebrow}>Belum yakin</Text>
+            <Text style={styles.resultMeta}>Pilih siswa yang sesuai dengan wajah ini:</Text>
+          </View>
+          {decision.candidates.map(candidate => (
+            <PrimaryButton
+              key={candidate.studentId}
+              fullWidth
+              label={`${candidate.name} · ${Math.round(candidate.similarity * 100)}%`}
+              onPress={() => onStudentIdentified(candidate.studentId)}
+              size="md"
+              variant="outline"
+            />
+          ))}
+          {retryButton}
+        </>
+      );
+    }
+
+    return (
+      <>
+        <InlineAlert
+          message={
+            decision.kind === 'other-class'
+              ? `Wajah mirip ${decision.match.name}, tetapi siswa ini bukan anggota kelas sesi ini.`
+              : 'Wajah belum dikenali. Pastikan wajah siswa sudah didaftarkan di Dashboard › Kelas › Registrasi Wajah.'
+          }
+          tone="warning"
+        />
+        {retryButton}
+        {manualButton}
+      </>
+    );
+  };
 
   const renderBlockingState = () => {
     if (!hasPermission) {
@@ -513,6 +657,10 @@ export function FaceIdentificationScreen({
       </View>
 
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + spacing[16] }]}>
+        {search.kind !== 'idle' ? (
+          renderSearchResult()
+        ) : (
+        <>
         <View accessibilityLiveRegion="polite" style={styles.statusRow}>
           {isBusy ? (
             <ActivityIndicator color={colors.brand.primary600} size="small" />
@@ -532,7 +680,8 @@ export function FaceIdentificationScreen({
           <Text style={styles.statusText}>{statusText}</Text>
         </View>
         <Text style={styles.helperText}>
-          Fitur ini opsional. Foto diambil otomatis saat wajah terlihat jelas.
+          Foto diambil otomatis saat wajah terlihat jelas, lalu dicocokkan dengan wajah
+          siswa yang sudah didaftarkan.
         </Text>
         <PrimaryButton
           fullWidth
@@ -541,6 +690,8 @@ export function FaceIdentificationScreen({
           size="md"
           variant="outline"
         />
+        </>
+        )}
       </View>
     </View>
   );
@@ -680,5 +831,22 @@ const styles = StyleSheet.create({
   helperText: {
     ...typography.caption,
     color: colors.text.muted,
+  },
+  resultBlock: {
+    gap: spacing[2],
+  },
+  resultEyebrow: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  resultName: {
+    ...typography.headingLg,
+    color: colors.text.primary,
+  },
+  resultMeta: {
+    ...typography.bodySm,
+    color: colors.text.secondary,
   },
 });

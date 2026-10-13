@@ -73,6 +73,9 @@ type StudentMeasurementScreenProps = {
   /** School and class of the session; enable "Tambah siswa baru". */
   schoolId?: string | null;
   classId?: string | null;
+  /** Student to open right away (e.g. recognised by face); handled once. */
+  openStudentId?: string | null;
+  onOpenStudentHandled?: () => void;
   onBack: () => void;
   onOpenFaceIdentification?: () => void;
 };
@@ -137,6 +140,8 @@ export function StudentMeasurementScreen({
   className = 'Kelas',
   schoolId = null,
   classId = null,
+  openStudentId = null,
+  onOpenStudentHandled,
   onBack,
   onOpenFaceIdentification,
 }: StudentMeasurementScreenProps) {
@@ -163,10 +168,19 @@ export function StudentMeasurementScreen({
   // Guards auto-save against firing twice before isSavingMeasurement re-renders.
   const savingRef = useRef(false);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
-  // Newly added student: open their form once the reloaded list contains them.
+  // Newly added (or face-recognised) student: open their form once the list
+  // contains them.
   const [openAfterReloadId, setOpenAfterReloadId] = useState<string | null>(
-    null,
+    openStudentId,
   );
+
+  useEffect(() => {
+    if (!openStudentId) {
+      return;
+    }
+    setOpenAfterReloadId(openStudentId);
+    onOpenStudentHandled?.();
+  }, [onOpenStudentHandled, openStudentId]);
   const [addedStudentNotice, setAddedStudentNotice] = useState<string | null>(
     null,
   );

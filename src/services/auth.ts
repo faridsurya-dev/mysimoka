@@ -4169,6 +4169,61 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
     .sort((first, second) => first.name.localeCompare(second.name, 'id-ID'));
 }
 
+export type FaceSearchMatch = {
+  studentId: string;
+  name: string;
+  studentNumber: string | null;
+  /** Cosine similarity, 1 = identical. */
+  similarity: number;
+};
+
+/**
+ * Finds the enrolled students (caller's schools) most similar to the face in
+ * a camera photo; best match first. The face service detects the face itself,
+ * so the full snapshot is sent, like at enrollment.
+ */
+export async function searchStudentFaces(
+  imageUri: string,
+  options: { topK?: number; threshold?: number } = {},
+): Promise<FaceSearchMatch[]> {
+  const formData = new FormData();
+  formData.append('image', {
+    uri: imageUri,
+    name: 'face-search.jpg',
+    type: 'image/jpeg',
+  } as unknown as Blob);
+  formData.append('top_k', String(options.topK ?? 5));
+  if (options.threshold !== undefined) {
+    formData.append('threshold', String(options.threshold));
+  }
+
+  const responseBody = (await apiRequest('/faces/search', {
+    method: 'POST',
+    requiresAuth: true,
+    body: formData,
+  })) as { data?: { matches?: unknown[] } | null } | null;
+
+  const matches = Array.isArray(responseBody?.data?.matches) ? responseBody.data.matches : [];
+  return matches
+    .map(item => {
+      const source = asObject(item);
+      const student = asObject(source?.student);
+      const studentId = readNullableString(student?.id);
+      const similarity = typeof source?.similarity === 'number' ? source.similarity : null;
+      if (!studentId || similarity === null) {
+        return null;
+      }
+      return {
+        studentId,
+        name: readNullableString(student?.full_name) ?? 'Siswa',
+        studentNumber: readNullableString(student?.student_number),
+        similarity,
+      };
+    })
+    .filter((item): item is FaceSearchMatch => item !== null)
+    .sort((first, second) => second.similarity - first.similarity);
+}
+
 export async function registerStudentFacesBulk(
   payload: RegisterStudentFacesBulkPayload,
 ): Promise<unknown> {
