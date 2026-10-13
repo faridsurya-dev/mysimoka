@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { loadCurrentSchoolContext } from '../../services';
+import { listTeachersBySchool, loadCurrentSchoolContext } from '../../services';
 import { getErrorMessage, updateTeacherName } from '../../services/schoolData';
 import { colors, spacing, typography } from '../../theme';
 import type { TeacherListItem } from '../../types';
@@ -39,6 +39,8 @@ export function TeacherDetailScreen({
   const [editError, setEditError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   useEffect(() => {
     if (schoolIdProp) {
@@ -49,6 +51,27 @@ export function TeacherDetailScreen({
       .then(context => setSchoolId(context?.schoolId ?? null))
       .catch(() => undefined);
   }, [schoolIdProp]);
+
+  /** Tarik untuk memuat ulang data guru dari server; data lama tetap tampil. */
+  async function handleRefresh() {
+    if (!schoolId) {
+      return;
+    }
+    setIsRefreshing(true);
+    setRefreshError(null);
+    try {
+      const fresh = (await listTeachersBySchool(schoolId)).find(item => item.id === teacher.id);
+      if (fresh) {
+        onSave(fresh);
+      } else {
+        setRefreshError('Guru tidak lagi terdaftar di sekolah ini.');
+      }
+    } catch (error) {
+      setRefreshError(getErrorMessage(error, 'Gagal memuat data guru.'));
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
 
   async function handleSave() {
     const name = draftName.trim();
@@ -89,9 +112,18 @@ export function TeacherDetailScreen({
         ) : null
       }
       onBack={onBack}
+      onRefresh={
+        schoolId
+          ? () => {
+              handleRefresh().catch(() => undefined);
+            }
+          : undefined
+      }
+      refreshing={isRefreshing}
       subtitle="Detail Guru"
       title={teacher.name}>
       {notice ? <InlineNotice message={notice} tone="success" /> : null}
+      {refreshError ? <InlineNotice message={refreshError} tone="warning" /> : null}
 
       <Card style={styles.hero}>
         <Avatar imageUrl={teacher.imageUrl} name={teacher.name} size={64} />

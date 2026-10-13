@@ -15,6 +15,9 @@ type SchoolSelectionScreenProps = {
   onSelectSchool: (membership: SchoolMembership) => void;
   selectedSchoolId?: string | null;
   errorMessage?: string | null;
+  /** Pull-to-refresh: reload the membership list from the server. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 };
 
 export function SchoolSelectionScreen({
@@ -22,6 +25,8 @@ export function SchoolSelectionScreen({
   onSelectSchool,
   selectedSchoolId = null,
   errorMessage = null,
+  onRefresh,
+  refreshing = false,
 }: SchoolSelectionScreenProps) {
   const activeMemberships = Array.from(
     memberships
@@ -46,7 +51,7 @@ export function SchoolSelectionScreen({
   );
 
   return (
-    <Screen contentContainerStyle={styles.content}>
+    <Screen contentContainerStyle={styles.content} onRefresh={onRefresh} refreshing={refreshing}>
       <View style={styles.column}>
         <View style={styles.header}>
           <View style={styles.headerIcon}>

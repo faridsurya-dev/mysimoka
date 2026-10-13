@@ -160,6 +160,9 @@ export function StudentMeasurementScreen({
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [studentLoadError, setStudentLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // Set by pull-to-refresh so the next load keeps the list visible.
+  const refreshRequestedRef = useRef(false);
   const [isSavingMeasurement, setIsSavingMeasurement] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
@@ -260,6 +263,8 @@ export function StudentMeasurementScreen({
   }, [searchKeyword, students]);
 
   useEffect(() => {
+    const isRefresh = refreshRequestedRef.current;
+    refreshRequestedRef.current = false;
     if (!sessionId) {
       setStudents([]);
       setStudentLoadError(
@@ -269,7 +274,8 @@ export function StudentMeasurementScreen({
     }
 
     let isMounted = true;
-    setIsLoadingStudents(true);
+    setIsRefreshing(isRefresh);
+    setIsLoadingStudents(!isRefresh);
     setStudentLoadError(null);
 
     loadSessionStudents('measurement', sessionId)
@@ -290,6 +296,7 @@ export function StudentMeasurementScreen({
       .finally(() => {
         if (isMounted) {
           setIsLoadingStudents(false);
+          setIsRefreshing(false);
         }
       });
 
@@ -297,6 +304,12 @@ export function StudentMeasurementScreen({
       isMounted = false;
     };
   }, [reloadToken, sessionId]);
+
+  // Pull-to-refresh on the list only; disabled while a modal is open.
+  const handleRefresh = () => {
+    refreshRequestedRef.current = true;
+    setReloadToken(value => value + 1);
+  };
 
   // A new measurement started (child stepped off / next child on the device):
   // the next stable result may be used again, even if it has the same value.
@@ -744,6 +757,12 @@ export function StudentMeasurementScreen({
       <Screen
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        onRefresh={
+          sessionId && !selectedStudentId && !isAddStudentOpen
+            ? handleRefresh
+            : undefined
+        }
+        refreshing={isRefreshing}
       >
         <DeviceStatusCard />
         <OfflineDataBanner

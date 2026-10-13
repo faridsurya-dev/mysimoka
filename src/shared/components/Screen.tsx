@@ -2,6 +2,7 @@ import React, { PropsWithChildren } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   ScrollViewProps,
   StyleProp,
@@ -23,6 +24,12 @@ type ScreenProps = PropsWithChildren<{
    * button stay visible above the keyboard. Use for form screens.
    */
   avoidKeyboard?: boolean;
+  /**
+   * Enables pull-to-refresh. Should re-run the screen's load in a mode that
+   * keeps the current data visible; `refreshing` drives the spinner.
+   */
+  onRefresh?: () => void | Promise<void>;
+  refreshing?: boolean;
 }> &
   Omit<ScrollViewProps, 'contentContainerStyle'>;
 
@@ -31,6 +38,8 @@ export function Screen({
   contentContainerStyle,
   withTopInset = true,
   avoidKeyboard = false,
+  onRefresh,
+  refreshing = false,
   style,
   ...scrollViewProps
 }: ScreenProps) {
@@ -49,6 +58,18 @@ export function Screen({
         },
         contentContainerStyle,
       ]}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            colors={[colors.brand.primary500]}
+            onRefresh={() => {
+              Promise.resolve(onRefresh()).catch(() => undefined);
+            }}
+            refreshing={refreshing}
+            tintColor={colors.brand.primary500}
+          />
+        ) : undefined
+      }
       {...scrollViewProps}>
       {children}
     </ScrollView>

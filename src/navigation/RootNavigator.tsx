@@ -427,6 +427,8 @@ export function RootNavigator() {
     Array<{ id: string; label: string; isActive: boolean }>
   >([]);
   const [isLoadingAcademicYears, setIsLoadingAcademicYears] = useState(false);
+  const [isRefreshingProfile, setIsRefreshingProfile] = useState(false);
+  const [isRefreshingMemberships, setIsRefreshingMemberships] = useState(false);
   const [isSavingAcademicYear, setIsSavingAcademicYear] = useState(false);
   const [academicYearActionError, setAcademicYearActionError] = useState<string | null>(null);
   const sessionUser = asObject(getAuthSession().user);
@@ -711,6 +713,40 @@ export function RootNavigator() {
       isMounted = false;
     };
   }, [activeTab, profileData.schoolId]);
+
+  // Pull-to-refresh on Pengaturan: reload the school profile and academic
+  // years while keeping the current values on screen.
+  const refreshProfileOverview = useCallback(async (): Promise<void> => {
+    const schoolId = profileData.schoolId;
+    if (!schoolId || !isUuidString(schoolId)) {
+      return;
+    }
+    setIsRefreshingProfile(true);
+    const [profileResult, yearsResult] = await Promise.allSettled([
+      refreshActiveSchoolProfile(schoolId),
+      listAcademicYears(schoolId),
+    ]);
+    if (profileResult.status === 'fulfilled') {
+      setSchoolProfileLoadError(null);
+    } else {
+      const error = profileResult.reason;
+      setSchoolProfileLoadError(
+        error instanceof Error ? error.message : 'Gagal memuat informasi sekolah.',
+      );
+    }
+    if (yearsResult.status === 'fulfilled') {
+      setAcademicYears(
+        yearsResult.value.map(row => ({ id: row.id, label: row.name, isActive: row.is_active })),
+      );
+      setAcademicYearActionError(null);
+    } else {
+      const error = yearsResult.reason;
+      setAcademicYearActionError(
+        error instanceof Error ? error.message : 'Gagal memuat data tahun akademik.',
+      );
+    }
+    setIsRefreshingProfile(false);
+  }, [profileData.schoolId, refreshActiveSchoolProfile]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1030,6 +1066,20 @@ export function RootNavigator() {
         memberships={schoolMemberships}
         errorMessage={schoolActionError}
         selectedSchoolId={currentSchoolId}
+        refreshing={isRefreshingMemberships}
+        onRefresh={() => {
+          // Reload the school list only; the active school is left untouched.
+          setIsRefreshingMemberships(true);
+          setSchoolActionError(null);
+          listMemberships()
+            .then(setSchoolMemberships)
+            .catch(error => {
+              setSchoolActionError(
+                error instanceof Error ? error.message : 'Gagal memuat daftar sekolah.',
+              );
+            })
+            .finally(() => setIsRefreshingMemberships(false));
+        }}
         onSelectSchool={membership => {
           setSchoolActionError(null);
           setActiveSchool(membership.school_id, normalizeRoleKey(membership.role))
@@ -1511,6 +1561,8 @@ export function RootNavigator() {
             isLoadingAcademicYears,
             isSavingAcademicYear,
             academicYearActionError,
+            isRefreshingProfile,
+            onRefreshProfile: refreshProfileOverview,
           })
         : null}
     </MainAppShell>
@@ -1932,6 +1984,8 @@ type ProfileStackOptions = {
   onUpdateAcademicYear: (academicYearId: string, name: string) => void;
   onSetActiveAcademicYear: (academicYearId: string) => void;
   onDeleteAcademicYear: (academicYearId: string) => void;
+  isRefreshingProfile: boolean;
+  onRefreshProfile: () => Promise<void>;
 };
 
 function renderProfileStack({
@@ -1959,6 +2013,8 @@ function renderProfileStack({
   onUpdateAcademicYear,
   onSetActiveAcademicYear,
   onDeleteAcademicYear,
+  isRefreshingProfile,
+  onRefreshProfile,
 }: ProfileStackOptions) {
   switch (profileRoute) {
     case 'edit-profile':
@@ -2029,6 +2085,8 @@ function renderProfileStack({
           onUpdateAcademicYear={onUpdateAcademicYear}
           onSetActiveAcademicYear={onSetActiveAcademicYear}
           onDeleteAcademicYear={onDeleteAcademicYear}
+          onRefresh={profileData.schoolId ? onRefreshProfile : undefined}
+          refreshing={isRefreshingProfile}
         />
       );
   }

@@ -124,11 +124,12 @@ export function ClassDetailScreen({
     }
   }, [classId, schoolId]);
 
-  const loadSummary = useCallback(async () => {
+  const loadSummary = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (!classId) {
       return;
     }
-    setIsLoadingSummary(true);
+    // Saat tarik-untuk-muat-ulang, ringkasan lama tetap tampil.
+    setIsLoadingSummary(mode === 'initial');
     setSummaryError(null);
     setIsSummaryRestricted(false);
     try {
@@ -266,7 +267,7 @@ export function ClassDetailScreen({
       onBack={onBack}
       onRefresh={() => {
         refreshClassroom().catch(() => undefined);
-        loadSummary().catch(() => undefined);
+        loadSummary('refresh').catch(() => undefined);
       }}
       refreshing={isRefreshing}
       subtitle={subtitleParts.join(' • ')}

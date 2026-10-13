@@ -62,6 +62,9 @@ type ProfileOverviewScreenProps = {
   onUpdateAcademicYear: (academicYearId: string, name: string) => void;
   onSetActiveAcademicYear: (academicYearId: string) => void;
   onDeleteAcademicYear: (academicYearId: string) => void;
+  /** Pull-to-refresh: reload school profile and academic years. */
+  onRefresh?: () => void | Promise<void>;
+  refreshing?: boolean;
 };
 
 
@@ -95,6 +98,8 @@ export function ProfileOverviewScreen({
   onUpdateAcademicYear,
   onSetActiveAcademicYear,
   onDeleteAcademicYear,
+  onRefresh,
+  refreshing = false,
 }: ProfileOverviewScreenProps) {
   const shouldShowWhatsApp = false;
   const deviceSession = useDeviceSession();
@@ -210,7 +215,11 @@ export function ProfileOverviewScreen({
     <View style={styles.container}>
       <ScreenHeader size="lg" title="Pengaturan" />
 
-      <Screen contentContainerStyle={styles.content} withTopInset={false}>
+      <Screen
+        contentContainerStyle={styles.content}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        withTopInset={false}>
         {/* Profile hero */}
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>

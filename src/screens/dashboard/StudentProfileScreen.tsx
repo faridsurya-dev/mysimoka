@@ -114,6 +114,7 @@ export function StudentProfileScreen({
   const [detail, setDetail] = useState<StudentDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [measurements, setMeasurements] = useState<AsyncState<StudentMeasurementEntry[]>>(
     initialAsync([]),
   );
@@ -149,11 +150,12 @@ export function StudentProfileScreen({
     }
   }, [studentId]);
 
-  const loadMeasurements = useCallback(async () => {
+  const loadMeasurements = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (!studentId) {
       return;
     }
-    setMeasurements(previous => ({ ...previous, isLoading: true, error: null }));
+    // Saat tarik-untuk-muat-ulang, riwayat lama tetap tampil.
+    setMeasurements(previous => ({ ...previous, isLoading: mode === 'initial', error: null }));
     try {
       const data = await getStudentMeasurementHistory(studentId);
       setMeasurements({ data, isLoading: false, error: null, isRestricted: false });
@@ -167,11 +169,11 @@ export function StudentProfileScreen({
     }
   }, [studentId]);
 
-  const loadImmunizations = useCallback(async () => {
+  const loadImmunizations = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (!studentId) {
       return;
     }
-    setImmunizations(previous => ({ ...previous, isLoading: true, error: null }));
+    setImmunizations(previous => ({ ...previous, isLoading: mode === 'initial', error: null }));
     try {
       const data = await getStudentImmunizationHistory(studentId);
       setImmunizations({ data, isLoading: false, error: null, isRestricted: false });
@@ -253,11 +255,14 @@ export function StudentProfileScreen({
       }
       onBack={onBack}
       onRefresh={() => {
-        loadDetail().catch(() => undefined);
-        loadMeasurements().catch(() => undefined);
-        loadImmunizations().catch(() => undefined);
+        setIsRefreshing(true);
+        Promise.allSettled([
+          loadDetail(),
+          loadMeasurements('refresh'),
+          loadImmunizations('refresh'),
+        ]).finally(() => setIsRefreshing(false));
       }}
-      refreshing={isLoadingDetail}
+      refreshing={isRefreshing || isLoadingDetail}
       subtitle={`${profile.className} • NISN ${profile.nisn}`}
       title={profile.name}>
       {notice ? <InlineNotice message={notice} tone="success" /> : null}

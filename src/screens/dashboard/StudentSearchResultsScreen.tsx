@@ -29,6 +29,7 @@ export function StudentSearchResultsScreen({
   const [activeKeyword, setActiveKeyword] = useState(keyword);
   const [results, setResults] = useState<DashboardStudentSearchItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function StudentSearchResultsScreen({
     setActiveKeyword(keyword);
   }, [keyword]);
 
-  const runSearch = useCallback(async () => {
+  const runSearch = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (!schoolId) {
       setResults([]);
       setLoadError('Sekolah aktif belum dipilih.');
@@ -47,7 +48,11 @@ export function StudentSearchResultsScreen({
       setLoadError(null);
       return;
     }
-    setIsLoading(true);
+    if (mode === 'refresh') {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
     setLoadError(null);
     try {
       setResults(await searchStudentsWithClass(schoolId, activeKeyword));
@@ -56,6 +61,7 @@ export function StudentSearchResultsScreen({
       setLoadError(getErrorMessage(error, 'Gagal mencari siswa.'));
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
   }, [activeKeyword, schoolId]);
 
@@ -83,6 +89,14 @@ export function StudentSearchResultsScreen({
         />
       }
       onBack={onBack}
+      onRefresh={
+        activeKeyword.trim()
+          ? () => {
+              runSearch('refresh').catch(() => undefined);
+            }
+          : undefined
+      }
+      refreshing={isRefreshing}
       subtitle={
         isLoading
           ? 'Mencari...'

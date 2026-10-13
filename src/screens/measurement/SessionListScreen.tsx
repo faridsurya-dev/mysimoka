@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   OfflineDataBanner,
@@ -129,9 +129,19 @@ export function SessionListScreen({
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // Set by pull-to-refresh so the next load keeps the list visible.
+  const refreshRequestedRef = useRef(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
 
+  function handleRefresh() {
+    refreshRequestedRef.current = true;
+    setReloadToken(value => value + 1);
+  }
+
   useEffect(() => {
+    const isRefresh = refreshRequestedRef.current;
+    refreshRequestedRef.current = false;
     if (!schoolId) {
       setMeasurementSessions([]);
       setImmunizationSessions([]);
@@ -140,7 +150,8 @@ export function SessionListScreen({
     }
 
     let isMounted = true;
-    setIsLoadingSessions(true);
+    setIsRefreshing(isRefresh);
+    setIsLoadingSessions(!isRefresh);
     setSessionLoadError(null);
 
     const request =
@@ -179,6 +190,7 @@ export function SessionListScreen({
       .finally(() => {
         if (isMounted) {
           setIsLoadingSessions(false);
+          setIsRefreshing(false);
         }
       });
 
@@ -207,7 +219,10 @@ export function SessionListScreen({
         }
       />
 
-      <Screen contentContainerStyle={styles.content}>
+      <Screen
+        contentContainerStyle={styles.content}
+        onRefresh={schoolId ? handleRefresh : undefined}
+        refreshing={isRefreshing}>
         <SegmentedControl
           options={PROGRAM_OPTIONS}
           value={mode}

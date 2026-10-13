@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -109,6 +109,9 @@ export function StudentImmunizationScreen({
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [studentLoadError, setStudentLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // Set by pull-to-refresh so the next load keeps the list visible.
+  const refreshRequestedRef = useRef(false);
   const [isSavingRecord, setIsSavingRecord] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
@@ -144,6 +147,8 @@ export function StudentImmunizationScreen({
   }, [searchKeyword, students]);
 
   useEffect(() => {
+    const isRefresh = refreshRequestedRef.current;
+    refreshRequestedRef.current = false;
     if (!sessionId) {
       setStudents([]);
       setStudentLoadError('Sesi imunisasi belum dipilih. Kembali lalu pilih atau buat sesi.');
@@ -151,7 +156,8 @@ export function StudentImmunizationScreen({
     }
 
     let isMounted = true;
-    setIsLoadingStudents(true);
+    setIsRefreshing(isRefresh);
+    setIsLoadingStudents(!isRefresh);
     setStudentLoadError(null);
 
     loadSessionStudents('immunization', sessionId)
@@ -172,6 +178,7 @@ export function StudentImmunizationScreen({
       .finally(() => {
         if (isMounted) {
           setIsLoadingStudents(false);
+          setIsRefreshing(false);
         }
       });
 
@@ -187,6 +194,12 @@ export function StudentImmunizationScreen({
     const timer = setTimeout(() => setLastSavedName(null), 2600);
     return () => clearTimeout(timer);
   }, [lastSavedName]);
+
+  // Pull-to-refresh on the list only; disabled while the form modal is open.
+  const handleRefresh = () => {
+    refreshRequestedRef.current = true;
+    setReloadToken(value => value + 1);
+  };
 
   const openImmunizationForm = (studentId: string) => {
     setSelectedStudentId(studentId);
@@ -362,7 +375,11 @@ export function StudentImmunizationScreen({
         </View>
       </View>
 
-      <Screen contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <Screen
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        onRefresh={sessionId && !selectedStudentId ? handleRefresh : undefined}
+        refreshing={isRefreshing}>
         <OfflineDataBanner cachedAt={cachedAt} onRetry={() => setReloadToken(value => value + 1)} />
         <PendingSyncBanner />
         {lastSavedName ? (

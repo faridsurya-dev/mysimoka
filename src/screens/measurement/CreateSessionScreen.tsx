@@ -108,18 +108,23 @@ export function CreateSessionScreen({
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassroomListItem[]>([]);
   const [isLoadingClasses, setIsLoadingClasses] = useState(false);
+  const [isRefreshingClasses, setIsRefreshingClasses] = useState(false);
   const [classOptionsError, setClassOptionsError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const loadClassOptions = useCallback(async () => {
+  const loadClassOptions = useCallback(async (loadMode: 'initial' | 'refresh' = 'initial') => {
     if (!schoolId) {
       setClassOptions([]);
       setClassOptionsError('Sekolah aktif belum dipilih.');
       return;
     }
 
-    setIsLoadingClasses(true);
+    if (loadMode === 'refresh') {
+      setIsRefreshingClasses(true);
+    } else {
+      setIsLoadingClasses(true);
+    }
     setClassOptionsError(null);
     try {
       const rows = await listClassroomsBySchool(schoolId);
@@ -141,6 +146,7 @@ export function CreateSessionScreen({
       setClassOptionsError(error instanceof Error ? error.message : 'Gagal memuat daftar kelas.');
     } finally {
       setIsLoadingClasses(false);
+      setIsRefreshingClasses(false);
     }
   }, [initialClassName, schoolId]);
 
@@ -321,7 +327,11 @@ export function CreateSessionScreen({
         onBack={onBack}
       />
 
-      <Screen keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+      <Screen
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.content}
+        onRefresh={schoolId ? () => loadClassOptions('refresh') : undefined}
+        refreshing={isRefreshingClasses}>
         <View style={styles.section}>
           <Text style={styles.fieldLabel}>Kelas</Text>
           {renderClassPicker()}

@@ -86,7 +86,14 @@ export function PageLayout({
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined
+          onRefresh ? (
+            <RefreshControl
+              colors={[colors.brand.primary500]}
+              onRefresh={onRefresh}
+              refreshing={refreshing}
+              tintColor={colors.brand.primary500}
+            />
+          ) : undefined
         }>
         <View style={[styles.contentInner, contentStyle]}>{children}</View>
       </ScrollView>
