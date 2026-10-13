@@ -27,7 +27,8 @@ export type IconName =
   | 'switch'
   | 'shield'
   | 'bluetooth'
-  | 'device';
+  | 'device'
+  | 'face-scan';
 
 type IconProps = {
   name: IconName;
@@ -189,6 +190,13 @@ export function Icon({
             <Rect x={4} y={4} width={16} height={16} rx={3} {...common} />
             <Path d="M8.5 9.5a5 5 0 0 1 7 0M12 9.5l1.5-1.8" {...common} />
             <Path d="M8 16h8" {...common} />
+          </>
+        );
+      case 'face-scan':
+        return (
+          <>
+            <Path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" {...common} />
+            <Path d="M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0" {...common} />
           </>
         );
       default:

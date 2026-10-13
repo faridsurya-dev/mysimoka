@@ -761,32 +761,33 @@ export function StudentMeasurementScreen({
             }
             onPress={startMeasurement}
           />
-          {CAN_USE_FACE_ID && onOpenFaceIdentification ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={onOpenFaceIdentification}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.secondaryPressed,
-              ]}
-            >
-              <Text style={styles.secondaryButtonLabel}>
-                Identifikasi Wajah
-              </Text>
-            </Pressable>
-          ) : null}
-          {canAddStudent ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setIsAddStudentOpen(true)}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.secondaryPressed,
-              ]}
-            >
-              <Icon name="plus" size={18} color={colors.brand.primary700} />
-              <Text style={styles.secondaryButtonLabel}>Tambah Siswa Baru</Text>
-            </Pressable>
+          {(CAN_USE_FACE_ID && onOpenFaceIdentification) || canAddStudent ? (
+            <View style={styles.secondaryActions}>
+              {CAN_USE_FACE_ID && onOpenFaceIdentification ? (
+                <PrimaryButton
+                  accessibilityLabel="Identifikasi siswa dengan wajah"
+                  label="Pindai Wajah"
+                  leftIcon={
+                    <Icon name="face-scan" size={20} color={colors.brand.primary700} />
+                  }
+                  onPress={onOpenFaceIdentification}
+                  size="md"
+                  style={styles.secondaryAction}
+                  variant="outline"
+                />
+              ) : null}
+              {canAddStudent ? (
+                <PrimaryButton
+                  accessibilityLabel="Tambah siswa baru ke kelas ini"
+                  label="Siswa Baru"
+                  leftIcon={<Icon name="plus" size={20} color={colors.brand.primary700} />}
+                  onPress={() => setIsAddStudentOpen(true)}
+                  size="md"
+                  style={styles.secondaryAction}
+                  variant="outline"
+                />
+              ) : null}
+            </View>
           ) : null}
         </View>
 
@@ -1224,26 +1225,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: colors.brand.primary500,
   },
-  secondaryButton: {
-    minHeight: 48,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border.strong,
-    backgroundColor: colors.surface.card,
-    alignItems: 'center',
-    justifyContent: 'center',
+  secondaryActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[8],
-    paddingHorizontal: spacing[16],
-    paddingVertical: spacing[8],
+    gap: spacing[12],
   },
-  secondaryPressed: {
-    backgroundColor: colors.surface.secondary,
-  },
-  secondaryButtonLabel: {
-    ...typography.labelMd,
-    color: colors.brand.primary700,
+  secondaryAction: {
+    flex: 1,
   },
   sectionHeader: {
     gap: spacing[4],
