@@ -20,6 +20,7 @@ class MainApplication : Application(), ReactApplication {
           // add(MyReactNativePackage())
           add(FeedbackTonePackage())
           add(AppUpdatePackage())
+          add(TempFilesPackage())
         },
     )
   }

@@ -41,6 +41,7 @@ import {
   StatusPill,
   type SegmentedOption,
 } from '../../shared/components';
+import { deleteTempPhoto } from '../../shared/tempFiles';
 import { colors, layout, radius, shadows, spacing, typography } from '../../theme';
 
 type FaceRegistrationScreenProps = {
@@ -208,6 +209,14 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
   const [uploadedByCropId, setUploadedByCropId] = useState<Record<string, boolean>>({});
   const [uploadingCropId, setUploadingCropId] = useState<string | null>(null);
   const [isUploadingAll, setIsUploadingAll] = useState(false);
+  // Face data of children is biometric data: the operator confirms the
+  // parents'/guardians' consent before anything is uploaded.
+  const [hasGuardianConsent, setHasGuardianConsent] = useState(false);
+
+  // The photo is only needed while registering: delete the temporary file
+  // (camera snapshot or gallery copy) when it is replaced or the screen closes.
+  const capturedPhotoUri = capturedPhoto?.imageUri ?? null;
+  useEffect(() => () => deleteTempPhoto(capturedPhotoUri), [capturedPhotoUri]);
   const [students, setStudents] = useState<DashboardStudentListItem[]>([]);
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [studentsError, setStudentsError] = useState<string | null>(null);
@@ -674,9 +683,20 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
     [students],
   );
 
+  const confirmConsentFirst = () => {
+    Alert.alert(
+      'Persetujuan orang tua/wali',
+      'Centang pernyataan persetujuan orang tua/wali di bawah sebelum menyimpan data wajah siswa.',
+    );
+  };
+
   const handleUploadSelectedFace = async () => {
     const selectedCrop = faceCrops[selectedCropIndex];
     if (!selectedCrop) {
+      return;
+    }
+    if (!hasGuardianConsent) {
+      confirmConsentFirst();
       return;
     }
 
@@ -746,6 +766,10 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
           { text: 'Keluar tanpa menyimpan', style: 'destructive', onPress: onBack },
         ],
       );
+      return;
+    }
+    if (!hasGuardianConsent) {
+      confirmConsentFirst();
       return;
     }
 
@@ -1397,6 +1421,21 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
           </View>
 
           <View style={[styles.stepTwoFooter, { paddingBottom: insets.bottom + spacing[16] }]}>
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: hasGuardianConsent }}
+              onPress={() => setHasGuardianConsent(value => !value)}
+              style={styles.consentRow}>
+              <View style={[styles.consentBox, hasGuardianConsent && styles.consentBoxChecked]}>
+                {hasGuardianConsent ? (
+                  <Icon color={colors.text.inverse} name="check" size={16} />
+                ) : null}
+              </View>
+              <Text style={styles.consentText}>
+                Orang tua/wali siswa sudah memberi persetujuan pendaftaran wajah. Yang disimpan
+                hanya pola wajah, bukan fotonya.
+              </Text>
+            </Pressable>
             <View style={styles.actionRow}>
               <PrimaryButton
                 label="Kembali"
@@ -1649,6 +1688,31 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border.subtle,
     backgroundColor: colors.surface.card,
+    gap: spacing[12],
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[10],
+  },
+  consentBox: {
+    width: 22,
+    height: 22,
+    marginTop: 1,
+    borderRadius: radius.sm,
+    borderWidth: 2,
+    borderColor: colors.border.strong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consentBoxChecked: {
+    borderColor: colors.brand.primary600,
+    backgroundColor: colors.brand.primary600,
+  },
+  consentText: {
+    ...typography.bodySm,
+    flex: 1,
+    color: colors.text.secondary,
   },
   sliderWrap: {
     paddingVertical: spacing[12],

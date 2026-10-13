@@ -29,6 +29,7 @@ import {
 } from '../../features/face/faceMatch';
 import { isNetworkError, loadSessionStudents } from '../../features/offline';
 import { searchStudentFaces, type FaceSearchMatch } from '../../services/auth';
+import { deleteTempPhoto } from '../../shared/tempFiles';
 import {
   EmptyState,
   Icon,
@@ -262,6 +263,9 @@ export function FaceIdentificationScreen({
       setSearch({ kind: 'result', decision: decideFaceMatch(matches, sessionStudentIds) });
     } catch (error) {
       setSearch({ kind: 'error', message: toSearchErrorMessage(error) });
+    } finally {
+      // The photo was only needed for this search: do not keep it on the phone.
+      deleteTempPhoto(imageUri);
     }
   }, [sessionStudentIds]);
 
