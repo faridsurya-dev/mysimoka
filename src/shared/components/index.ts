@@ -15,3 +15,4 @@ export * from './Avatar';
 export * from './TextLink';
 export * from './SegmentedControl';
 export * from './ListRow';
+export * from './ModalSafeArea';

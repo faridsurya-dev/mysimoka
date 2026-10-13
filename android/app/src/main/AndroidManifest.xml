@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Vibration feedback when a measurement is saved automatically. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!--
       No storage/media permission: the gallery pick in FaceRegistrationScreen uses
       react-native-image-picker launchImageLibrary, which goes through the system

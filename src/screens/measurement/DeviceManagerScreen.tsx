@@ -122,7 +122,9 @@ function formatTimestamp(value: string) {
 
 export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
   const insets = useSafeAreaInsets();
-  const headerHeight = insets.top + 72;
+  // The header floats over the list; its real height (title + optional
+  // technician pill) is measured so the content starts right below it.
+  const [headerHeight, setHeaderHeight] = useState(insets.top + 72);
   const deviceSession = useDeviceSession();
   const {
     isScanning,
@@ -324,7 +326,9 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.fixedHeader, { paddingTop: insets.top + spacing[8] }]}>
+      <View
+        onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}
+        style={[styles.fixedHeader, { paddingTop: insets.top + spacing[8] }]}>
         {onBack ? (
           <Pressable
             delayLongPress={TECHNICIAN_LONG_PRESS_MS}

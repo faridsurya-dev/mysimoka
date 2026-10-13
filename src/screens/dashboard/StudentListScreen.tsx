@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { OfflineDataBanner, loadSchoolClassrooms, loadSchoolStudents } from '../../features/offline';
 import {
-  listClassroomsBySchool,
-  listStudentsBySchool,
   type ClassroomListItem,
   type DashboardStudentListItem,
 } from '../../services';
@@ -46,6 +45,7 @@ export function StudentListScreen({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isCreateVisible, setIsCreateVisible] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
 
   const loadData = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -61,11 +61,14 @@ export function StudentListScreen({
       }
       setLoadError(null);
       try {
-        const [studentRows, classRows] = await Promise.all([
-          listStudentsBySchool(schoolId),
-          listClassroomsBySchool(schoolId).catch(() => [] as ClassroomListItem[]),
+        const [studentResult, classRows] = await Promise.all([
+          loadSchoolStudents(schoolId),
+          loadSchoolClassrooms(schoolId)
+            .then(result => result.value)
+            .catch(() => [] as ClassroomListItem[]),
         ]);
-        setStudents(studentRows);
+        setStudents(studentResult.value);
+        setCachedAt(studentResult.cachedAt);
         setClassrooms(classRows);
       } catch (error) {
         setLoadError(getErrorMessage(error, 'Gagal memuat daftar siswa.'));
@@ -179,6 +182,13 @@ export function StudentListScreen({
       }
       title="Daftar Siswa">
       {notice ? <InlineNotice message={notice} tone="success" /> : null}
+      <OfflineDataBanner
+        cachedAt={cachedAt}
+        onRetry={() => {
+          loadData('refresh').catch(() => undefined);
+        }}
+        recording={false}
+      />
 
       {isLoading && students.length === 0 ? (
         <StateView kind="loading" title="Memuat daftar siswa..." />

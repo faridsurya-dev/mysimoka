@@ -2,12 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  OfflineDataBanner,
+  loadDashboardAnalytics,
+  loadSchoolAcademicYears,
+  loadSchoolClassrooms,
+  loadSchoolStudents,
+} from '../../features/offline';
+import {
   getAuthSession,
-  getDashboardMeasurementAnalytics,
   getMyProfile,
-  listAcademicYears,
   listMemberships,
-  listStudentsBySchool,
   type AcademicYear,
   type DashboardMeasurementAnalytics,
   type DashboardStudentListItem,
@@ -136,6 +140,10 @@ export function DashboardScreen({
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [isAnalyticsRestricted, setIsAnalyticsRestricted] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Set when a section shows the phone's copy because there is no connection.
+  const [studentsCachedAt, setStudentsCachedAt] = useState<string | null>(null);
+  const [analyticsCachedAt, setAnalyticsCachedAt] = useState<string | null>(null);
+  const offlineCachedAt = studentsCachedAt ?? analyticsCachedAt;
 
   const displayedUserName =
     serverUserName ?? readString(authUser, ['full_name', 'fullName', 'name']) ?? 'Pengguna';
@@ -176,7 +184,13 @@ export function DashboardScreen({
     setIsLoadingStudents(true);
     setStudentsError(null);
     try {
-      setStudents(await listStudentsBySchool(schoolId));
+      const result = await loadSchoolStudents(schoolId);
+      setStudents(result.value);
+      setStudentsCachedAt(result.cachedAt);
+      if (!result.cachedAt) {
+        // Online: also store the class list so Kelas opens offline later.
+        loadSchoolClassrooms(schoolId).catch(() => undefined);
+      }
     } catch (error) {
       setStudentsError(getErrorMessage(error, 'Gagal memuat data siswa.'));
     } finally {
@@ -190,7 +204,7 @@ export function DashboardScreen({
       return;
     }
     try {
-      setAcademicYears(await listAcademicYears(schoolId));
+      setAcademicYears((await loadSchoolAcademicYears(schoolId)).value);
     } catch {
       setAcademicYears(null);
     }
@@ -205,13 +219,12 @@ export function DashboardScreen({
     setAnalyticsError(null);
     setIsAnalyticsRestricted(false);
     try {
-      setAnalytics(
-        await getDashboardMeasurementAnalytics({
-          schoolId,
-          startDate: period.start,
-          endDate: period.end,
-        }),
+      const result = await loadDashboardAnalytics(
+        { schoolId, startDate: period.start, endDate: period.end },
+        preset === 'custom' ? `${period.start}_${period.end}` : preset,
       );
+      setAnalytics(result.value);
+      setAnalyticsCachedAt(result.cachedAt);
     } catch (error) {
       setAnalytics(null);
       const restricted =
@@ -226,7 +239,7 @@ export function DashboardScreen({
     } finally {
       setIsLoadingAnalytics(false);
     }
-  }, [period.end, period.start, schoolId]);
+  }, [period.end, period.start, preset, schoolId]);
 
   useEffect(() => {
     loadStudents().catch(() => undefined);
@@ -394,6 +407,14 @@ export function DashboardScreen({
             title="Sekolah aktif belum dipilih"
           />
         ) : null}
+
+        <OfflineDataBanner
+          cachedAt={offlineCachedAt}
+          onRetry={() => {
+            handleRefresh().catch(() => undefined);
+          }}
+          recording={false}
+        />
 
         {isAdmin && academicYears !== null && academicYears.length === 0 ? (
           <InlineNotice

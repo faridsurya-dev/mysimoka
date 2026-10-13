@@ -1825,6 +1825,8 @@ function renderMeasurementStack({
           sessionName={activeMeasurementSession?.name}
           sessionDate={activeMeasurementSession?.sessionDate ?? activeSessionDate}
           className={activeMeasurementSession?.className}
+          schoolId={activeMeasurementSession?.schoolId ?? null}
+          classId={activeMeasurementSession?.classId ?? null}
           onBack={onBackToSessionList}
           onOpenFaceIdentification={onOpenFaceIdentification}
         />

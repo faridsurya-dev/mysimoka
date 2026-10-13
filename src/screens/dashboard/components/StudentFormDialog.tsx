@@ -28,6 +28,15 @@ type StudentFormDialogProps = {
   defaultClassId?: string | null;
   /** Daftar kelas yang sudah dimuat; bila kosong akan dimuat sendiri. */
   classrooms?: ClassroomListItem[];
+  /**
+   * Tambah cepat dari sesi pencatatan (guru juga): kelas dikunci ke
+   * `defaultClassId` (`lockedClassName` ditampilkan), NISN opsional, tanpa data
+   * wali/alamat (guru tidak punya izin ubah biodata).
+   */
+  quick?: boolean;
+  lockedClassName?: string;
+  /** Nama awal, mis. dari kata kunci pencarian. */
+  initialName?: string;
 };
 
 type Gender = 'male' | 'female';
@@ -57,6 +66,9 @@ export function StudentFormDialog({
   student,
   defaultClassId,
   classrooms: providedClassrooms,
+  quick = false,
+  lockedClassName,
+  initialName,
 }: StudentFormDialogProps) {
   const [fullName, setFullName] = useState('');
   const [nisn, setNisn] = useState('');
@@ -68,14 +80,18 @@ export function StudentFormDialog({
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [isActive, setIsActive] = useState<'active' | 'inactive'>('active');
-  const [loadedClassrooms, setLoadedClassrooms] = useState<ClassroomListItem[]>([]);
+  const [loadedClassrooms, setLoadedClassrooms] = useState<ClassroomListItem[]>(
+    [],
+  );
   const [isLoadingClassrooms, setIsLoadingClassrooms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
 
   const classrooms =
-    providedClassrooms && providedClassrooms.length > 0 ? providedClassrooms : loadedClassrooms;
+    providedClassrooms && providedClassrooms.length > 0
+      ? providedClassrooms
+      : loadedClassrooms;
 
   // Reset form setiap kali dialog dibuka.
   useEffect(() => {
@@ -84,20 +100,29 @@ export function StudentFormDialog({
     }
     setError(null);
     setShowErrors(false);
-    setFullName(student?.name ?? '');
+    setFullName(student?.name ?? initialName ?? '');
     setNisn(student?.nisn && student.nisn !== '-' ? student.nisn : '');
     setClassId(student?.classId ?? defaultClassId ?? null);
     setGender(normalizeGender(student?.gender));
-    setBirthDate(student?.dateOfBirth ? student.dateOfBirth.slice(0, 10) : null);
+    setBirthDate(
+      student?.dateOfBirth ? student.dateOfBirth.slice(0, 10) : null,
+    );
     setParentName(student?.parentName ?? '');
     setParentPhone(student?.parentPhone ?? '');
     setAddress(student?.address ?? '');
     setNotes(student?.notes ?? '');
     setIsActive(student?.isActive === false ? 'inactive' : 'active');
+    // Hanya saat dialog dibuka; initialName tidak boleh menimpa ketikan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultClassId, student, visible]);
 
   useEffect(() => {
-    if (!visible || !schoolId || (providedClassrooms && providedClassrooms.length > 0)) {
+    if (
+      quick ||
+      !visible ||
+      !schoolId ||
+      (providedClassrooms && providedClassrooms.length > 0)
+    ) {
       return;
     }
     let isMounted = true;
@@ -121,7 +146,7 @@ export function StudentFormDialog({
     return () => {
       isMounted = false;
     };
-  }, [providedClassrooms, schoolId, visible]);
+  }, [providedClassrooms, quick, schoolId, visible]);
 
   const classOptions = useMemo(
     () =>
@@ -133,14 +158,27 @@ export function StudentFormDialog({
     [classrooms],
   );
 
-  const nameError = showErrors && fullName.trim().length === 0 ? 'Nama siswa wajib diisi.' : null;
-  const nisnError = showErrors && nisn.trim().length === 0 ? 'NISN wajib diisi.' : null;
+  const nameError =
+    showErrors && fullName.trim().length === 0
+      ? 'Nama siswa wajib diisi.'
+      : null;
+  const nisnRequired = !quick;
+  const nisnError =
+    showErrors && nisnRequired && nisn.trim().length === 0
+      ? 'NISN wajib diisi.'
+      : null;
   const classError =
-    showErrors && mode === 'create' && !classId ? 'Pilih kelas untuk siswa ini.' : null;
+    showErrors && mode === 'create' && !classId
+      ? 'Pilih kelas untuk siswa ini.'
+      : null;
 
   async function handleSubmit() {
     setShowErrors(true);
-    if (!fullName.trim() || !nisn.trim() || (mode === 'create' && !classId)) {
+    if (
+      !fullName.trim() ||
+      (nisnRequired && !nisn.trim()) ||
+      (mode === 'create' && !classId)
+    ) {
       setError('Lengkapi kolom yang wajib diisi.');
       return;
     }
@@ -151,7 +189,9 @@ export function StudentFormDialog({
 
     setError(null);
     setIsSubmitting(true);
-    const className = classrooms.find(item => item.id === classId)?.name;
+    const className = quick
+      ? lockedClassName
+      : classrooms.find(item => item.id === classId)?.name;
     const extras = {
       parentName,
       parentPhone,
@@ -170,7 +210,9 @@ export function StudentFormDialog({
           birthDate,
         });
         let message = 'Siswa berhasil ditambahkan.';
-        const hasExtras = Object.values(extras).some(value => value.trim().length > 0);
+        const hasExtras =
+          !quick &&
+          Object.values(extras).some(value => value.trim().length > 0);
         if (hasExtras) {
           try {
             await updateStudent({
@@ -182,7 +224,8 @@ export function StudentFormDialog({
               ...extras,
             });
           } catch {
-            message = 'Siswa ditambahkan, tetapi data wali/alamat belum tersimpan.';
+            message =
+              'Siswa ditambahkan, tetapi data wali/alamat belum tersimpan.';
           }
         }
         onSaved(
@@ -239,7 +282,11 @@ export function StudentFormDialog({
   return (
     <FormDialog
       description={
-        mode === 'create'
+        quick
+          ? `Siswa baru langsung masuk ${
+              lockedClassName ?? 'kelas sesi ini'
+            } dan bisa diukur. Biodata lain dapat dilengkapi admin sekolah nanti.`
+          : mode === 'create'
           ? 'Isi data siswa baru. Registrasi wajah bisa dilakukan nanti dan tidak wajib.'
           : 'Perbarui biodata siswa. Perubahan kelas akan memindahkan siswa ke kelas baru.'
       }
@@ -249,7 +296,8 @@ export function StudentFormDialog({
       submitLabel={mode === 'create' ? 'Tambah Siswa' : 'Simpan Perubahan'}
       submitting={isSubmitting}
       title={mode === 'create' ? 'Tambah Siswa' : 'Edit Data Siswa'}
-      visible={visible}>
+      visible={visible}
+    >
       <InputField
         autoCapitalize="words"
         error={nameError}
@@ -261,28 +309,39 @@ export function StudentFormDialog({
       />
       <InputField
         error={nisnError}
-        hint="Nomor Induk Siswa Nasional"
+        hint={
+          quick
+            ? 'Opsional, bisa dilengkapi nanti'
+            : 'Nomor Induk Siswa Nasional'
+        }
         keyboardType="number-pad"
         label="NISN"
         maxLength={20}
         onChangeText={value => setNisn(value.replace(/[^0-9A-Za-z]/g, ''))}
         placeholder="Contoh: 0093184011"
-        required
+        required={nisnRequired}
         value={nisn}
       />
-      <SelectField
-        emptyMessage="Belum ada kelas. Tambahkan kelas terlebih dahulu."
-        label="Kelas"
-        loading={isLoadingClassrooms}
-        onChange={setClassId}
-        options={classOptions}
-        placeholder="Pilih kelas"
-        required={mode === 'create'}
-        searchable
-        value={classId}
-      />
+      {quick ? null : (
+        <SelectField
+          emptyMessage="Belum ada kelas. Tambahkan kelas terlebih dahulu."
+          label="Kelas"
+          loading={isLoadingClassrooms}
+          onChange={setClassId}
+          options={classOptions}
+          placeholder="Pilih kelas"
+          required={mode === 'create'}
+          searchable
+          value={classId}
+        />
+      )}
       {classError ? <InputHint message={classError} /> : null}
-      <ChoiceField label="Jenis kelamin" onChange={setGender} options={GENDER_OPTIONS} value={gender} />
+      <ChoiceField
+        label="Jenis kelamin"
+        onChange={setGender}
+        options={GENDER_OPTIONS}
+        value={gender}
+      />
       <DateField
         clearable
         defaultPickerDate="2016-01-01"
@@ -292,34 +351,38 @@ export function StudentFormDialog({
         placeholder="Pilih tanggal lahir"
         value={birthDate}
       />
-      <InputField
-        autoCapitalize="words"
-        label="Nama orang tua/wali"
-        onChangeText={setParentName}
-        placeholder="Opsional"
-        value={parentName}
-      />
-      <InputField
-        keyboardType="phone-pad"
-        label="No. HP orang tua/wali"
-        onChangeText={setParentPhone}
-        placeholder="Opsional"
-        value={parentPhone}
-      />
-      <InputField
-        label="Alamat"
-        multiline
-        onChangeText={setAddress}
-        placeholder="Opsional"
-        value={address}
-      />
-      <InputField
-        label="Catatan"
-        multiline
-        onChangeText={setNotes}
-        placeholder="Opsional, mis. alergi atau kondisi khusus"
-        value={notes}
-      />
+      {quick ? null : (
+        <>
+          <InputField
+            autoCapitalize="words"
+            label="Nama orang tua/wali"
+            onChangeText={setParentName}
+            placeholder="Opsional"
+            value={parentName}
+          />
+          <InputField
+            keyboardType="phone-pad"
+            label="No. HP orang tua/wali"
+            onChangeText={setParentPhone}
+            placeholder="Opsional"
+            value={parentPhone}
+          />
+          <InputField
+            label="Alamat"
+            multiline
+            onChangeText={setAddress}
+            placeholder="Opsional"
+            value={address}
+          />
+          <InputField
+            label="Catatan"
+            multiline
+            onChangeText={setNotes}
+            placeholder="Opsional, mis. alergi atau kondisi khusus"
+            value={notes}
+          />
+        </>
+      )}
       {mode === 'edit' ? (
         <ChoiceField
           label="Status siswa"

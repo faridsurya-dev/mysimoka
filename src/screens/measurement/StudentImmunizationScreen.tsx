@@ -7,7 +7,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { saveStudentImmunizationRecord, type SaveStudentImmunizationRecordPayload } from '../../services';
 import {
   OfflineDataBanner,
@@ -32,11 +31,13 @@ import {
   IconButton,
   InlineAlert,
   LoadingState,
+  ModalSafeArea,
   PrimaryButton,
   Screen,
   ScreenHeader,
   StatusPill,
   TextField,
+  TopInsetView,
 } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import type { StudentMeasurementItem } from '../../types';
@@ -100,7 +101,6 @@ export function StudentImmunizationScreen({
   sessionImmunizationOfficer,
   sessionDateIso,
 }: StudentImmunizationScreenProps) {
-  const insets = useSafeAreaInsets();
   const [students, setStudents] = useState<StudentMeasurementItem[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -440,8 +440,8 @@ export function StudentImmunizationScreen({
         presentationStyle="fullScreen"
         visible={selectedStudent !== null}
         onRequestClose={closeModal}>
-        <View style={styles.modalContainer}>
-          <View style={[styles.modalHeader, { paddingTop: insets.top + spacing[8] }]}>
+        <ModalSafeArea style={styles.modalContainer}>
+          <TopInsetView extraTop={spacing[8]} style={styles.modalHeader}>
             <View style={styles.modalHeaderText}>
               <Text style={styles.modalEyebrow}>
                 Siswa {selectedStudentIndex + 1} dari {students.length}
@@ -453,7 +453,7 @@ export function StudentImmunizationScreen({
             <IconButton accessibilityLabel="Tutup pencatatan imunisasi" onPress={closeModal}>
               <Icon name="close" color={colors.text.primary} />
             </IconButton>
-          </View>
+          </TopInsetView>
 
           <Screen contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
             <View style={styles.modalHero}>
@@ -537,7 +537,7 @@ export function StudentImmunizationScreen({
               />
             </View>
           </Screen>
-        </View>
+        </ModalSafeArea>
       </Modal>
     </View>
   );

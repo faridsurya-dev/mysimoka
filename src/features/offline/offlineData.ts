@@ -1,9 +1,23 @@
 import {
+  getDashboardMeasurementAnalytics,
+  listAcademicYears,
+  listClassroomsBySchool,
   listImmunizationSessions,
   listImmunizationStudents,
   listMeasurementSessions,
   listMeasurementStudents,
+  listStudentsBySchool,
+  type AcademicYear,
+  type ClassroomListItem,
+  type DashboardMeasurementAnalytics,
+  type DashboardStudentListItem,
 } from '../../services/auth';
+import {
+  getClassMeasurementSummary,
+  getClassroomDetail,
+  type ClassMeasurementSummary,
+  type ClassroomDetail,
+} from '../../services/schoolData';
 import type {
   ImmunizationSessionListItem,
   MeasurementSessionListItem,
@@ -82,6 +96,50 @@ export async function loadImmunizationSessions(
     prefetchStudents('immunization', result.value);
   }
   return result;
+}
+
+// Dashboard reads (school summary, analytics, classes, students). Same
+// network-first fallback, so the dashboard still opens without signal.
+
+export function loadSchoolStudents(
+  schoolId: string,
+): Promise<OfflineResult<DashboardStudentListItem[]>> {
+  return withCache(`school-students/${schoolId}`, () => listStudentsBySchool(schoolId));
+}
+
+export function loadSchoolClassrooms(
+  schoolId: string,
+): Promise<OfflineResult<ClassroomListItem[]>> {
+  return withCache(`school-classes/${schoolId}`, () => listClassroomsBySchool(schoolId));
+}
+
+export function loadSchoolAcademicYears(schoolId: string): Promise<OfflineResult<AcademicYear[]>> {
+  return withCache(`academic-years/${schoolId}`, () => listAcademicYears(schoolId));
+}
+
+export function loadClassMeasurementSummary(
+  classId: string,
+): Promise<OfflineResult<ClassMeasurementSummary>> {
+  return withCache(`class-summary/${classId}`, () => getClassMeasurementSummary(classId));
+}
+
+export function loadClassroomDetail(
+  classId: string,
+): Promise<OfflineResult<ClassroomDetail | null>> {
+  return withCache(`class-detail/${classId}`, () => getClassroomDetail(classId));
+}
+
+/**
+ * `periodKey` names the period (e.g. a preset like "year"): preset ranges end
+ * "today", so keying by dates would miss the cache on the next day.
+ */
+export function loadDashboardAnalytics(
+  payload: { schoolId: string; startDate: string; endDate: string },
+  periodKey: string,
+): Promise<OfflineResult<DashboardMeasurementAnalytics>> {
+  return withCache(`dashboard-analytics/${payload.schoolId}/${periodKey}`, () =>
+    getDashboardMeasurementAnalytics(payload),
+  );
 }
 
 const PREFETCH_LIMIT = 10;

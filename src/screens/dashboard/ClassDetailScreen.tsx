@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import {
-  listClassroomsBySchool,
+  loadClassMeasurementSummary,
+  loadClassroomDetail,
+  loadSchoolClassrooms,
+} from '../../features/offline';
+import {
   listGradeLevels,
   updateClassroom,
   type ClassroomListItem,
@@ -9,8 +13,6 @@ import {
   type GradeLevelItem,
 } from '../../services';
 import {
-  getClassMeasurementSummary,
-  getClassroomDetail,
   getErrorMessage,
   isPermissionError,
   type ClassMeasurementSummary,
@@ -103,8 +105,10 @@ export function ClassDetailScreen({
     setRefreshError(null);
     try {
       const [rows, classDetail] = await Promise.all([
-        listClassroomsBySchool(schoolId),
-        getClassroomDetail(classId).catch(() => null),
+        loadSchoolClassrooms(schoolId).then(result => result.value),
+        loadClassroomDetail(classId)
+          .then(result => result.value)
+          .catch(() => null),
       ]);
       const fresh = rows.find(item => item.id === classId);
       if (fresh) {
@@ -128,7 +132,7 @@ export function ClassDetailScreen({
     setSummaryError(null);
     setIsSummaryRestricted(false);
     try {
-      setSummary(await getClassMeasurementSummary(classId));
+      setSummary((await loadClassMeasurementSummary(classId)).value);
     } catch (error) {
       setSummary(null);
       setSummaryError(getErrorMessage(error, 'Gagal memuat ringkasan pengukuran.'));
@@ -142,8 +146,8 @@ export function ClassDetailScreen({
     if (!classId) {
       return;
     }
-    getClassroomDetail(classId)
-      .then(setDetail)
+    loadClassroomDetail(classId)
+      .then(result => setDetail(result.value))
       .catch(() => undefined);
     loadSummary().catch(() => undefined);
   }, [classId, loadSummary]);

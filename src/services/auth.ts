@@ -78,6 +78,7 @@ const LOGIN_ENDPOINT = '/login';
 const REFRESH_ENDPOINT = '/refresh';
 const VERIFY_EMAIL_ENDPOINT = '/verify-email';
 const JOIN_SCHOOL_ENDPOINT = '/schools/join';
+const CREATE_STUDENT_ENDPOINT = '/students';
 const PROFILE_PHOTO_ENDPOINT = '/me/photo';
 const AUTH_SESSION_STORAGE_KEY = 'mysimoka:auth-session';
 const CURRENT_SCHOOL_STORAGE_KEY = 'mysimoka:current-school';
@@ -4570,120 +4571,37 @@ export async function searchStudentsBySchool(
 }
 
 export async function createStudent(payload: CreateStudentPayload): Promise<DashboardStudentListItem> {
-  const normalizedSchoolId = payload.schoolId.trim();
   const classroomId = payload.classroomId.trim();
   const normalizedName = payload.fullName.trim();
-  if (!normalizedSchoolId || !classroomId || !normalizedName) {
+  if (!payload.schoolId.trim() || !classroomId || !normalizedName) {
     throw new Error('Nama siswa wajib diisi.');
   }
-
-  const normalizedNisn = payload.nisn?.trim() ?? '';
-  if (!normalizedNisn) {
-    throw new Error('NISN wajib diisi.');
+  if (!isUuidString(classroomId)) {
+    throw new Error('Kelas tidak valid.');
   }
 
-  const studentInsertObject: Record<string, unknown> = {
-    full_name: normalizedName,
-    student_number: normalizedNisn,
-    gender: payload.gender ?? null,
-    date_of_birth: payload.birthDate?.trim() || null,
-    is_active: true,
-  };
-
-  const mutation = `
-    mutation CreateStudent($object: students_insert_input!) {
-      insert_students_one(object: $object) {
-        id
-        is_active
-        full_name
-        parent_name
-        parent_phone
-        student_number
-        date_of_birth
-        address
-        notes
-        created_at
-        updated_at
-        gender
-      }
-    }
-  `;
-
-  const responseBody = (await apiRequest(GRAPHQL_URL, {
+  // The auth service checks the caller's membership in the class's school
+  // (teacher or school admin) and inserts the student + class enrollment in
+  // one transaction, so a failed enrollment never leaves an orphan student.
+  const responseBody = (await apiRequest(createAuthRequestUrl(CREATE_STUDENT_ENDPOINT), {
     method: 'POST',
     requiresAuth: true,
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      query: mutation,
-      variables: {
-        object: studentInsertObject,
-      },
+      class_id: classroomId,
+      full_name: normalizedName,
+      student_number: payload.nisn?.trim() || null,
+      gender: payload.gender ?? null,
+      date_of_birth: payload.birthDate?.trim() || null,
     }),
-  })) as
-    | {
-        data?: { insert_students_one?: Record<string, unknown> | null };
-        errors?: Array<{ message?: string }>;
-      }
-    | null;
+  })) as { data?: Record<string, unknown> | null } | null;
 
-  if (__DEV__) {
-    console.log('[createStudent][graphql][endpoint]', GRAPHQL_URL);
-    console.log('[createStudent][graphql][raw]', JSON.stringify(responseBody));
-  }
-
-  if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
-    throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan data siswa.');
-  }
-
-  const created = normalizeStudentListItem(responseBody?.data?.insert_students_one);
+  const created = normalizeStudentListItem(responseBody?.data);
   if (!created) {
     throw new Error('Respons simpan siswa tidak valid.');
   }
-
-  const enrollmentMutation = `
-    mutation CreateStudentEnrollment($studentId: uuid!, $classroomId: uuid!) {
-      insert_student_enrollments_one(
-        object: {
-          student_id: $studentId,
-          class_id: $classroomId,
-          status: "active"
-        }
-      ) {
-        id
-      }
-    }
-  `;
-
-  const enrollmentResponse = (await apiRequest(GRAPHQL_URL, {
-    method: 'POST',
-    requiresAuth: true,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      query: enrollmentMutation,
-      variables: {
-        studentId: created.id,
-        classroomId,
-      },
-    }),
-  })) as
-    | {
-        data?: { insert_student_enrollments_one?: { id?: string | null } | null };
-        errors?: Array<{ message?: string }>;
-      }
-    | null;
-
-  if (Array.isArray(enrollmentResponse?.errors) && enrollmentResponse.errors.length > 0) {
-    throw new Error(enrollmentResponse.errors[0]?.message || 'Gagal memasukkan siswa ke kelas.');
-  }
-
-  if (!enrollmentResponse?.data?.insert_student_enrollments_one?.id) {
-    throw new Error('Respons enrollment siswa tidak valid.');
-  }
-
   return created;
 }
 

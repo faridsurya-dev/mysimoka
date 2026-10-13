@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal } from 'react-native';
+import { ModalSafeArea } from '../../shared/components/ModalSafeArea';
 // Resolves to DeviceManagerScreen.web.tsx on web (no BLE there).
 import { DeviceManagerScreen } from './DeviceManagerScreen';
 
@@ -21,7 +22,11 @@ export function DeviceManagerSheet({ visible, onClose }: DeviceManagerSheetProps
       presentationStyle="fullScreen"
       visible={visible}
       onRequestClose={onClose}>
-      {visible ? <DeviceManagerScreen onBack={onClose} /> : null}
+      {visible ? (
+        <ModalSafeArea>
+          <DeviceManagerScreen onBack={onClose} />
+        </ModalSafeArea>
+      ) : null}
     </Modal>
   );
 }

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { OfflineDataBanner, loadSchoolClassrooms } from '../../features/offline';
 import {
   createClassroom,
-  listClassroomsBySchool,
   listGradeLevels,
   type ClassroomListItem,
   type GradeLevelItem,
@@ -53,6 +53,7 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
 
   const [isCreateVisible, setIsCreateVisible] = useState(false);
   const [className, setClassName] = useState('');
@@ -76,7 +77,9 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
       }
       setLoadError(null);
       try {
-        setClasses(await listClassroomsBySchool(schoolId));
+        const result = await loadSchoolClassrooms(schoolId);
+        setClasses(result.value);
+        setCachedAt(result.cachedAt);
       } catch (error) {
         setLoadError(getErrorMessage(error, 'Gagal memuat daftar kelas.'));
       } finally {
@@ -186,6 +189,13 @@ export function ClassListScreen({ schoolId, onBack, onOpenClassDetail }: ClassLi
       }
       title="Daftar Kelas">
       {notice ? <InlineNotice message={notice} tone="success" /> : null}
+      <OfflineDataBanner
+        cachedAt={cachedAt}
+        onRetry={() => {
+          loadClasses('refresh').catch(() => undefined);
+        }}
+        recording={false}
+      />
 
       {isLoading && classes.length === 0 ? (
         <StateView kind="loading" title="Memuat daftar kelas..." />

@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   InlineAlert,
+  ModalSafeArea,
   PrimaryButton,
   Screen,
   SegmentedControl,
   StatusPill,
   TextField,
+  TopInsetView,
 } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
@@ -112,7 +113,6 @@ function formatValue(measure: CalibrationMeasure, value: number) {
 }
 
 export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCalibrationModalProps) {
-  const insets = useSafeAreaInsets();
   const session = useDeviceSession();
   const bleId = session.connectedDeviceId;
 
@@ -336,13 +336,13 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
 
   return (
     <Modal animationType="slide" onRequestClose={handleClose} visible={visible}>
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + spacing[8] }]}>
+      <ModalSafeArea style={styles.container}>
+        <TopInsetView extraTop={spacing[8]} style={styles.header}>
           <Text style={styles.headerTitle}>Cek akurasi & kalibrasi</Text>
           <Pressable accessibilityRole="button" onPress={handleClose} style={styles.closeButton}>
             <Text style={styles.closeLabel}>Tutup</Text>
           </Pressable>
-        </View>
+        </TopInsetView>
 
         <Screen avoidKeyboard contentContainerStyle={styles.content} withTopInset={false}>
           {!bleId ? (
@@ -560,7 +560,7 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
             )}
           </View>
         </Screen>
-      </View>
+      </ModalSafeArea>
     </Modal>
   );
 }

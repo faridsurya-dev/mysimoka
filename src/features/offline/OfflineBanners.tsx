@@ -44,9 +44,12 @@ export function PendingSyncBanner() {
 export function OfflineDataBanner({
   cachedAt,
   onRetry,
+  recording = true,
 }: {
   cachedAt: string | null;
   onRetry?: () => void;
+  /** False on read-only screens (dashboard), where "recording continues" does not apply. */
+  recording?: boolean;
 }) {
   if (!cachedAt) {
     return null;
@@ -54,7 +57,9 @@ export function OfflineDataBanner({
   return (
     <InlineAlert
       actionLabel="Muat ulang"
-      message={`Tidak ada koneksi. Menampilkan data tersimpan di HP (${formatTime(cachedAt)}). Pencatatan tetap bisa dilanjutkan.`}
+      message={`Tidak ada koneksi. Menampilkan data tersimpan di HP (${formatTime(cachedAt)}).${
+        recording ? ' Pencatatan tetap bisa dilanjutkan.' : ''
+      }`}
       onAction={onRetry}
       title="Mode offline"
       tone="info"
