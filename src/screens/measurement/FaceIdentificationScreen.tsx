@@ -423,7 +423,7 @@ export function FaceIdentificationScreen({
             <Icon color={colors.brand.primary700} name="switch" size={20} />
           </IconButton>
         }
-        subtitle={`Uji coba · Kamera ${cameraFacingLabel.toLowerCase()}`}
+        subtitle={`Kamera ${cameraFacingLabel.toLowerCase()}`}
         title="Identifikasi Wajah"
       />
 

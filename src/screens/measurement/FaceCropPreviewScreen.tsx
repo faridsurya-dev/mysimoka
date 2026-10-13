@@ -77,7 +77,7 @@ export function FaceCropPreviewScreen({
           <View style={styles.resultBlock}>
             <Text style={styles.resultName}>Wajah berhasil diambil</Text>
             <Text style={styles.resultClass}>
-              Pencocokan wajah otomatis masih tahap uji coba dan belum menyimpan data.
+              Pencocokan wajah otomatis belum tersedia di versi ini.
               Tekan "Tutup Pengukuran" lalu pilih siswa dari daftar untuk mengisi tinggi dan
               berat secara manual.
             </Text>

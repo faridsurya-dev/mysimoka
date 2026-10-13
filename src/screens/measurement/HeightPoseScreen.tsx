@@ -33,7 +33,7 @@ export function HeightPoseScreen({
       <ScreenHeader
         backAccessibilityLabel="Kembali ke input manual"
         onBack={onBack}
-        subtitle="Uji coba · opsional"
+        subtitle="Opsional"
         title="Ukur Tinggi dengan Kamera"
       />
 
@@ -46,7 +46,7 @@ export function HeightPoseScreen({
             compact
             icon="info"
             title="Deteksi pose sedang dinonaktifkan"
-            description="Pengukuran tinggi badan lewat kamera masih tahap uji coba dan belum aktif di versi aplikasi ini."
+            description="Pengukuran tinggi badan lewat kamera belum tersedia di versi aplikasi ini."
           />
           <InlineAlert
             tone="info"

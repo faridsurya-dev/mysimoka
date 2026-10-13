@@ -61,7 +61,7 @@ export function BatchMeasurementScreen({
       return 'Semua alat terhubung.';
     }
 
-    return 'Alat ukur opsional dan masih tahap uji coba. Angka tetap bisa diketik manual.';
+    return 'Alat ukur opsional. Angka tetap bisa diketik manual.';
   }, [allDevicesConnected]);
 
   // Auto-fill from the device only on stable (final) readings; typing still works.
