@@ -438,6 +438,19 @@ export function RootNavigator() {
       return false;
     }
 
+    // A second press within 2 s leaves the app.
+    const confirmExit = () => {
+      const now = Date.now();
+      if (now - lastExitPressRef.current < 2000) {
+        return false;
+      }
+      lastExitPressRef.current = now;
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Tekan sekali lagi untuk keluar', ToastAndroid.SHORT);
+      }
+      return true;
+    };
+
     if (!isAuthenticated) {
       if (authRoute === 'register' || authRoute === 'forgot-password') {
         setAuthRoute('login');
@@ -448,11 +461,18 @@ export function RootNavigator() {
         setAuthRoute('login');
         return true;
       }
-      return false;
+      return confirmExit();
     }
 
     if (isSchoolSelectionVisible) {
-      return false;
+      // Opened from Profil › Ganti sekolah: keep the current school and go back.
+      if (currentSchoolId) {
+        setSchoolActionError(null);
+        setIsSchoolSelectionVisible(false);
+        return true;
+      }
+      // Right after login, no school chosen yet: do not quit on a single press.
+      return confirmExit();
     }
 
     if (activeTab === 'dashboard') {
@@ -510,16 +530,8 @@ export function RootNavigator() {
       return true;
     }
 
-    // Dashboard root: a second press within 2 s leaves the app.
-    const now = Date.now();
-    if (now - lastExitPressRef.current < 2000) {
-      return false;
-    }
-    lastExitPressRef.current = now;
-    if (Platform.OS === 'android') {
-      ToastAndroid.show('Tekan sekali lagi untuk keluar', ToastAndroid.SHORT);
-    }
-    return true;
+    // Dashboard root.
+    return confirmExit();
   };
 
   useEffect(() => {
