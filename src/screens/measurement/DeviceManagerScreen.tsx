@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  AppState,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { State } from 'react-native-ble-plx';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -419,12 +428,30 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
           </View>
           {technicianMode && measurementLogs.length > 0 ? (
             <View style={styles.debugLogContainer}>
-              <Text style={styles.debugLogTitle}>Log BLE Timbangan (raw)</Text>
-              {measurementLogs.map((logItem, logIndex) => (
-                <Text key={`${logIndex}-${logItem}`} style={styles.debugLogItem}>
-                  {logItem}
+              <View style={styles.debugLogHeader}>
+                <Text style={styles.debugLogTitle}>
+                  Log BLE Timbangan (raw) · {measurementLogs.length}
                 </Text>
-              ))}
+                <Pressable
+                  accessibilityLabel="Hapus log"
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => setMeasurementLogs([])}>
+                  <Text style={styles.debugLogClear}>Hapus</Text>
+                </Pressable>
+              </View>
+              {/* Fixed height with its own scroll, so the log never pushes the
+                  device list down; newest line on top. */}
+              <ScrollView
+                nestedScrollEnabled
+                style={styles.debugLogScroll}
+                contentContainerStyle={styles.debugLogScrollContent}>
+                {measurementLogs.map((logItem, logIndex) => (
+                  <Text key={`${logIndex}-${logItem}`} style={styles.debugLogItem}>
+                    {logItem}
+                  </Text>
+                ))}
+              </ScrollView>
             </View>
           ) : null}
         </View>
@@ -768,9 +795,26 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[10],
     gap: spacing[6],
   },
+  debugLogHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[8],
+  },
   debugLogTitle: {
     ...typography.labelMd,
     color: colors.text.primary,
+    flexShrink: 1,
+  },
+  debugLogClear: {
+    ...typography.labelMd,
+    color: colors.brand.primary600,
+  },
+  debugLogScroll: {
+    maxHeight: 200,
+  },
+  debugLogScrollContent: {
+    gap: spacing[6],
   },
   debugLogItem: {
     ...typography.bodySm,
