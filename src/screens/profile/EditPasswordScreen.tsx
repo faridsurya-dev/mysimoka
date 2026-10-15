@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import {
   InfoCard,
   InlineAlert,
@@ -8,36 +8,68 @@ import {
   ScreenHeader,
   TextField,
 } from '../../shared/components';
+import { PASSWORD_MIN_LENGTH, changePassword } from '../../services';
 import { colors, layout, spacing } from '../../theme';
 
 type EditPasswordScreenProps = {
   onBack: () => void;
 };
 
+// Counted like the auth service: characters, spaces included.
 function hasMinLength(value: string) {
-  return value.trim().length >= 8;
+  return Array.from(value).length >= PASSWORD_MIN_LENGTH;
 }
 
 export function EditPasswordScreen({ onBack }: EditPasswordScreenProps) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const isConfirmMismatch =
     confirmPassword.trim().length > 0 && confirmPassword !== newPassword;
 
   const isSaveDisabled = useMemo(() => {
     return (
-      currentPassword.trim().length === 0 ||
-      newPassword.trim().length === 0 ||
-      confirmPassword.trim().length === 0 ||
+      isSaving ||
+      currentPassword.length === 0 ||
+      newPassword.length === 0 ||
+      confirmPassword.length === 0 ||
       !hasMinLength(newPassword) ||
       newPassword !== confirmPassword ||
       currentPassword === newPassword
     );
-  }, [confirmPassword, currentPassword, newPassword]);
+  }, [confirmPassword, currentPassword, isSaving, newPassword]);
 
   const isNewPasswordTooShort = newPassword.length > 0 && !hasMinLength(newPassword);
+
+  const handleSave = async () => {
+    if (isSaveDisabled) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setErrorMessage(null);
+      const message = await changePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      Alert.alert(
+        'Password Diubah',
+        `${message} Perangkat lain yang memakai akun ini perlu login ulang.`,
+        [{ text: 'OK', onPress: onBack }],
+        { cancelable: true, onDismiss: onBack },
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Gagal mengubah password. Silakan coba lagi.',
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -48,6 +80,7 @@ export function EditPasswordScreen({ onBack }: EditPasswordScreenProps) {
           description="Gunakan password yang kuat dan jangan dibagikan ke orang lain."
           title="Keamanan akun">
           <TextField
+            editable={!isSaving}
             label="Password Saat Ini"
             onChangeText={setCurrentPassword}
             placeholder="Masukkan password saat ini"
@@ -55,15 +88,17 @@ export function EditPasswordScreen({ onBack }: EditPasswordScreenProps) {
             value={currentPassword}
           />
           <TextField
-            error={isNewPasswordTooShort ? 'Password baru minimal 8 karakter.' : null}
-            helperText="Minimal 8 karakter."
+            editable={!isSaving}
+            error={isNewPasswordTooShort ? `Password baru minimal ${PASSWORD_MIN_LENGTH} karakter.` : null}
+            helperText={`Minimal ${PASSWORD_MIN_LENGTH} karakter.`}
             label="Password Baru"
             onChangeText={setNewPassword}
-            placeholder="Minimal 8 karakter"
+            placeholder={`Minimal ${PASSWORD_MIN_LENGTH} karakter`}
             secureTextEntry
             value={newPassword}
           />
           <TextField
+            editable={!isSaving}
             error={isConfirmMismatch ? 'Konfirmasi password belum sama.' : null}
             label="Konfirmasi Password Baru"
             onChangeText={setConfirmPassword}
@@ -73,16 +108,19 @@ export function EditPasswordScreen({ onBack }: EditPasswordScreenProps) {
           />
         </InfoCard>
 
+        {errorMessage ? <InlineAlert message={errorMessage} tone="error" /> : null}
+
         <InlineAlert
           message="Gunakan kombinasi huruf dan angka agar password lebih aman."
           tone="info"
         />
 
         <PrimaryButton
-          disabled={isSaveDisabled}
+          disabled={isSaveDisabled && !isSaving}
           fullWidth
           label="Simpan Password Baru"
-          onPress={() => undefined}
+          loading={isSaving}
+          onPress={handleSave}
         />
       </Screen>
     </View>

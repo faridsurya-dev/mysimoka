@@ -80,6 +80,8 @@ const VERIFY_EMAIL_ENDPOINT = '/verify-email';
 const JOIN_SCHOOL_ENDPOINT = '/schools/join';
 const CREATE_STUDENT_ENDPOINT = '/students';
 const PROFILE_PHOTO_ENDPOINT = '/me/photo';
+const CHANGE_PASSWORD_ENDPOINT = '/me/password';
+const WRONG_CURRENT_PASSWORD_MESSAGE = 'Password saat ini salah.';
 const AUTH_SESSION_STORAGE_KEY = 'mysimoka:auth-session';
 const CURRENT_SCHOOL_STORAGE_KEY = 'mysimoka:current-school';
 export const ROLE_HIERARCHY = ['school_admin', 'teacher', 'user'] as const;
@@ -5185,6 +5187,74 @@ export async function deleteMyProfilePhoto(): Promise<void> {
       image_url: null,
     },
   });
+}
+
+export const PASSWORD_MIN_LENGTH = 8;
+
+// POST /me/password. The auth service answers 401 "Password saat ini salah."
+// for a wrong current password, so this cannot go through apiRequest (which
+// treats every 401 as an expired access token). Only a 401 with another
+// message triggers one refresh + retry. On success the server has revoked
+// every refresh token of the account (other devices must log in again) and
+// returns a fresh session in the /login shape, which replaces ours.
+export async function changePassword(currentPassword: string, newPassword: string): Promise<string> {
+  if (!currentPassword) {
+    throw new Error('Password saat ini wajib diisi.');
+  }
+  if (Array.from(newPassword).length < PASSWORD_MIN_LENGTH) {
+    throw new Error(`Password baru minimal ${PASSWORD_MIN_LENGTH} karakter.`);
+  }
+  if (newPassword === currentPassword) {
+    throw new Error('Password baru harus berbeda dari password saat ini.');
+  }
+  if (!authSession.accessToken) {
+    throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
+  }
+
+  const send = (accessToken: string) =>
+    fetchWithDevNetworkLog(
+      createAuthRequestUrl(CHANGE_PASSWORD_ENDPOINT),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      },
+      'initial',
+    );
+
+  let response = await send(authSession.accessToken);
+  let responseBody = await parseResponseBody(response);
+  let errorMessage = response.ok ? null : normalizeApiErrorMessage(responseBody);
+
+  if (response.status === 401 && errorMessage !== WRONG_CURRENT_PASSWORD_MESSAGE) {
+    const refreshedAccessToken = await refreshAccessToken();
+    if (!refreshedAccessToken) {
+      clearAuthSession();
+      throw new Error('Sesi berakhir. Silakan login ulang.');
+    }
+    response = await send(refreshedAccessToken);
+    responseBody = await parseResponseBody(response);
+    errorMessage = response.ok ? null : normalizeApiErrorMessage(responseBody);
+  }
+
+  if (!response.ok) {
+    throw new Error(errorMessage ?? 'Gagal mengubah password. Silakan coba lagi.');
+  }
+
+  const session = normalizeLoginResult(responseBody);
+  if (session) {
+    setAuthSession({
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken ?? authSession.refreshToken,
+      user: session.user ?? authSession.user,
+    });
+  }
+
+  return readNullableString(responseBody?.message) ?? 'Password berhasil diubah.';
 }
 
 export async function updateSchoolProfile(
