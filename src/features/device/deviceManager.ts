@@ -40,6 +40,11 @@ import {
 const DISCOVERY_DURATION_MS = 7000;
 const S400_CONNECT_TIMEOUT_MS = 6000;
 const GATT_CONNECT_TIMEOUT_MS = 10000;
+// Android often drops the first GATT connect right after a scan stops; a short
+// pause and a retry (after releasing the half-open link) usually succeed.
+const SCAN_SETTLE_MS = 300;
+const MANUAL_CONNECT_ATTEMPTS = 3;
+const CONNECT_RETRY_DELAY_MS = 700;
 const RECONNECT_SCAN_DURATION_MS = 5000;
 const BROADCAST_RECEIVING_MESSAGE = 'Menerima broadcast data S400 (service data terdeteksi).';
 
@@ -383,7 +388,40 @@ type ConnectOptions = {
   name?: string | null;
 };
 
+function wait(ms: number) {
+  return new Promise<void>(resolve => setTimeout(resolve, ms));
+}
+
+// Closes a GATT link left half-open by a failed connect. Android keeps it
+// otherwise, and every later connect fails until Bluetooth is toggled.
+async function releaseFailedConnection(deviceId: string) {
+  stopMonitoringWeightScale(deviceId);
+  disconnectSubscription?.remove();
+  disconnectSubscription = null;
+  await getBleManager()?.cancelDeviceConnection(deviceId).catch(() => undefined);
+  if (getDeviceSessionSnapshot().connectedDeviceId === deviceId) {
+    setConnectedBleDevice(null);
+    markConnected(null);
+  }
+}
+
 async function connectDeviceInternal(deviceId: string, options: ConnectOptions): Promise<boolean> {
+  const attempts = options.auto ? 1 : MANUAL_CONNECT_ATTEMPTS;
+  for (let attempt = 1; attempt < attempts; attempt++) {
+    const result = await connectDeviceOnce(deviceId, options, false);
+    if (result !== 'retry') {
+      return result;
+    }
+    await wait(CONNECT_RETRY_DELAY_MS);
+  }
+  return (await connectDeviceOnce(deviceId, options, true)) === true;
+}
+
+async function connectDeviceOnce(
+  deviceId: string,
+  options: ConnectOptions,
+  lastAttempt: boolean,
+): Promise<boolean | 'retry'> {
   ensureInitialized();
   if (getDeviceSessionSnapshot().connectedDeviceId || state.busyDeviceId) {
     return false;
@@ -410,9 +448,14 @@ async function connectDeviceInternal(deviceId: string, options: ConnectOptions):
     ...(options.auto ? {} : { message: null }),
   });
 
+  const isS400 = isLikelyS400Device(fallbackName);
   try {
     await stopScan();
-    const isS400 = isLikelyS400Device(fallbackName);
+    await wait(SCAN_SETTLE_MS);
+    if (!isS400 && (await manager.isDeviceConnected(deviceId).catch(() => false))) {
+      // Left over from an earlier failed attempt or app session.
+      await manager.cancelDeviceConnection(deviceId).catch(() => undefined);
+    }
     setDeviceMacAddress(deviceId, deviceId);
     resetAdvertisementCache(deviceId);
     if (isS400) {
@@ -423,7 +466,10 @@ async function connectDeviceInternal(deviceId: string, options: ConnectOptions):
       ? await manager
           .connectToDevice(deviceId, { timeout: S400_CONNECT_TIMEOUT_MS })
           .catch(() => null)
-      : await manager.connectToDevice(deviceId, { timeout: GATT_CONNECT_TIMEOUT_MS });
+      : await manager.connectToDevice(deviceId, {
+          timeout: GATT_CONNECT_TIMEOUT_MS,
+          refreshGatt: 'OnConnected',
+        });
 
     if (!device && isS400) {
       setConnectedBleDevice({ id: deviceId, name: fallbackName });
@@ -488,6 +534,12 @@ async function connectDeviceInternal(deviceId: string, options: ConnectOptions):
     });
     return true;
   } catch (error) {
+    if (!isS400) {
+      await releaseFailedConnection(deviceId);
+      if (!lastAttempt) {
+        return 'retry';
+      }
+    }
     if (options.auto) {
       if (__DEV__) {
         console.log('[autoReconnect] connect failed', error instanceof Error ? error.message : error);
