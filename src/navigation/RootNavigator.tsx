@@ -1245,6 +1245,13 @@ export function RootNavigator() {
               setActiveImmunizationSession(null);
               setMeasurementRoute('create-session');
             },
+            // Stale-session warning: a new session for the same class.
+            onCreateSessionForClass: (classPreset: { id: string | null; name: string | null }) => {
+              setCreateSessionClassPreset(classPreset);
+              setActiveMeasurementSession(null);
+              setActiveImmunizationSession(null);
+              setMeasurementRoute('create-session');
+            },
             onCreateSession: (payload: CreateSessionPayload) => {
               setActiveSessionDate(payload.sessionDate);
               setCreateSessionClassPreset(null);
@@ -1802,6 +1809,7 @@ type MeasurementStackOptions = {
   onFaceCameraFacingChange: (facing: 'back' | 'front') => void;
   onBackToSessionList: () => void;
   onOpenCreateSession: () => void;
+  onCreateSessionForClass: (classPreset: { id: string | null; name: string | null }) => void;
   onCreateSession: (payload: CreateSessionPayload) => void;
   onOpenFaceIdentification: () => void;
   onOpenMeasurementSession: (session: MeasurementSessionListItem) => void;
@@ -1843,6 +1851,7 @@ function renderMeasurementStack({
   onOpenImmunizationManual,
   faceCropPreview,
   createSessionClassPreset,
+  onCreateSessionForClass,
 }: MeasurementStackOptions) {
   switch (measurementRoute) {
     case 'create-session':
@@ -1915,6 +1924,12 @@ function renderMeasurementStack({
           onOpenStudentHandled={onFaceIdentifiedStudentOpened}
           onBack={onBackToSessionList}
           onOpenFaceIdentification={onOpenFaceIdentification}
+          onCreateNewSession={() =>
+            onCreateSessionForClass({
+              id: activeMeasurementSession?.classId ?? null,
+              name: activeMeasurementSession?.className ?? null,
+            })
+          }
         />
       );
     case 'immunization-manual':
@@ -1927,7 +1942,13 @@ function renderMeasurementStack({
           sessionImmunizationType={activeImmunizationType}
           sessionImmunizationDose={activeImmunizationDose}
           sessionImmunizationOfficer={activeImmunizationOfficer}
-          sessionDateIso={activeSessionDate}
+          sessionDateIso={activeImmunizationSession?.sessionDate ?? activeSessionDate}
+          onCreateNewSession={() =>
+            onCreateSessionForClass({
+              id: activeImmunizationSession?.classId ?? null,
+              name: activeImmunizationSession?.className ?? null,
+            })
+          }
         />
       );
     case 'session-list':

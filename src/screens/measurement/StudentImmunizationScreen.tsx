@@ -24,6 +24,7 @@ import {
   type PendingRecord,
 } from '../../features/offline';
 import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
+import { StaleSessionModal } from '../../features/session/StaleSessionModal';
 import {
   Avatar,
   EmptyState,
@@ -51,6 +52,8 @@ type StudentImmunizationScreenProps = {
   sessionImmunizationDose: string | null;
   sessionImmunizationOfficer: string | null;
   sessionDateIso: string;
+  /** Opens the create-session flow (stale-session warning). */
+  onCreateNewSession?: () => void;
 };
 
 type ImmunizationStatus = NonNullable<SaveStudentImmunizationRecordPayload['status']>;
@@ -100,6 +103,7 @@ export function StudentImmunizationScreen({
   sessionImmunizationDose,
   sessionImmunizationOfficer,
   sessionDateIso,
+  onCreateNewSession,
 }: StudentImmunizationScreenProps) {
   const [students, setStudents] = useState<StudentMeasurementItem[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -116,6 +120,8 @@ export function StudentImmunizationScreen({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
   const [lastSavedOffline, setLastSavedOffline] = useState(false);
+  // The last save replaced a record already stored in this session.
+  const [lastSavedRemeasure, setLastSavedRemeasure] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const { records: pendingRecords } = usePendingRecords();
   const pendingStudentIds = useMemo(
@@ -236,6 +242,7 @@ export function StudentImmunizationScreen({
 
     const savedStudentId = selectedStudent.id;
     const savedStudentName = selectedStudent.name;
+    const isRemeasure = selectedStudent.checked;
     setIsSavingRecord(true);
     setSaveError(null);
 
@@ -294,6 +301,7 @@ export function StudentImmunizationScreen({
       );
       setStudents(updatedStudents);
       setLastSavedOffline(savedOffline);
+      setLastSavedRemeasure(isRemeasure);
       setLastSavedName(savedStudentName);
 
       const currentIndex = updatedStudents.findIndex(student => student.id === savedStudentId);
@@ -387,8 +395,12 @@ export function StudentImmunizationScreen({
             tone={lastSavedOffline ? 'info' : 'success'}
             message={
               lastSavedOffline
-                ? `Tidak ada koneksi. Data imunisasi ${lastSavedName} disimpan di HP dan dikirim otomatis saat online.`
-                : `Data imunisasi ${lastSavedName} tersimpan.`
+                ? `Tidak ada koneksi. Data imunisasi ${lastSavedName} disimpan di HP dan dikirim otomatis saat online.${
+                    lastSavedRemeasure ? ' Diperbarui (catat ulang).' : ''
+                  }`
+                : `Data imunisasi ${lastSavedName} ${
+                    lastSavedRemeasure ? 'diperbarui (catat ulang)' : 'tersimpan'
+                  }.`
             }
           />
         ) : null}
@@ -478,10 +490,14 @@ export function StudentImmunizationScreen({
               <Avatar name={selectedStudent?.name ?? ''} size={88} ring />
               <Text style={styles.modalStudentName}>{selectedStudent?.name}</Text>
               <Text style={styles.modalStudentMeta}>{className}</Text>
-              {selectedStudent?.checked ? (
-                <StatusPill label="Sudah dicatat — simpan untuk memperbarui" tone="success" />
-              ) : null}
             </View>
+            {selectedStudent?.checked ? (
+              <InlineAlert
+                tone="warning"
+                title="Catat ulang"
+                message={`Sudah ${selectedStudent.timestamp.replace(/^Dicatat/, 'dicatat')} · ${selectedStudent.measurement} — simpan akan menggantikan catatan resmi sesi ini.`}
+              />
+            ) : null}
 
             <View style={styles.detailCard}>
               <FieldRow label="Jenis imunisasi" value={sessionImmunizationType} />
@@ -529,7 +545,7 @@ export function StudentImmunizationScreen({
             {saveError ? <InlineAlert tone="error" message={saveError} /> : null}
 
             <PrimaryButton
-              label="Simpan dan Lanjutkan"
+              label={selectedStudent?.checked ? 'Simpan Ulang dan Lanjutkan' : 'Simpan dan Lanjutkan'}
               loading={isSavingRecord}
               onPress={() => {
                 saveAndContinue().catch(() => undefined);
@@ -557,6 +573,12 @@ export function StudentImmunizationScreen({
           </Screen>
         </ModalSafeArea>
       </Modal>
+
+      <StaleSessionModal
+        sessionId={sessionId}
+        sessionDate={sessionDateIso}
+        onCreateNewSession={onCreateNewSession}
+      />
     </View>
   );
 }

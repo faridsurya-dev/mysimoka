@@ -44,6 +44,7 @@ import {
   type PendingRecord,
 } from '../../features/offline';
 import { toRecordingErrorMessage } from '../../features/session/recordingErrors';
+import { StaleSessionModal } from '../../features/session/StaleSessionModal';
 import {
   Avatar,
   EmptyState,
@@ -78,6 +79,8 @@ type StudentMeasurementScreenProps = {
   onOpenStudentHandled?: () => void;
   onBack: () => void;
   onOpenFaceIdentification?: () => void;
+  /** Opens the create-session flow (stale-session warning). */
+  onCreateNewSession?: () => void;
 };
 
 const CAN_USE_BLE = Platform.OS === 'android' || Platform.OS === 'ios';
@@ -133,6 +136,37 @@ function formatSessionDate(value?: string) {
   });
 }
 
+function formatStoredValue(value: string) {
+  const parsed = parseMeasurementNumber(value);
+  return parsed === null
+    ? value
+    : (formatReading(parsed) ?? value).replace('.', ',');
+}
+
+/**
+ * The record already stored for this student in this session (server or
+ * offline queue), e.g. "Sudah diukur 16 Okt 2026, 10.12 · TB 120,5 cm ·
+ * BB 22,1 kg"; null when nothing was saved yet.
+ */
+export function describePreviousMeasurement(
+  student: StudentMeasurementItem | null,
+): string | null {
+  if (!student) {
+    return null;
+  }
+  const parts = [
+    student.heightCm ? `TB ${formatStoredValue(student.heightCm)} cm` : null,
+    student.weightKg ? `BB ${formatStoredValue(student.weightKg)} kg` : null,
+  ].filter(Boolean);
+  if (parts.length === 0) {
+    return null;
+  }
+  const when = student.timestamp.startsWith('Diukur ')
+    ? student.timestamp.slice('Diukur '.length)
+    : null;
+  return [when ? `Sudah diukur ${when}` : 'Sudah diukur', ...parts].join(' · ');
+}
+
 export function StudentMeasurementScreen({
   sessionId = null,
   sessionName = 'Sesi Pengukuran',
@@ -144,6 +178,7 @@ export function StudentMeasurementScreen({
   onOpenStudentHandled,
   onBack,
   onOpenFaceIdentification,
+  onCreateNewSession,
 }: StudentMeasurementScreenProps) {
   const deviceSession = useDeviceSession();
   const sensorSummary = describeSensorSummary(deviceSession.sensorStatus);
@@ -167,6 +202,8 @@ export function StudentMeasurementScreen({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedName, setLastSavedName] = useState<string | null>(null);
   const [lastSavedValues, setLastSavedValues] = useState('');
+  // The last save replaced a result already stored in this session.
+  const [lastSavedRemeasure, setLastSavedRemeasure] = useState(false);
   const [autoSave, setAutoSave] = useState(false);
   // Guards auto-save against firing twice before isSavingMeasurement re-renders.
   const savingRef = useRef(false);
@@ -531,6 +568,7 @@ export function StudentMeasurementScreen({
     }
 
     const isAuto = measurementMode === 'auto' && isScaleConnected;
+    const isRemeasure = describePreviousMeasurement(selectedStudent) !== null;
     const savedStudentId = selectedStudent.id;
     const savedStudentName = selectedStudent.name;
     savingRef.current = true;
@@ -625,6 +663,7 @@ export function StudentMeasurementScreen({
       );
       setStudents(updatedStudents);
       setLastSavedOffline(savedOffline);
+      setLastSavedRemeasure(isRemeasure);
       setLastSavedName(savedStudentName);
       setLastSavedValues(
         [
@@ -725,13 +764,17 @@ export function StudentMeasurementScreen({
         lastSavedOffline
           ? `Tidak ada koneksi. Data ${lastSavedName}${
               lastSavedValues ? ` (${lastSavedValues})` : ''
-            } disimpan di HP dan dikirim otomatis saat online.`
+            } disimpan di HP dan dikirim otomatis saat online.${
+              lastSavedRemeasure ? ' Diperbarui (ukur ulang).' : ''
+            }`
           : `Data ${lastSavedName}${
               lastSavedValues ? ` (${lastSavedValues})` : ''
-            } tersimpan.`
+            } ${lastSavedRemeasure ? 'diperbarui (ukur ulang)' : 'tersimpan'}.`
       }
     />
   ) : null;
+
+  const previousMeasurementText = describePreviousMeasurement(selectedStudent);
 
   return (
     <View style={styles.container}>
@@ -920,13 +963,14 @@ export function StudentMeasurementScreen({
                   {selectedStudent?.name}
                 </Text>
                 <Text style={styles.modalStudentMeta}>{className}</Text>
-                {selectedStudent?.checked ? (
-                  <StatusPill
-                    label="Sudah diukur — simpan untuk memperbarui"
-                    tone="success"
-                  />
-                ) : null}
               </View>
+              {previousMeasurementText ? (
+                <InlineAlert
+                  tone="warning"
+                  title="Ukur ulang"
+                  message={`${previousMeasurementText} — simpan akan menggantikan hasil resmi; percobaan sebelumnya tetap tercatat di riwayat.`}
+                />
+              ) : null}
 
               {CAN_USE_BLE ? (
                 <View style={styles.modeCard}>
@@ -1055,7 +1099,11 @@ export function StudentMeasurementScreen({
               ) : null}
 
               <PrimaryButton
-                label="Simpan dan Lanjutkan"
+                label={
+                  previousMeasurementText
+                    ? 'Simpan Ulang dan Lanjutkan'
+                    : 'Simpan dan Lanjutkan'
+                }
                 loading={isSavingMeasurement}
                 onPress={() => {
                   saveAndContinue().catch(() => undefined);
@@ -1096,7 +1144,14 @@ export function StudentMeasurementScreen({
                 </View>
                 <View style={styles.savedToastText}>
                   <Text numberOfLines={1} style={styles.savedToastTitle}>
-                    {lastSavedOffline ? 'Tersimpan di HP' : 'Tersimpan'}:{' '}
+                    {lastSavedRemeasure
+                      ? lastSavedOffline
+                        ? 'Diperbarui di HP (ukur ulang)'
+                        : 'Diperbarui (ukur ulang)'
+                      : lastSavedOffline
+                      ? 'Tersimpan di HP'
+                      : 'Tersimpan'}
+                    :{' '}
                     {lastSavedName}
                   </Text>
                   {lastSavedValues ? (
@@ -1113,6 +1168,12 @@ export function StudentMeasurementScreen({
           </View>
         </ModalSafeArea>
       </Modal>
+
+      <StaleSessionModal
+        sessionId={sessionId}
+        sessionDate={sessionDate}
+        onCreateNewSession={onCreateNewSession}
+      />
 
       {canAddStudent ? (
         <StudentFormDialog
