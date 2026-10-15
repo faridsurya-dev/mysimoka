@@ -128,8 +128,8 @@ android {
         applicationId "com.mysimoka_mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.1.1"
+        versionCode 4
+        versionName "1.1.2"
     }
     signingConfigs {
         debug {
