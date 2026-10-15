@@ -210,6 +210,10 @@ export function StudentMeasurementScreen({
   const [consumedReadingKey, setConsumedReadingKey] = useState<string | null>(
     null,
   );
+  // After an auto-save the next one waits for a new (unstable) measurement, so
+  // a held result that still changes on the device (older firmware refines it
+  // for a few seconds) is never saved for the next student.
+  const [autoSaveArmed, setAutoSaveArmed] = useState(true);
 
   const selectedStudentIndex = selectedStudentId
     ? students.findIndex(student => student.id === selectedStudentId)
@@ -319,6 +323,12 @@ export function StudentMeasurementScreen({
     }
   }, [consumedReadingKey, deviceSession.latestReadingStable]);
 
+  useEffect(() => {
+    if (!autoSaveArmed && !deviceSession.latestReadingStable) {
+      setAutoSaveArmed(true);
+    }
+  }, [autoSaveArmed, deviceSession.latestReadingStable]);
+
   // Marks the device's current reading as belonging to the student on screen,
   // so it is never pre-filled for the next one.
   const consumeCurrentReading = useCallback(() => {
@@ -335,6 +345,7 @@ export function StudentMeasurementScreen({
   // moves to the next one, so a queue of children needs no tap per child.
   const canAutoSave =
     autoSave &&
+    autoSaveArmed &&
     measurementMode === 'auto' &&
     hasFreshStableReading &&
     selectedStudentId !== null &&
@@ -603,6 +614,9 @@ export function StudentMeasurementScreen({
 
     try {
       consumeCurrentReading();
+      if (isAutoSave) {
+        setAutoSaveArmed(false);
+      }
 
       const updatedStudents = students.map(student =>
         student.id === savedStudentId
