@@ -101,7 +101,7 @@
 
 #define FW_MAJOR 2
 #define FW_MINOR 2
-#define FW_PATCH 3
+#define FW_PATCH 4
 // Serial number in Device Info. Empty = "SG-" + last 3 bytes of the MAC.
 #define SERIAL_NUMBER ""
 
@@ -186,13 +186,17 @@
 #define HX711_TIMEOUT_MS 1000
 #define DISTANCE_FRESH_MS 1000    // an older distance is no longer used as height
 // After hold the result is refined for this long, then frozen: the held weight
-// becomes the mean of every sample in that time (body sway averages out), and
+// becomes the most frequent value (mode, in WEIGHT_MODE_STEP_KG bins) of every
+// sample in that time, so sway and leaning do not pull it like a mean would, and
 // a new stable height replaces the held one and restarts the period (the head
 // board is often still being adjusted). Later changes (board lifted away,
 // child stepping off) never touch the result.
 #define HOLD_REFINE_MS 5000
 #define HOLD_REFINE_MAX_KG 3.0f   // samples further off are ignored (stepping off, leaning)
 #define HOLD_REFINE_CM 0.5f
+#define WEIGHT_MODE_STEP_KG 0.1f  // mode bin; the held weight is the bin centre
+#define HEIGHT_MODE_STEP_CM 0.5f
+#define WEIGHT_MODE_BINS 64       // +-3.2 kg around the first held value
 
 // ---------------------------------------------------------------------------
 // State
@@ -246,7 +250,9 @@ unsigned long lastMeasuringNotifyMs = 0;
 unsigned long lastHoldNotifyMs = 0;
 unsigned long holdRefineSinceMs = 0;
 bool holdRefining = false;
-double holdWeightSum = 0;  // running mean of the held weight while refining
+// Histogram of the held weight while refining: bin i = holdModeBase + i steps.
+uint16_t holdWeightBins[WEIGHT_MODE_BINS];
+long holdModeBase = 0;
 uint16_t holdWeightSamples = 0;
 unsigned long lastWeightReadyMs = 0;
 float heldWeightKg = NAN;
@@ -292,6 +298,56 @@ static float windowAverage(const float* window, uint8_t count) {
   float sum = 0;
   for (int i = 0; i < count; i++) sum += window[i];
   return sum / count;
+}
+
+// Most frequent value of the window in `step` bins (bin centre). Ties go to
+// the bin closest to the window mean.
+static float windowMode(const float* window, uint8_t count, float step) {
+  if (count == 0) return NAN;
+  float mean = windowAverage(window, count);
+  long bestBin = 0;
+  int bestCount = 0;
+  for (int i = 0; i < count; i++) {
+    long bin = lroundf(window[i] / step);
+    int n = 0;
+    for (int j = 0; j < count; j++) {
+      if (lroundf(window[j] / step) == bin) n++;
+    }
+    if (n > bestCount || (n == bestCount && fabsf(bin * step - mean) < fabsf(bestBin * step - mean))) {
+      bestBin = bin;
+      bestCount = n;
+    }
+  }
+  return bestBin * step;
+}
+
+static void holdModeStart(const float* window, uint8_t count) {
+  memset(holdWeightBins, 0, sizeof(holdWeightBins));
+  holdWeightSamples = 0;
+  holdModeBase = lroundf(windowMode(window, count, WEIGHT_MODE_STEP_KG) / WEIGHT_MODE_STEP_KG) -
+                 WEIGHT_MODE_BINS / 2;
+}
+
+static void holdModeAdd(float kg) {
+  long i = lroundf(kg / WEIGHT_MODE_STEP_KG) - holdModeBase;
+  if (i < 0 || i >= WEIGHT_MODE_BINS || holdWeightBins[i] == UINT16_MAX) return;
+  holdWeightBins[i]++;
+  holdWeightSamples++;
+}
+
+// Most frequent bin so far; ties go to the bin closest to `previous`.
+static float holdModeValue(float previous) {
+  int best = -1;
+  for (int i = 0; i < WEIGHT_MODE_BINS; i++) {
+    if (holdWeightBins[i] == 0) continue;
+    if (best < 0 || holdWeightBins[i] > holdWeightBins[best] ||
+        (holdWeightBins[i] == holdWeightBins[best] &&
+         fabsf((holdModeBase + i) * WEIGHT_MODE_STEP_KG - previous) <
+             fabsf((holdModeBase + best) * WEIGHT_MODE_STEP_KG - previous))) {
+      best = i;
+    }
+  }
+  return best < 0 ? previous : (holdModeBase + best) * WEIGHT_MODE_STEP_KG;
 }
 
 static float pushMedian(float value) {
@@ -1086,12 +1142,13 @@ void loop() {
         enterState(STATE_HOLD);
         holdRefineSinceMs = millis();
         holdRefining = true;
-        heldWeightKg = windowAverage(weightWindow, weightCount);
-        holdWeightSum = (double)heldWeightKg * weightCount;
-        holdWeightSamples = weightCount;
-        heldHeightCm = heightStable ? windowAverage(heightWindow, heightCount) : NAN;
+        holdModeStart(weightWindow, weightCount);
+        for (int i = 0; i < weightCount; i++) holdModeAdd(weightWindow[i]);
+        heldWeightKg = holdModeValue(windowAverage(weightWindow, weightCount));
+        heldHeightCm = heightStable ? windowMode(heightWindow, heightCount, HEIGHT_MODE_STEP_CM) : NAN;
         Serial.printf("hold: %.2f kg, %.1f cm\n", heldWeightKg, heldHeightCm);
-        notifyMeasurement(heldWeightKg, heldHeightCm, true);
+        // Not flagged stable until the refine period ends (see STATE_HOLD).
+        notifyMeasurement(heldWeightKg, heldHeightCm, false);
         lastHoldNotifyMs = millis();
       } else if (millis() - lastMeasuringNotifyMs >= MEASURING_NOTIFY_MS) {
         lastMeasuringNotifyMs = millis();
@@ -1110,21 +1167,21 @@ void loop() {
         holdRefining = false;
         Serial.printf("hold final: %.2f kg (%u samples), %.1f cm\n", heldWeightKg,
                       holdWeightSamples, heldHeightCm);
+        lastHoldNotifyMs = 0;  // send the final result now
       }
       if (holdRefining) {
-        // The repeat below sends the current mean at most 1x/s.
-        if (fabsf(weight - heldWeightKg) <= HOLD_REFINE_MAX_KG && holdWeightSamples < UINT16_MAX) {
-          holdWeightSum += weight;
-          holdWeightSamples++;
-          heldWeightKg = holdWeightSum / holdWeightSamples;
+        // The repeat below sends the current mode at most 1x/s.
+        if (fabsf(weight - heldWeightKg) <= HOLD_REFINE_MAX_KG) {
+          holdModeAdd(weight);
+          heldWeightKg = holdModeValue(heldWeightKg);
         }
         if (newHeight && !isnan(height) && height >= HEIGHT_MIN_CM && height <= HEIGHT_MAX_CM) {
           pushWindow(heightWindow, HEIGHT_WINDOW, heightCount, height);
         }
         if (windowStable(heightWindow, HEIGHT_WINDOW, heightCount, HEIGHT_STABLE_TOL_CM)) {
-          float avg = windowAverage(heightWindow, heightCount);
-          if (isnan(heldHeightCm) || fabsf(avg - heldHeightCm) > HOLD_REFINE_CM) {
-            heldHeightCm = avg;
+          float mode = windowMode(heightWindow, heightCount, HEIGHT_MODE_STEP_CM);
+          if (isnan(heldHeightCm) || fabsf(mode - heldHeightCm) > HOLD_REFINE_CM) {
+            heldHeightCm = mode;
             holdRefineSinceMs = millis();
             Serial.printf("hold update: %.2f kg, %.1f cm\n", heldWeightKg, heldHeightCm);
             lastHoldNotifyMs = 0;  // send the new height now
@@ -1133,8 +1190,10 @@ void loop() {
       }
       if (lastHoldNotifyMs == 0 || millis() - lastHoldNotifyMs >= HOLD_REPEAT_MS) {
         // Repeat the held result at most 1x/s (protocol section 7), so a phone
-        // that connected or subscribed late still receives it.
-        notifyMeasurement(heldWeightKg, heldHeightCm, true);
+        // that connected or subscribed late still receives it. It is flagged
+        // stable only once frozen, so an app saving on the first stable frame
+        // gets the final value, which never changes after that.
+        notifyMeasurement(heldWeightKg, heldHeightCm, !holdRefining);
         lastHoldNotifyMs = millis();
       }
       break;

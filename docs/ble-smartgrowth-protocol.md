@@ -222,6 +222,11 @@ cek tinggi butuh beban ≥ 2 kg di platform (mis. balok acuan yang cukup berat).
   1×/detik. Tinggi stabil baru yang berbeda > 0,5 cm **mengganti** tinggi, langsung dikirim, dan
   memulai ulang 5 s. Setelah itu hasil beku sampai anak turun. Aplikasi memakai frame stabil
   **terakhir**.
+- Firmware 2.2.4: hasil = **nilai paling sering muncul** (modus), bukan rata-rata: berat dalam
+  kelompok 0,1 kg selama 5 s penyempurnaan, tinggi dalam kelompok 0,5 cm dari jendela tinggi.
+  Selama penyempurnaan frame dikirim dengan bit2 = **0** (state tetap "hold"); bit2 = 1 (+
+  indicate `0x2A9D`) baru dikirim setelah hasil beku, lalu diulang 1×/detik dengan nilai yang
+  sama. Jadi frame stabil pertama sudah hasil final dan tidak berubah sampai anak turun.
 - Siklus baru setelah beban turun < 1 kg (anak turun) atau perintah `0x02`.
 - Unit dengan berat + tinggi: kirim frame stabil saat **keduanya** stabil; bila sensor tinggi
   gagal/time-out > 3 s, kirim berat stabil saja (bit1 = 0).
