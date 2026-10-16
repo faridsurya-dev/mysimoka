@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   AppState,
   Linking,
   Pressable,
@@ -176,6 +177,14 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
     calibrationStatusKey,
   );
   const connectedDevice = detectedDevices.find(device => device.isConnected) ?? null;
+  // On-page connecting state (manual connect or background auto-reconnect).
+  const connectingName = deviceSession.connectedDeviceId
+    ? null
+    : busyAction === 'connect' && busyDeviceId
+    ? detectedDevices.find(device => device.id === busyDeviceId)?.name ??
+      deviceSession.reconnectingDeviceName ??
+      'alat'
+    : deviceSession.reconnectingDeviceName;
 
   // Quick tare respects the device's "platform empty" guard so a child on the
   // scale is never zeroed; only technicians may force it (e.g. after assembly).
@@ -407,10 +416,19 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
           {scanMessage && scanMessage !== deviceSession.deviceNotice ? (
             <Text style={styles.scanMessage}>{scanMessage}</Text>
           ) : null}
-          {deviceSession.reconnectingDeviceName && !deviceSession.connectedDeviceId ? (
-            <Text style={styles.scanMessage}>
-              Menyambungkan ulang ke {deviceSession.reconnectingDeviceName}…
-            </Text>
+          {connectingName ? (
+            <View
+              accessibilityLiveRegion="polite"
+              accessibilityRole="progressbar"
+              style={styles.connectingBanner}>
+              <ActivityIndicator color={colors.brand.primary600} size="small" />
+              <View style={styles.connectingText}>
+                <Text style={styles.connectingTitle}>Menghubungkan ke {connectingName}…</Text>
+                <Text style={styles.scanMessage}>
+                  Pastikan alat menyala dan dekat dengan HP. Biasanya beberapa detik.
+                </Text>
+              </View>
+            </View>
           ) : null}
           <View style={styles.autoReconnectRow}>
             <View style={styles.autoReconnectText}>
@@ -524,16 +542,21 @@ export function DeviceManagerScreen({ onBack }: DeviceManagerScreenProps) {
                           busyDeviceId === null &&
                           styles.connectActionPressed,
                       ]}>
-                      <Text
-                        style={[
-                          styles.connectActionLabel,
-                          (!!connectedDevice || busyDeviceId !== null) &&
-                            styles.connectActionLabelDisabled,
-                        ]}>
-                        {busyAction === 'connect' && busyDeviceId === device.id
-                          ? 'Menghubungkan...'
-                          : 'Hubungkan'}
-                      </Text>
+                      <View style={styles.connectActionContent}>
+                        {busyAction === 'connect' && busyDeviceId === device.id ? (
+                          <ActivityIndicator color={colors.text.muted} size="small" />
+                        ) : null}
+                        <Text
+                          style={[
+                            styles.connectActionLabel,
+                            (!!connectedDevice || busyDeviceId !== null) &&
+                              styles.connectActionLabelDisabled,
+                          ]}>
+                          {busyAction === 'connect' && busyDeviceId === device.id
+                            ? 'Menghubungkan...'
+                            : 'Hubungkan'}
+                        </Text>
+                      </View>
                     </Pressable>
                   )}
                 </View>
@@ -760,6 +783,30 @@ const styles = StyleSheet.create({
   scanMessage: {
     ...typography.bodySm,
     color: colors.text.secondary,
+  },
+  connectingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[10],
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[10],
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.brand.primary100,
+    backgroundColor: colors.brand.primary50,
+  },
+  connectingText: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  connectingTitle: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  connectActionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[6],
   },
   autoReconnectRow: {
     flexDirection: 'row',
