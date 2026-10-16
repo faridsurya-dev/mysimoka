@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { OfflineDataBanner, loadSchoolClassrooms, loadSchoolStudents } from '../../features/offline';
 import {
   type ClassroomListItem,
@@ -26,6 +26,8 @@ type StudentListScreenProps = {
   schoolId: string | null;
   onBack: () => void;
   onOpenStudentProfile: (student: DashboardStudentListItem) => void;
+  /** Buka registrasi wajah untuk siswa yang baru ditambahkan (opsional). */
+  onRegisterFace?: (student: DashboardStudentListItem) => void;
 };
 
 const ALL_CLASSES = '__all__';
@@ -34,6 +36,7 @@ export function StudentListScreen({
   schoolId,
   onBack,
   onOpenStudentProfile,
+  onRegisterFace,
 }: StudentListScreenProps) {
   const { isAdmin } = useSchoolRole(schoolId);
   const [query, setQuery] = useState('');
@@ -112,8 +115,16 @@ export function StudentListScreen({
 
   const hasFilter = query.trim().length > 0 || classFilter !== ALL_CLASSES;
 
-  function handleStudentSaved(student: DashboardStudentListItem, message: string) {
+  function handleStudentSaved(
+    student: DashboardStudentListItem,
+    message: string,
+    options?: { scanFace: boolean },
+  ) {
     setIsCreateVisible(false);
+    if (options?.scanFace && onRegisterFace) {
+      onRegisterFace(student);
+      return;
+    }
     setNotice(message);
     setStudents(previous =>
       [student, ...previous.filter(item => item.id !== student.id)].sort((left, right) =>
@@ -258,6 +269,7 @@ export function StudentListScreen({
               : null
           }
           mode="create"
+          offerFaceScan={!!onRegisterFace && Platform.OS !== 'web'}
           onClose={() => setIsCreateVisible(false)}
           onSaved={handleStudentSaved}
           schoolId={schoolId}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Switch, Text, View } from 'react-native';
 import {
   createStudent,
   listClassroomsBySchool,
@@ -21,7 +21,11 @@ type StudentFormDialogProps = {
   mode: 'create' | 'edit';
   schoolId: string | null;
   onClose: () => void;
-  onSaved: (student: DashboardStudentListItem, message: string) => void;
+  onSaved: (
+    student: DashboardStudentListItem,
+    message: string,
+    options?: { scanFace: boolean },
+  ) => void;
   /** Data awal untuk mode edit. */
   student?: StudentDetail | null;
   /** Kelas yang dipilih otomatis (mis. dari halaman detail kelas). */
@@ -37,6 +41,11 @@ type StudentFormDialogProps = {
   lockedClassName?: string;
   /** Nama awal, mis. dari kata kunci pencarian. */
   initialName?: string;
+  /**
+   * Mode tambah: tampilkan pilihan "Pindai wajah setelah disimpan" (opsional).
+   * Pilihan dikirim lewat `onSaved(..., { scanFace })`.
+   */
+  offerFaceScan?: boolean;
 };
 
 type Gender = 'male' | 'female';
@@ -69,6 +78,7 @@ export function StudentFormDialog({
   quick = false,
   lockedClassName,
   initialName,
+  offerFaceScan = false,
 }: StudentFormDialogProps) {
   const [fullName, setFullName] = useState('');
   const [nisn, setNisn] = useState('');
@@ -87,6 +97,7 @@ export function StudentFormDialog({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  const [scanFaceAfterSave, setScanFaceAfterSave] = useState(false);
 
   const classrooms =
     providedClassrooms && providedClassrooms.length > 0
@@ -112,6 +123,7 @@ export function StudentFormDialog({
     setAddress(student?.address ?? '');
     setNotes(student?.notes ?? '');
     setIsActive(student?.isActive === false ? 'inactive' : 'active');
+    setScanFaceAfterSave(false);
     // Hanya saat dialog dibuka; initialName tidak boleh menimpa ketikan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultClassId, student, visible]);
@@ -238,6 +250,7 @@ export function StudentFormDialog({
             notes: notes.trim() || null,
           },
           message,
+          { scanFace: offerFaceScan && scanFaceAfterSave },
         );
         return;
       }
@@ -383,6 +396,21 @@ export function StudentFormDialog({
           />
         </>
       )}
+      {mode === 'create' && offerFaceScan ? (
+        <View style={styles.faceScanRow}>
+          <View style={styles.faceScanText}>
+            <Text style={styles.faceScanLabel}>Pindai wajah setelah disimpan</Text>
+            <Text style={styles.faceScanHint}>
+              Opsional. Kamera registrasi wajah langsung terbuka untuk siswa ini.
+            </Text>
+          </View>
+          <Switch
+            accessibilityLabel="Pindai wajah setelah disimpan"
+            onValueChange={setScanFaceAfterSave}
+            value={scanFaceAfterSave}
+          />
+        </View>
+      ) : null}
       {mode === 'edit' ? (
         <ChoiceField
           label="Status siswa"
@@ -407,5 +435,22 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.feedback.errorText,
     marginTop: -spacing[8],
+  },
+  faceScanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+  },
+  faceScanText: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  faceScanLabel: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
+  faceScanHint: {
+    ...typography.caption,
+    color: colors.text.muted,
   },
 });

@@ -394,6 +394,12 @@ export function RootNavigator() {
   const [studentProfileBackRoute, setStudentProfileBackRoute] = useState<
     'class-detail' | 'student-search-results' | 'student-list'
   >('class-detail');
+  // Registrasi wajah: siswa yang dipilih otomatis (mis. baru ditambahkan) dan
+  // halaman tujuan saat kembali.
+  const [faceRegistrationTarget, setFaceRegistrationTarget] = useState<{
+    student: DashboardStudentListItem | null;
+    backRoute: 'class-detail' | 'student-list';
+  }>({ student: null, backRoute: 'class-detail' });
   const [measurementRoute, setMeasurementRoute] =
     useState<MeasurementRoute>('session-list');
   const [measurementProgram, setMeasurementProgram] =
@@ -496,7 +502,7 @@ export function RootNavigator() {
           setDashboardRoute('class-list');
           return true;
         case 'face-registration':
-          setDashboardRoute('class-detail');
+          setDashboardRoute(faceRegistrationTarget.backRoute);
           return true;
         case 'student-profile':
           setDashboardRoute(studentProfileBackRoute);
@@ -1215,11 +1221,17 @@ export function RootNavigator() {
               setActiveImmunizationDose(null);
               setActiveImmunizationOfficer('Petugas UKS');
             },
-            onOpenFaceRegistrationFromClass: () => {
+            faceRegistrationStudent: faceRegistrationTarget.student,
+            onOpenFaceRegistrationFromClass: student => {
+              setFaceRegistrationTarget({ student: student ?? null, backRoute: 'class-detail' });
+              setDashboardRoute('face-registration');
+            },
+            onOpenFaceRegistrationFromList: student => {
+              setFaceRegistrationTarget({ student, backRoute: 'student-list' });
               setDashboardRoute('face-registration');
             },
             onBackFromFaceRegistration: () => {
-              setDashboardRoute('class-detail');
+              setDashboardRoute(faceRegistrationTarget.backRoute);
             },
             studentSearchKeyword: dashboardStudentSearchKeyword,
             onBackFromStudentProfile: () => setDashboardRoute(studentProfileBackRoute),
@@ -1648,7 +1660,9 @@ type DashboardStackOptions = {
   onOpenRecordingHome: () => void;
   onStartMeasurementFromClass: () => void;
   onStartImmunizationFromStudentProfile: () => void;
-  onOpenFaceRegistrationFromClass: () => void;
+  faceRegistrationStudent: DashboardStudentListItem | null;
+  onOpenFaceRegistrationFromClass: (student?: DashboardStudentListItem) => void;
+  onOpenFaceRegistrationFromList: (student: DashboardStudentListItem) => void;
   onBackFromFaceRegistration: () => void;
   studentSearchKeyword: string;
   onBackFromStudentProfile: () => void;
@@ -1678,7 +1692,9 @@ function renderDashboardStack({
   onOpenRecordingHome,
   onStartMeasurementFromClass,
   onStartImmunizationFromStudentProfile,
+  faceRegistrationStudent,
   onOpenFaceRegistrationFromClass,
+  onOpenFaceRegistrationFromList,
   onBackFromFaceRegistration,
   studentSearchKeyword,
   onBackFromStudentProfile,
@@ -1718,6 +1734,7 @@ function renderDashboardStack({
           schoolId={currentSchoolId}
           onBack={onBackToDashboard}
           onOpenStudentProfile={onOpenStudentFromList}
+          onRegisterFace={onOpenFaceRegistrationFromList}
         />
       );
     case 'teacher-detail':
@@ -1756,6 +1773,7 @@ function renderDashboardStack({
       return (
         <FaceRegistrationScreen
           onBack={onBackFromFaceRegistration}
+          preselectedStudent={faceRegistrationStudent}
           schoolId={currentSchoolId}
         />
       );

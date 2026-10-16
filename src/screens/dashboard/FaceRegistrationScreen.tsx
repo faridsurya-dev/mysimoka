@@ -49,6 +49,8 @@ import { colors, layout, radius, shadows, spacing, typography } from '../../them
 type FaceRegistrationScreenProps = {
   onBack: () => void;
   schoolId: string | null;
+  /** Siswa tujuan (mis. baru ditambahkan); dipasangkan otomatis bila foto berisi satu wajah. */
+  preselectedStudent?: DashboardStudentListItem | null;
 };
 
 type CapturedPhoto = {
@@ -185,7 +187,11 @@ function intersectRect(a: CropRect, b: CropRect): CropRect | null {
   };
 }
 
-export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScreenProps) {
+export function FaceRegistrationScreen({
+  onBack,
+  schoolId,
+  preselectedStudent = null,
+}: FaceRegistrationScreenProps) {
   const insets = useSafeAreaInsets();
   const { hasPermission, requestPermission } = useCameraPermission();
   const [imageSource, setImageSource] = useState<'camera' | 'device'>('camera');
@@ -296,13 +302,18 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
         if (!isMounted) {
           return;
         }
-        setStudents(rows);
+        // Siswa yang baru ditambahkan bisa belum ikut di daftar (cache).
+        setStudents(
+          preselectedStudent && !rows.some(row => row.id === preselectedStudent.id)
+            ? [preselectedStudent, ...rows]
+            : rows,
+        );
       })
       .catch(error => {
         if (!isMounted) {
           return;
         }
-        setStudents([]);
+        setStudents(preselectedStudent ? [preselectedStudent] : []);
         setStudentsError(error instanceof Error ? error.message : 'Gagal memuat daftar siswa.');
       })
       .finally(() => {
@@ -314,7 +325,7 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
     return () => {
       isMounted = false;
     };
-  }, [schoolId]);
+  }, [preselectedStudent, schoolId]);
 
   const isCameraReady =
     imageSource === 'camera' && hasPermission && !!device && isAppActive && !capturedPhoto;
@@ -557,7 +568,10 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
       }
 
       setFaceCrops(crops);
-      setAssignedByCropId({});
+      // Satu wajah + siswa sudah dipilih (mis. baru ditambahkan): pasangkan otomatis.
+      setAssignedByCropId(
+        preselectedStudent && crops.length === 1 ? { [crops[0].id]: preselectedStudent.id } : {},
+      );
       setUploadedByCropId({});
       setUploadingCropId(null);
       setIsUploadingAll(false);
@@ -1016,7 +1030,9 @@ export function FaceRegistrationScreen({ onBack, schoolId }: FaceRegistrationScr
             ) : undefined
           }
           subtitle={
-            imageSource === 'camera'
+            preselectedStudent
+              ? `Tahap 1 dari 2 · Untuk ${preselectedStudent.name}`
+              : imageSource === 'camera'
               ? `Tahap 1 dari 2 · Opsional · Kamera ${cameraFacingLabel.toLowerCase()}`
               : 'Tahap 1 dari 2 · Opsional'
           }

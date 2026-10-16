@@ -48,7 +48,8 @@ type ClassDetailScreenProps = {
   onStartMeasurement: () => void;
   classroom?: ClassroomListItem | null;
   onOpenStudent: (student: DashboardStudentListItem) => void;
-  onOpenFaceRegistration: () => void;
+  /** Tanpa argumen: pilih siswa di layar registrasi; dengan siswa: dipilih otomatis. */
+  onOpenFaceRegistration: (student?: DashboardStudentListItem) => void;
 };
 
 type DetailTab = 'summary' | 'students';
@@ -397,7 +398,7 @@ export function ClassDetailScreen({
               <ActionButton
                 icon="face"
                 label="Mulai Registrasi Wajah"
-                onPress={onOpenFaceRegistration}
+                onPress={() => onOpenFaceRegistration()}
                 variant="secondary"
               />
             ) : null}
@@ -477,8 +478,13 @@ export function ClassDetailScreen({
             defaultClassId={classroom.id}
             mode="create"
             onClose={() => setIsAddStudentVisible(false)}
-            onSaved={(_, message) => {
+            offerFaceScan={Platform.OS !== 'web'}
+            onSaved={(created, message, options) => {
               setIsAddStudentVisible(false);
+              if (options?.scanFace) {
+                onOpenFaceRegistration(created);
+                return;
+              }
               setNotice(message);
               refreshClassroom().catch(() => undefined);
             }}

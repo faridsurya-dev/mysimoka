@@ -7,6 +7,7 @@ import { ActionButton, Card, PageLayout } from './components/ui';
 type FaceRegistrationScreenProps = {
   onBack: () => void;
   schoolId: string | null;
+  preselectedStudent?: unknown;
 };
 
 /**
