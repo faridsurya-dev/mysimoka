@@ -723,6 +723,10 @@ export type SaveStudentMeasurementRecordPayload = {
     | 'height_pose';
   heightCm?: number | null;
   weightKg?: number | null;
+  /** Optional value from a comparison instrument (manual scale), for device validation. */
+  referenceWeightKg?: number | null;
+  /** Optional value from a comparison instrument (stadiometer), for device validation. */
+  referenceHeightCm?: number | null;
   notes?: string | null;
   deviceId?: string | null;
   deviceName?: string | null;
@@ -2948,6 +2952,12 @@ export async function saveStudentMeasurementRecord(
     throw new Error('Sesi atau siswa tidak valid.');
   }
 
+  // Reference (comparison instrument) values are sent only when filled, so
+  // normal saves keep working on a backend without these columns.
+  const referenceWeightKg = readNullableNumber(payload.referenceWeightKg);
+  const referenceHeightCm = readNullableNumber(payload.referenceHeightCm);
+  const hasReference = referenceWeightKg !== null || referenceHeightCm !== null;
+
   const mutation = `
     mutation UpsertStudentMeasurementRecord($object: student_measurement_records_insert_input!) {
       insert_student_measurement_records_one(
@@ -2961,7 +2971,7 @@ export async function saveStudentMeasurementRecord(
             capture_source
             measured_at
             height_cm
-            weight_kg
+            weight_kg${hasReference ? '\n            reference_weight_kg\n            reference_height_cm' : ''}
             notes
             device_id
             device_name
@@ -3006,6 +3016,9 @@ export async function saveStudentMeasurementRecord(
           device_name: payload.deviceName?.trim() || null,
           device_payload: payload.devicePayload ?? {},
           client_record_id: payload.clientRecordId?.trim() || null,
+          ...(hasReference
+            ? { reference_weight_kg: referenceWeightKg, reference_height_cm: referenceHeightCm }
+            : {}),
         },
       },
     }),
@@ -3017,7 +3030,14 @@ export async function saveStudentMeasurementRecord(
     | null;
 
   if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
-    throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan hasil pengukuran.');
+    const message = responseBody.errors[0]?.message || '';
+    if (hasReference && /reference_(weight_kg|height_cm)/i.test(message)) {
+      throw new Error(
+        'Server belum mendukung data pembanding (berat/tinggi pembanding) atau izinnya belum aktif. ' +
+          'Hubungi admin untuk memperbarui server, atau kosongkan data pembanding lalu simpan ulang.',
+      );
+    }
+    throw new Error(message || 'Gagal menyimpan hasil pengukuran.');
   }
 
   const record = asObject(responseBody?.data?.insert_student_measurement_records_one);

@@ -124,6 +124,30 @@ function formatReading(value: number | null) {
   return value === null ? null : value.toFixed(1).replace(/\.0$/, '');
 }
 
+// "Data pembanding" section open/closed, kept while the app runs so testers
+// comparing against a manual scale don't re-open it for every student.
+let referenceSectionExpandedMemory = false;
+
+/**
+ * Difference of the measured value against the comparison instrument, e.g.
+ * "Selisih +0,3 kg"; null when either value is missing.
+ */
+export function describeReferenceDifference(
+  measured: string,
+  reference: string,
+  unit: string,
+): string | null {
+  const measuredNumber = parseMeasurementNumber(measured);
+  const referenceNumber = parseMeasurementNumber(reference);
+  if (measuredNumber === null || referenceNumber === null) {
+    return null;
+  }
+  const diff = Math.round((measuredNumber - referenceNumber) * 10) / 10;
+  const sign = diff > 0 ? '+' : diff < 0 ? '−' : '±';
+  const text = Math.abs(diff).toFixed(1).replace('.', ',');
+  return `Selisih ${sign}${text} ${unit}`;
+}
+
 function formatSessionDate(value?: string) {
   const date = value ? new Date(value) : new Date();
   if (Number.isNaN(date.getTime())) {
@@ -192,6 +216,23 @@ export function StudentMeasurementScreen({
   );
   const [heightValue, setHeightValue] = useState('');
   const [weightValue, setWeightValue] = useState('');
+  // Optional values from a comparison instrument (validation testing). Always
+  // per student: cleared whenever the form switches/closes, like height/weight.
+  const [referenceHeightValue, setReferenceHeightValue] = useState('');
+  const [referenceWeightValue, setReferenceWeightValue] = useState('');
+  const [isReferenceExpanded, setIsReferenceExpanded] = useState(
+    referenceSectionExpandedMemory,
+  );
+  const toggleReferenceExpanded = () => {
+    setIsReferenceExpanded(value => {
+      referenceSectionExpandedMemory = !value;
+      return !value;
+    });
+  };
+  const resetReferenceValues = () => {
+    setReferenceHeightValue('');
+    setReferenceWeightValue('');
+  };
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [studentLoadError, setStudentLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -460,6 +501,8 @@ export function StudentMeasurementScreen({
       const student = students.find(item => item.id === studentId);
       setSelectedStudentId(studentId);
       setSaveError(null);
+      setReferenceHeightValue('');
+      setReferenceWeightValue('');
       // With auto-save, only a measurement started after the form opened may be
       // saved for this student; an earlier result on the device is ignored.
       const useDeviceReading = measurementMode === 'auto' && !autoSave;
@@ -508,6 +551,7 @@ export function StudentMeasurementScreen({
     setSaveError(null);
     setHeightValue(nextStudent.heightCm ?? '');
     setWeightValue(nextStudent.weightKg ?? '');
+    resetReferenceValues();
   };
 
   const closeMeasurementForm = () => {
@@ -516,10 +560,15 @@ export function StudentMeasurementScreen({
     setSelectedStudentId(null);
     setHeightValue('');
     setWeightValue('');
+    resetReferenceValues();
     setSaveError(null);
   };
 
-  /** `values` overrides the form (auto-save runs before the fields re-render). */
+  /**
+   * `values` overrides the form (auto-save runs before the fields re-render).
+   * Reference values are always read from the form: whatever the operator
+   * typed before an auto-save goes with it, empty ones never hold it back.
+   */
   const saveAndContinue = async (values?: {
     height: string;
     weight: string;
@@ -566,6 +615,28 @@ export function StudentMeasurementScreen({
       );
       return;
     }
+    const referenceHeightNumber = parseMeasurementNumber(referenceHeightValue);
+    const referenceWeightNumber = parseMeasurementNumber(referenceWeightValue);
+    if (
+      referenceHeightNumber !== null &&
+      (referenceHeightNumber < HEIGHT_RANGE.min ||
+        referenceHeightNumber > HEIGHT_RANGE.max)
+    ) {
+      failSave(
+        `Tinggi pembanding harus di antara ${HEIGHT_RANGE.min}–${HEIGHT_RANGE.max} cm (atau kosongkan).`,
+      );
+      return;
+    }
+    if (
+      referenceWeightNumber !== null &&
+      (referenceWeightNumber < WEIGHT_RANGE.min ||
+        referenceWeightNumber > WEIGHT_RANGE.max)
+    ) {
+      failSave(
+        `Berat pembanding harus di antara ${WEIGHT_RANGE.min}–${WEIGHT_RANGE.max} kg (atau kosongkan).`,
+      );
+      return;
+    }
 
     const isAuto = measurementMode === 'auto' && isScaleConnected;
     const isRemeasure = describePreviousMeasurement(selectedStudent) !== null;
@@ -583,6 +654,8 @@ export function StudentMeasurementScreen({
       captureSource: isAuto ? 'device_ble' : 'manual_form',
       heightCm: heightNumber,
       weightKg: weightNumber,
+      referenceHeightCm: referenceHeightNumber,
+      referenceWeightKg: referenceWeightNumber,
       deviceId: isAuto ? deviceSession.connectedDeviceId : null,
       deviceName: isAuto ? deviceSession.connectedDeviceName : null,
       devicePayload: isAuto
@@ -692,6 +765,7 @@ export function StudentMeasurementScreen({
         setSelectedStudentId(nextPending.id);
         setHeightValue(nextPending.heightCm ?? '');
         setWeightValue(nextPending.weightKg ?? '');
+        resetReferenceValues();
       } else {
         closeMeasurementForm();
       }
@@ -1094,6 +1168,62 @@ export function StudentMeasurementScreen({
                 kg.
               </Text>
 
+              <View style={styles.referenceCard}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: isReferenceExpanded }}
+                  accessibilityLabel="Data pembanding (opsional)"
+                  onPress={toggleReferenceExpanded}
+                  style={styles.referenceToggle}
+                >
+                  <View style={styles.autoDeviceTextBlock}>
+                    <Text style={styles.autoDeviceTitle}>
+                      Data pembanding (opsional)
+                    </Text>
+                    <Text style={styles.autoDeviceDescription}>
+                      {isReferenceExpanded
+                        ? 'Hasil alat pembanding (timbangan/meteran manual), ikut tersimpan bersama data siswa ini.'
+                        : referenceHeightValue || referenceWeightValue
+                        ? 'Terisi — ketuk untuk melihat.'
+                        : 'Untuk uji alat: catat hasil timbangan/meteran manual.'}
+                    </Text>
+                  </View>
+                  <Text style={styles.referenceChevron}>
+                    {isReferenceExpanded ? '▲' : '▼'}
+                  </Text>
+                </Pressable>
+                {isReferenceExpanded ? (
+                  <View style={styles.referenceFields}>
+                    <ReferenceField
+                      label="Tinggi pembanding"
+                      unit="cm"
+                      value={referenceHeightValue}
+                      onChangeText={value =>
+                        setReferenceHeightValue(sanitizeDecimalInput(value))
+                      }
+                      difference={describeReferenceDifference(
+                        heightValue,
+                        referenceHeightValue,
+                        'cm',
+                      )}
+                    />
+                    <ReferenceField
+                      label="Berat pembanding"
+                      unit="kg"
+                      value={referenceWeightValue}
+                      onChangeText={value =>
+                        setReferenceWeightValue(sanitizeDecimalInput(value))
+                      }
+                      difference={describeReferenceDifference(
+                        weightValue,
+                        referenceWeightValue,
+                        'kg',
+                      )}
+                    />
+                  </View>
+                ) : null}
+              </View>
+
               {saveError ? (
                 <InlineAlert tone="error" message={saveError} />
               ) : null}
@@ -1231,6 +1361,42 @@ function MeasurementField({
         value={value}
       />
       <Text style={styles.fieldUnit}>{unit}</Text>
+    </View>
+  );
+}
+
+type ReferenceFieldProps = MeasurementFieldProps & {
+  difference: string | null;
+};
+
+function ReferenceField({
+  label,
+  unit,
+  value,
+  onChangeText,
+  difference,
+}: ReferenceFieldProps) {
+  return (
+    <View style={styles.referenceField}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.referenceInputRow}>
+        <TextInput
+          accessibilityLabel={`${label} (${unit})`}
+          inputMode="decimal"
+          keyboardType="decimal-pad"
+          maxLength={5}
+          onChangeText={onChangeText}
+          placeholder="—"
+          placeholderTextColor={colors.text.muted}
+          selectTextOnFocus
+          style={styles.referenceInput}
+          value={value}
+        />
+        <Text style={styles.fieldUnit}>{unit}</Text>
+      </View>
+      <Text style={styles.referenceDifference}>
+        {difference ?? ' '}
+      </Text>
     </View>
   );
 }
@@ -1541,6 +1707,56 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.text.muted,
     textAlign: 'center',
+  },
+  referenceCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.subtle,
+    backgroundColor: colors.surface.card,
+  },
+  referenceToggle: {
+    minHeight: 48,
+    padding: spacing[12],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+  },
+  referenceChevron: {
+    ...typography.labelMd,
+    color: colors.text.secondary,
+  },
+  referenceFields: {
+    flexDirection: 'row',
+    gap: spacing[12],
+    paddingHorizontal: spacing[12],
+    paddingBottom: spacing[12],
+  },
+  referenceField: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing[4],
+  },
+  referenceInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[6],
+  },
+  referenceInput: {
+    minWidth: 88,
+    minHeight: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.strong,
+    backgroundColor: colors.surface.primary,
+    paddingHorizontal: spacing[8],
+    textAlign: 'center',
+    fontSize: 22,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  referenceDifference: {
+    ...typography.caption,
+    color: colors.text.secondary,
   },
   studentNavActions: {
     flexDirection: 'row',
