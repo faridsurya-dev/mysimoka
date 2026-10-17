@@ -4,6 +4,10 @@ Kalibrasi tersimpan di NVS ESP32. Flash `smartgrowth.ino.merged.bin` menghapus N
 default), jadi untuk update program pakai `smartgrowth.ino.bin` saja di alamat `0x10000`, atau
 masukkan ulang nilai di bawah lewat Serial (`c <kg>` / `h <cm>`).
 
+Firmware 2.3+ (penstabil sensor): faktor/offset di bawah tetap dipakai selama belum ada titik
+latih. Titik latih (regresi linier) juga tersimpan di NVS (`wn`/`wpts`, `hn`/`hpts`) dan bisa
+dilihat di aplikasi atau Serial `l`; update lewat `app.bin` di `0x10000` mempertahankannya.
+
 ## SG-14F13A (prototipe, PCB Esp32_Sensorjarak)
 
 Tanggal: 2026-10-11, dikalibrasi di firmware 2.2.0, terpasang firmware 2.2.3 (tag `firmware-v2.2.3`).

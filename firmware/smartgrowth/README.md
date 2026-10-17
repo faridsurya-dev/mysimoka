@@ -33,10 +33,31 @@ Nilai tersimpan di flash (NVS), tetap ada setelah alat mati.
 | Perintah | Fungsi |
 | --- | --- |
 | `t` | tare, platform kosong |
-| `c 10.00` | kalibrasi berat: taruh beban acuan 10,00 kg dulu |
-| `h 100.0` | kalibrasi tinggi: balok acuan 100,0 cm + papan kepala di atasnya |
-| `r` | kembalikan kalibrasi ke default |
-| `i` | status (offset, faktor, sensor, bacaan terakhir) |
+| `pw 46.25` | tambah titik latih berat: beban acuan 46,25 kg di timbangan (fw 2.3+) |
+| `ph 170.0` | tambah titik latih tinggi: tinggi acuan 170,0 cm di bawah papan kepala (fw 2.3+) |
+| `l` | daftar titik + model (rumus, RMSE, selisih tiap titik) |
+| `xw 2` / `xw *` | hapus titik berat ke-2 / semua titik berat (`xh` untuk tinggi) |
+| `c 10.00` | kalibrasi berat 1 titik: taruh beban acuan 10,00 kg dulu (mengganti semua titik berat) |
+| `h 100.0` | kalibrasi tinggi 1 titik: balok acuan 100,0 cm + papan kepala di atasnya |
+| `r` | kembalikan kalibrasi ke default (titik ikut terhapus) |
+| `i` | status (model, jumlah titik, sensor, bacaan terakhir) |
+
+### Penstabil sensor (firmware 2.3+, regresi linier)
+
+Berat dan tinggi tidak lagi memakai satu faktor/offset tetap. Alat menyimpan titik latih
+(nilai sensor + nilai acuan dari timbangan/meteran terkalibrasi, maks. 10 per jenis) dan
+menghitung sendiri rumus koreksi dengan regresi linier (least squares) plus galatnya (RMSE):
+`kg = slope × (raw − zero) + intercept`, `cm = slope × jarak + intercept`. Bacaan tetap
+disaring dulu (median, jendela stabil, modus 5 detik) seperti 2.2.4.
+
+- Tanpa titik: nilai kalibrasi lama (faktor/offset dari `c`/`h` atau firmware < 2.3) tetap
+  dipakai, jadi update firmware tidak mengubah hasil ukur sampai titik pertama ditambah.
+- Regresi butuh ≥ 2 titik yang berjauhan (berat ≥ 10 kg, tinggi ≥ 20 cm). Kurang dari itu:
+  berat lewat titik nol, tinggi hanya offset. Regresi berat selalu ikut memakai titik nol
+  (tare) sebagai jangkar, supaya titik dari orang dewasa saja tidak membuat berat anak meleset.
+- Disarankan 3–5 titik merata, mis. 10, 30, 60 kg dan 80, 120, 160 cm.
+- Titik ditambah/dihapus dari aplikasi (Mode teknisi → Cek akurasi & kalibrasi) lewat BLE:
+  melatih ulang tidak perlu kabel USB. Model + titik: characteristic `519e0007` (protokol §6c).
 
 ### Kalibrasi dari aplikasi (firmware 2.1+, BLE)
 
@@ -52,6 +73,9 @@ penyesuaian alat opsional, lalu cek ulang. Semua cek dan perintah kalibrasi terc
 | `20` + float32 LE kg | kalibrasi berat, mis. 10 kg = `20 00 00 20 41` |
 | `21` + float32 LE cm | kalibrasi tinggi |
 | `22 A5` | reset kalibrasi ke default |
+| `23` + float32 LE kg | tambah titik latih berat (fw 2.3+) |
+| `24` + float32 LE cm | tambah titik latih tinggi (fw 2.3+) |
+| `25` + u8 jenis + u8 indeks | hapus titik (jenis 1 berat / 2 tinggi, indeks `FF` = semua) (fw 2.3+) |
 
 Hasil + nilai kalibrasi aktif: characteristic Calibration `519e0006-59fe-44b5-828f-34822e2361a9`
 (read + notify, 20 byte), detail di protokol §6b. Perintah Serial di atas tetap jalan dan ikut

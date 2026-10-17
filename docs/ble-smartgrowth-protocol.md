@@ -62,6 +62,7 @@ Kirim **hanya** saat berat stabil.
 | Control | `519e0004-59fe-44b5-828f-34822e2361a9` | Write (with response) |
 | Status (tambahan, opsional) | `519e0005-59fe-44b5-828f-34822e2361a9` | Read + Notify |
 | Calibration (tambahan, firmware ≥ 2.1) | `519e0006-59fe-44b5-828f-34822e2361a9` | Read + Notify |
+| Model penstabil sensor (tambahan, firmware ≥ 2.3) | `519e0007-59fe-44b5-828f-34822e2361a9` | Read |
 
 UUID ini tetap (sudah dipakai aplikasi). Jangan diubah tanpa menaikkan versi protokol.
 
@@ -125,11 +126,16 @@ Format: `cmd u8` + parameter (opsional). Perintah tak dikenal diabaikan (tetap A
 | `0x02` | Start measurement | — | reset status stabil, mulai siklus ukur baru |
 | `0x03` | Stop measurement | — | berhenti mengirim frame "mengukur" |
 | `0x10` | Set unit | cadangan | belum dipakai; unit protokol selalu kg/cm |
-| `0x20` | Kalibrasi berat | `float32` LE: berat acuan kg (0 < kg ≤ 200) | `faktor = (raw − zero) / kg`, disimpan di flash (fw ≥ 2.1) |
-| `0x21` | Kalibrasi tinggi | `float32` LE: tinggi acuan cm (0 < cm ≤ 250) | rata-rata 20 jarak → offset tinggi, disimpan (fw ≥ 2.1) |
-| `0x22` | Reset kalibrasi | `u8` `0xA5` (konfirmasi) | kembali ke nilai bawaan; tanpa `0xA5` ditolak (fw ≥ 2.1) |
+| `0x20` | Kalibrasi berat | `float32` LE: berat acuan kg (0 < kg ≤ 200) | `faktor = (raw − zero) / kg`, disimpan di flash (fw ≥ 2.1). fw ≥ 2.3: kalibrasi 1 titik = semua titik berat diganti titik ini |
+| `0x21` | Kalibrasi tinggi | `float32` LE: tinggi acuan cm (0 < cm ≤ 250) | rata-rata 20 jarak → offset tinggi, disimpan (fw ≥ 2.1). fw ≥ 2.3: semua titik tinggi diganti titik ini |
+| `0x22` | Reset kalibrasi | `u8` `0xA5` (konfirmasi) | kembali ke nilai bawaan; tanpa `0xA5` ditolak (fw ≥ 2.1). fw ≥ 2.3: semua titik ikut dihapus |
+| `0x23` | Tambah titik berat | `float32` LE: berat acuan kg | rata-rata 20 raw HX711 → titik (raw − zero, kg), model dihitung ulang (fw ≥ 2.3, §6c) |
+| `0x24` | Tambah titik tinggi | `float32` LE: tinggi acuan cm | rata-rata 20 jarak → titik (jarak, cm), model dihitung ulang (fw ≥ 2.3) |
+| `0x25` | Hapus titik | `u8` jenis (1 berat, 2 tinggi), `u8` indeks (`0xFF` = semua jenis itu) | model dihitung ulang (fw ≥ 2.3) |
 
-Contoh: kalibrasi berat 10,00 kg = `20 00 00 20 41`; reset = `22 A5`.
+Contoh: kalibrasi berat 10,00 kg = `20 00 00 20 41`; reset = `22 A5`; tambah titik berat
+46,25 kg = `23 00 00 39 42`; hapus titik berat ke-2 (indeks 1) = `25 01 01`; hapus semua titik
+tinggi = `25 02 FF`.
 
 Perintah tare paksa / `0x20`–`0x22` dikerjakan di loop (bisa ~2–5 detik, selalu time-out bila
 sensor tidak ada) dan hasilnya dilaporkan di characteristic Calibration (§6b). Satu perintah
@@ -196,10 +202,51 @@ little-endian. Notify saat perintah mulai (flag busy) dan saat selesai (`seq` na
 | `0x06` | tidak ada sensor tinggi |
 | `0x07` | busy: perintah sebelumnya masih berjalan |
 | `0x08` | perintah tidak dikenal |
+| `0x09` | titik penuh (maks. 10 per jenis), hapus titik dulu (fw ≥ 2.3) |
 | `0xFF` | belum ada perintah sejak boot |
+
+fw ≥ 2.3: faktor (9–12) = `1 / slope` model berat, offset tinggi (13–16) = intercept model tinggi
+(nilai efektif untuk pembaca lama; model lengkap di §6c).
 
 Aplikasi: tulis perintah ke Control, tunggu notify dengan `seq` berbeda, busy = 0 dan opcode
 sama (time-out 15 detik, lalu satu kali baca).
+
+## 6c. Characteristic Model penstabil sensor (read, tambahan, firmware ≥ 2.3)
+
+Algoritma penstabil sensor: setiap bacaan disaring (median 5, jendela stabil, modus 5 detik),
+lalu dikoreksi dengan model **regresi linier** yang dilatih dari titik acuan (nilai sensor +
+nilai acuan dari timbangan/meteran terkalibrasi), bukan satu faktor tetap:
+
+- berat: `kg = slope × (raw − zero) + intercept`
+- tinggi: `cm = slope × jarak + intercept`
+
+Pelatihan (least squares) dan evaluasi galat (RMSE) dilakukan di ESP32 setiap titik ditambah /
+dihapus (Control `0x23`–`0x25`, dari aplikasi lewat BLE: tanpa kabel USB). Titik disimpan di
+flash (maks. 10 per jenis). Jenis model:
+
+| Tipe | Kapan | Rumus |
+| --- | --- | --- |
+| 0 default | belum ada titik | faktor/offset tersimpan (kalibrasi 1 titik lama, juga firmware < 2.3) |
+| 1 single | 1 titik, atau acuan terlalu rapat (berat < 10 kg, tinggi < 20 cm), atau slope tinggi di luar 0,8–1,2 | berat: lewat titik nol (slope = Σxy/Σx²); tinggi: slope fisik ±1, offset = rata-rata |
+| 2 regression | ≥ 2 titik dengan sebaran cukup | slope + intercept least squares; berat: titik nol tare (0 hitungan = 0 kg) ikut sebagai jangkar supaya rentang ringan (anak) tidak melenceng bila titik hanya dari beban berat |
+
+Isi (little-endian, ≤ 193 byte; dibaca dengan long read, tidak di-notify. Aplikasi membaca
+ulang setelah notify §6b):
+
+| Offset | Tipe | Field |
+| --- | --- | --- |
+| 0 | u8 | versi (= `0x01`) |
+| 1 | u8 | tipe model berat (0/1/2) |
+| 2 | u8 | jumlah titik berat |
+| 3 | u8 | tipe model tinggi |
+| 4 | u8 | jumlah titik tinggi |
+| 5–8, 9–12, 13–16 | f32 | berat: slope (kg per hitungan), intercept (kg), RMSE (kg; NaN tanpa titik) |
+| 17–20, 21–24, 25–28 | f32 | tinggi: slope, intercept (cm), RMSE (cm) |
+| 29–32 | i32 | zero offset (tare sekarang) |
+| 33.. | 8 byte × n | titik berat: `i32` hitungan (raw − zero saat titik diambil), `f32` acuan kg |
+| setelahnya | 8 byte × n | titik tinggi: `f32` jarak cm, `f32` acuan cm |
+
+Serial: `pw <kg>` / `ph <cm>` tambah titik, `l` daftar titik + model, `xw <i|*>` / `xh <i|*>` hapus.
 
 ### Cek akurasi (tanpa perubahan firmware)
 

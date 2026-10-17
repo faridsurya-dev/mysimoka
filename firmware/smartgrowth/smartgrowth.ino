@@ -17,6 +17,15 @@
  *   - calibration can also be done from the app over BLE (Control 0x01/0x20/
  *     0x21/0x22, result on the Calibration characteristic 519e0006)
  *
+ * Sensor stabiliser (2.3.0): weight and height are no longer one fixed factor /
+ * offset. Calibration points (sensor value + reference value from a
+ * calibrated scale / tape) are stored in flash, a linear regression
+ * (least squares) is fitted on them and its error (RMSE) is kept; every
+ * measurement is filtered (median, stability window, mode) and then corrected
+ * by that model. Points are added and removed from the app over BLE (Control
+ * 0x23/0x24/0x25, model + points on the Model characteristic 519e0007), so
+ * retraining needs no USB cable.
+ *
  * Board: "ESP32 Dev Module" (ESP32 DevKit V1, ESP32-WROOM-32).
  * Libraries (Arduino Library Manager):
  *   - NimBLE-Arduino (h2zero) 2.x
@@ -26,9 +35,13 @@
  *
  * Serial monitor (115200 baud, line ending "Newline"):
  *   t            tare (platform empty)
- *   c 10.00      weight calibration with a 10.00 kg reference on the platform
- *   h 100.0      height calibration with a 100.0 cm reference block
- *   r            reset calibration to the defaults below
+ *   pw 46.25     add a weight point: 46.25 kg reference on the platform
+ *   ph 170.0     add a height point: 170.0 cm reference under the head board
+ *   l            list points and models
+ *   xw 2 / xw *  delete weight point 2 / all weight points (xh for height)
+ *   c 10.00      single-point weight calibration (replaces all weight points)
+ *   h 100.0      single-point height calibration (replaces all height points)
+ *   r            reset calibration (and all points) to the defaults below
  *   i            print status
  * The same operations are available over BLE (Control characteristic), see
  * firmware/smartgrowth/README.md and docs/ble-smartgrowth-protocol.md.
@@ -100,8 +113,8 @@
 // ---------------------------------------------------------------------------
 
 #define FW_MAJOR 2
-#define FW_MINOR 2
-#define FW_PATCH 4
+#define FW_MINOR 3
+#define FW_PATCH 0
 // Serial number in Device Info. Empty = "SG-" + last 3 bytes of the MAC.
 #define SERIAL_NUMBER ""
 
@@ -116,6 +129,7 @@
 #define SG_CONTROL_UUID "519e0004-59fe-44b5-828f-34822e2361a9"
 #define SG_STATUS_UUID "519e0005-59fe-44b5-828f-34822e2361a9"
 #define SG_CALIBRATION_UUID "519e0006-59fe-44b5-828f-34822e2361a9"
+#define SG_MODEL_UUID "519e0007-59fe-44b5-828f-34822e2361a9"
 
 // Status characteristic (read + notify), additive to protocol v1.
 #define STATUS_VERSION 1
@@ -135,9 +149,12 @@
 #define CMD_TARE 0x01        // optional param u8: 0x01 = force (skip "platform empty" check)
 #define CMD_START 0x02
 #define CMD_STOP 0x03
-#define CMD_CAL_WEIGHT 0x20  // param float32 LE: reference mass in kg (0 < kg <= 200)
-#define CMD_CAL_HEIGHT 0x21  // param float32 LE: reference height in cm (0 < cm <= 250)
-#define CMD_CAL_RESET 0x22   // param u8 0xA5 (confirm): restore default calibration
+#define CMD_CAL_WEIGHT 0x20  // param float32 LE: reference mass in kg (0 < kg <= 200); replaces all weight points
+#define CMD_CAL_HEIGHT 0x21  // param float32 LE: reference height in cm (0 < cm <= 250); replaces all height points
+#define CMD_CAL_RESET 0x22   // param u8 0xA5 (confirm): restore default calibration, delete all points
+#define CMD_CAL_ADD_WEIGHT 0x23    // param float32 LE kg: add a weight point, refit
+#define CMD_CAL_ADD_HEIGHT 0x24    // param float32 LE cm: add a height point, refit
+#define CMD_CAL_DELETE_POINT 0x25  // param u8 kind (1 weight, 2 height), u8 index (0xFF = all of that kind)
 
 #define TARE_FORCE 0x01
 #define CAL_RESET_CONFIRM 0xA5
@@ -164,7 +181,37 @@
 #define CAL_ERR_NO_HEIGHT_SENSOR 0x06
 #define CAL_ERR_BUSY 0x07           // another calibration command is still running
 #define CAL_ERR_UNKNOWN 0x08
+#define CAL_ERR_FULL 0x09           // all point slots are used, delete one first
 #define CAL_NONE 0xFF               // no command since boot
+
+// Sensor stabiliser model (Model characteristic, read; refreshed after every
+// calibration command, whose completion is notified on the Calibration
+// characteristic). Little-endian:
+//   [0] version (=1)
+//   [1] weight model type | [2] weight point count
+//   [3] height model type | [4] height point count
+//   [5-8] weight slope f32 (kg per HX711 count) | [9-12] weight intercept f32 kg
+//   [13-16] weight RMSE f32 kg (NaN without points)
+//   [17-20] height slope f32 (cm per cm distance) | [21-24] height intercept f32 cm
+//   [25-28] height RMSE f32 cm | [29-32] zero offset i32 (current tare)
+//   then per weight point: counts i32 (raw - zero) | reference kg f32
+//   then per height point: distance cm f32 | reference cm f32
+#define MODEL_VERSION 1
+#define MODEL_DEFAULT 0     // no points: factory factor / saved single-point values
+#define MODEL_SINGLE 1      // points too close together: fixed slope, offset fitted
+#define MODEL_REGRESSION 2  // least squares slope + intercept
+#define MAX_CAL_POINTS 10
+#define POINT_KIND_WEIGHT 1
+#define POINT_KIND_HEIGHT 2
+#define POINT_INDEX_ALL 0xFF
+// A regression needs references at least this far apart; closer points only
+// fix the offset (a slope from two near-equal loads is mostly noise).
+#define WEIGHT_MIN_SPAN_KG 10.0f
+#define HEIGHT_MIN_SPAN_CM 20.0f
+// A height slope outside this range means a bad point (the distance sensor is
+// linear, its scale error is a few %); the single model is used instead.
+#define HEIGHT_SLOPE_MIN 0.8f
+#define HEIGHT_SLOPE_MAX 1.2f
 
 #define WEIGHT_MIN_KG 2.0f
 #define WEIGHT_MAX_KG 200.0f
@@ -214,15 +261,40 @@ HeightSource heightSource = HEIGHT_NONE;
 long zeroOffset = DEFAULT_ZERO_OFFSET;
 float calFactor = DEFAULT_CAL_FACTOR;
 float heightOffsetCm = DEFAULT_HEIGHT_OFFSET_CM;
-bool weightCalibrated = false;
+bool factorCalibrated = false;  // calFactor set by a single-point calibration
+bool offsetCalibrated = false;  // heightOffsetCm set by a single-point calibration
+bool weightCalibrated = false;  // factor or points: the weight is calibrated
 bool heightCalibrated = false;
 bool zeroSet = false;
 unsigned long lastDistanceMs = 0;
+
+// Training points of the sensor stabiliser (saved in flash).
+struct WeightPoint {
+  int32_t counts;  // HX711 raw minus the tare at the time of the point
+  float referenceKg;
+};
+struct HeightPoint {
+  float distanceCm;
+  float referenceCm;
+};
+struct LinearModel {
+  uint8_t type;
+  float slope;
+  float intercept;
+  float rmse;
+};
+WeightPoint weightPoints[MAX_CAL_POINTS];
+uint8_t weightPointCount = 0;
+HeightPoint heightPoints[MAX_CAL_POINTS];
+uint8_t heightPointCount = 0;
+LinearModel weightModel = {MODEL_DEFAULT, 1.0f / DEFAULT_CAL_FACTOR, 0, NAN};
+LinearModel heightModel = {MODEL_DEFAULT, -1.0f, DEFAULT_HEIGHT_OFFSET_CM, NAN};
 
 NimBLECharacteristic* weightMeasurementChar = nullptr;  // 0x2A9D
 NimBLECharacteristic* sgMeasurementChar = nullptr;
 NimBLECharacteristic* sgStatusChar = nullptr;
 NimBLECharacteristic* sgCalibrationChar = nullptr;
+NimBLECharacteristic* sgModelChar = nullptr;
 
 // Calibration command handed from the BLE task to loop() (one at a time).
 static portMUX_TYPE calCmdMux = portMUX_INITIALIZER_UNLOCKED;
@@ -389,16 +461,134 @@ static void enterState(State next) {
 // Calibration storage
 // ---------------------------------------------------------------------------
 
+// Height = slope * distance + intercept; a down-facing sensor sees a shorter
+// distance for a taller child, so the physical slope is -1 (up-facing: +1).
+#if HEIGHT_MOUNT == HEIGHT_MOUNT_DOWN
+#define HEIGHT_MOUNT_SLOPE -1.0f
+#else
+#define HEIGHT_MOUNT_SLOPE 1.0f
+#endif
+
+// Least squares y = slope * x + intercept. false when x has no spread.
+static bool fitLine(const double* x, const double* y, uint8_t n, double& slope, double& intercept) {
+  if (n < 2) return false;
+  double mx = 0, my = 0;
+  for (int i = 0; i < n; i++) { mx += x[i]; my += y[i]; }
+  mx /= n;
+  my /= n;
+  double sxx = 0, sxy = 0;
+  for (int i = 0; i < n; i++) {
+    sxx += (x[i] - mx) * (x[i] - mx);
+    sxy += (x[i] - mx) * (y[i] - my);
+  }
+  if (sxx <= 0) return false;
+  slope = sxy / sxx;
+  intercept = my - slope * mx;
+  return true;
+}
+
+// Root mean square of (prediction - reference); NAN without points.
+static float fitRmse(const double* x, const double* y, uint8_t n, double slope, double intercept) {
+  if (n == 0) return NAN;
+  double sum = 0;
+  for (int i = 0; i < n; i++) {
+    double e = slope * x[i] + intercept - y[i];
+    sum += e * e;
+  }
+  return (float)sqrt(sum / n);
+}
+
+static float referenceSpan(const double* y, uint8_t n) {
+  if (n == 0) return 0;
+  double lo = y[0], hi = y[0];
+  for (int i = 1; i < n; i++) { lo = min(lo, y[i]); hi = max(hi, y[i]); }
+  return (float)(hi - lo);
+}
+
+// Weight: kg = slope * (raw - zero) + intercept. Without points the saved
+// single factor is used (also the value from firmware before 2.3.0).
+// The tare point (0 counts = 0 kg, true by definition of the tare) is part of
+// the regression as an anchor: without it, points only from heavy loads (e.g.
+// adults 46-92 kg) let the line drift at the light end where children are
+// (10 kg read as 9.5 in a test with real data; with the anchor 9.9).
+static void rebuildWeightModel() {
+  uint8_t n = weightPointCount;
+  double x[MAX_CAL_POINTS + 1], y[MAX_CAL_POINTS + 1];
+  for (int i = 0; i < n; i++) {
+    x[i] = weightPoints[i].counts;
+    y[i] = weightPoints[i].referenceKg;
+  }
+  x[n] = 0;  // tare anchor, only used by the regression
+  y[n] = 0;
+  LinearModel m = {MODEL_DEFAULT, 1.0f / calFactor, 0, NAN};
+  // Through the tare point (0 counts = 0 kg): slope = sum(xy) / sum(xx).
+  double sxx = 0, sxy = 0;
+  for (int i = 0; i < n; i++) { sxx += x[i] * x[i]; sxy += x[i] * y[i]; }
+  double originSlope = sxx > 0 ? sxy / sxx : 0;
+  double slope, intercept;
+  if (n >= 2 && referenceSpan(y, n) >= WEIGHT_MIN_SPAN_KG && fitLine(x, y, n + 1, slope, intercept) &&
+      slope * originSlope > 0) {
+    // RMSE over the real points only (what the app shows per point).
+    m = {MODEL_REGRESSION, (float)slope, (float)intercept, fitRmse(x, y, n, slope, intercept)};
+  } else if (n >= 1 && originSlope != 0) {
+    m = {MODEL_SINGLE, (float)originSlope, 0, fitRmse(x, y, n, originSlope, 0)};
+  }
+  weightModel = m;
+  weightCalibrated = factorCalibrated || n > 0;
+}
+
+// Height: cm = slope * distance + intercept. Without points the saved
+// single-point offset is used.
+static void rebuildHeightModel() {
+  uint8_t n = heightPointCount;
+  double x[MAX_CAL_POINTS], y[MAX_CAL_POINTS];
+  for (int i = 0; i < n; i++) {
+    x[i] = heightPoints[i].distanceCm;
+    y[i] = heightPoints[i].referenceCm;
+  }
+  LinearModel m = {MODEL_DEFAULT, HEIGHT_MOUNT_SLOPE, heightOffsetCm, NAN};
+  double slope, intercept;
+  bool fitted = n >= 2 && referenceSpan(y, n) >= HEIGHT_MIN_SPAN_CM && fitLine(x, y, n, slope, intercept);
+  double physical = fitted ? slope * HEIGHT_MOUNT_SLOPE : 0;  // > 0 when the sign is right
+  if (fitted && physical >= HEIGHT_SLOPE_MIN && physical <= HEIGHT_SLOPE_MAX) {
+    m = {MODEL_REGRESSION, (float)slope, (float)intercept, fitRmse(x, y, n, slope, intercept)};
+  } else if (n >= 1) {
+    // Fixed physical slope, offset = mean of what each point asks for.
+    double sum = 0;
+    for (int i = 0; i < n; i++) sum += y[i] - HEIGHT_MOUNT_SLOPE * x[i];
+    double offset = sum / n;
+    m = {MODEL_SINGLE, HEIGHT_MOUNT_SLOPE, (float)offset, fitRmse(x, y, n, HEIGHT_MOUNT_SLOPE, offset)};
+  }
+  heightModel = m;
+  heightCalibrated = offsetCalibrated || n > 0;
+}
+
+static float weightFromCounts(long counts) {
+  return weightModel.slope * counts + weightModel.intercept;
+}
+
 static void loadCalibration() {
   prefs.begin("smartgrowth", true);
   zeroOffset = prefs.getLong("zero", DEFAULT_ZERO_OFFSET);
   calFactor = prefs.getFloat("factor", DEFAULT_CAL_FACTOR);
   heightOffsetCm = prefs.getFloat("hoffset", DEFAULT_HEIGHT_OFFSET_CM);
-  weightCalibrated = prefs.getBool("calibrated", false);
-  heightCalibrated = prefs.getBool("hcal", false);
+  factorCalibrated = prefs.getBool("calibrated", false);
+  offsetCalibrated = prefs.getBool("hcal", false);
   zeroSet = prefs.isKey("zero");
+  weightPointCount = min((uint8_t)MAX_CAL_POINTS, prefs.getUChar("wn", 0));
+  heightPointCount = min((uint8_t)MAX_CAL_POINTS, prefs.getUChar("hn", 0));
+  if (prefs.getBytes("wpts", weightPoints, sizeof(WeightPoint) * weightPointCount) !=
+      sizeof(WeightPoint) * weightPointCount) {
+    weightPointCount = 0;
+  }
+  if (prefs.getBytes("hpts", heightPoints, sizeof(HeightPoint) * heightPointCount) !=
+      sizeof(HeightPoint) * heightPointCount) {
+    heightPointCount = 0;
+  }
   prefs.end();
   if (calFactor == 0 || isnan(calFactor)) calFactor = DEFAULT_CAL_FACTOR;
+  rebuildWeightModel();
+  rebuildHeightModel();
 }
 
 static void saveCalibration() {
@@ -406,8 +596,12 @@ static void saveCalibration() {
   prefs.putLong("zero", zeroOffset);
   prefs.putFloat("factor", calFactor);
   prefs.putFloat("hoffset", heightOffsetCm);
-  prefs.putBool("calibrated", weightCalibrated);
-  prefs.putBool("hcal", heightCalibrated);
+  prefs.putBool("calibrated", factorCalibrated);
+  prefs.putBool("hcal", offsetCalibrated);
+  prefs.putUChar("wn", weightPointCount);
+  prefs.putUChar("hn", heightPointCount);
+  if (weightPointCount) prefs.putBytes("wpts", weightPoints, sizeof(WeightPoint) * weightPointCount);
+  if (heightPointCount) prefs.putBytes("hpts", heightPoints, sizeof(HeightPoint) * heightPointCount);
   prefs.end();
 }
 
@@ -462,7 +656,7 @@ static int32_t hx711ReadRaw() {
 static float readWeightKg() {
   if (!hx711Ready()) return NAN;
   lastWeightReadyMs = millis();
-  return (hx711ReadRaw() - zeroOffset) / calFactor;
+  return weightFromCounts(hx711ReadRaw() - zeroOffset);
 }
 
 static long readRawAverage(int samples) {
@@ -573,11 +767,7 @@ static float readDistanceCm() {
 
 static float distanceToHeightCm(float distanceCm) {
   if (isnan(distanceCm)) return NAN;
-#if HEIGHT_MOUNT == HEIGHT_MOUNT_DOWN
-  return heightOffsetCm - distanceCm;
-#else
-  return distanceCm + heightOffsetCm;
-#endif
+  return heightModel.slope * distanceCm + heightModel.intercept;
 }
 
 static int readBatteryPct() {
@@ -685,8 +875,10 @@ static void updateCalibrationChar(bool notify) {
   if (calBusy) flags |= CF_BUSY;
   if (heightSource != HEIGHT_NONE) flags |= CF_HEIGHT_PRESENT;
   int32_t zero = (int32_t)zeroOffset;
-  float factor = calFactor;
-  float hoffset = heightOffsetCm;
+  // Effective values of the current models (protocol v1 readers expect a
+  // factor and an offset; the full model is on the Model characteristic).
+  float factor = 1.0f / weightModel.slope;
+  float hoffset = heightModel.intercept;
   int32_t measured = lastCalMeasured;
   if (measured > 8388607) measured = 8388607;
   if (measured < -8388608) measured = -8388608;
@@ -704,6 +896,38 @@ static void updateCalibrationChar(bool notify) {
   out[19] = (uint8_t)((m >> 16) & 0xFF);
   sgCalibrationChar->setValue(out, sizeof(out));
   if (notify && clientConnected) sgCalibrationChar->notify();
+}
+
+// Layout documented at MODEL_VERSION. Read only: the app re-reads it after a
+// calibration result arrives on the Calibration characteristic.
+static void updateModelChar() {
+  if (!sgModelChar) return;
+  uint8_t out[33 + MAX_CAL_POINTS * 16];
+  int32_t zero = (int32_t)zeroOffset;
+  out[0] = MODEL_VERSION;
+  out[1] = weightModel.type;
+  out[2] = weightPointCount;
+  out[3] = heightModel.type;
+  out[4] = heightPointCount;
+  memcpy(out + 5, &weightModel.slope, 4);
+  memcpy(out + 9, &weightModel.intercept, 4);
+  memcpy(out + 13, &weightModel.rmse, 4);
+  memcpy(out + 17, &heightModel.slope, 4);
+  memcpy(out + 21, &heightModel.intercept, 4);
+  memcpy(out + 25, &heightModel.rmse, 4);
+  memcpy(out + 29, &zero, 4);
+  size_t length = 33;
+  for (int i = 0; i < weightPointCount; i++) {
+    memcpy(out + length, &weightPoints[i].counts, 4);
+    memcpy(out + length + 4, &weightPoints[i].referenceKg, 4);
+    length += 8;
+  }
+  for (int i = 0; i < heightPointCount; i++) {
+    memcpy(out + length, &heightPoints[i].distanceCm, 4);
+    memcpy(out + length + 4, &heightPoints[i].referenceCm, 4);
+    length += 8;
+  }
+  sgModelChar->setValue(out, length);
 }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -757,11 +981,17 @@ class ControlCallbacks : public NimBLECharacteristicCallbacks {
       case CMD_STOP: measuringEnabled = false; break;
       case CMD_CAL_WEIGHT:
       case CMD_CAL_HEIGHT:
+      case CMD_CAL_ADD_WEIGHT:
+      case CMD_CAL_ADD_HEIGHT:
         // A missing parameter becomes NAN and is rejected with CAL_ERR_BAD_ARG.
         queued = queueCalCommand(data[0], size >= 5 ? readFloatLE(data + 1) : NAN, false);
         break;
       case CMD_CAL_RESET:
         queued = queueCalCommand(CMD_CAL_RESET, (size >= 2 && data[1] == CAL_RESET_CONFIRM) ? 1.0f : 0.0f, false);
+        break;
+      case CMD_CAL_DELETE_POINT:
+        // kind * 256 + index, exact in a float; -1 = parameter missing.
+        queued = queueCalCommand(CMD_CAL_DELETE_POINT, size >= 3 ? data[1] * 256.0f + data[2] : -1.0f, false);
         break;
       default: break;  // 0x10 reserved; unknown commands are acknowledged and ignored
     }
@@ -798,8 +1028,10 @@ static void setupBle() {
   sgStatusChar = sg->createCharacteristic(SG_STATUS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   sgCalibrationChar =
       sg->createCharacteristic(SG_CALIBRATION_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  sgModelChar = sg->createCharacteristic(SG_MODEL_UUID, NIMBLE_PROPERTY::READ, 33 + MAX_CAL_POINTS * 16);
   control->setCallbacks(new ControlCallbacks());
   updateCalibrationChar(false);
+  updateModelChar();
 
   uint8_t infoValue[20];
   infoValue[0] = PROTOCOL_VERSION;
@@ -843,10 +1075,15 @@ static void updateLeds() {
 // Serial commands (calibration)
 // ---------------------------------------------------------------------------
 
+static const char* modelName(uint8_t type) {
+  return type == MODEL_REGRESSION ? "regression" : type == MODEL_SINGLE ? "single" : "default";
+}
+
 static void printStatus() {
   const char* sources[] = {"none", "VL53L0X", "Sharp"};
-  Serial.printf("fw %d.%d.%d | zero=%ld factor=%.2f hoffset=%.1f | height=%s | kg=%.2f d=%.1f h=%.1f | ble=%s\n",
-                FW_MAJOR, FW_MINOR, FW_PATCH, zeroOffset, calFactor, heightOffsetCm,
+  Serial.printf("fw %d.%d.%d | zero=%ld weight=%s(%u) height=%s(%u) | sensor=%s | kg=%.2f d=%.1f h=%.1f | ble=%s\n",
+                FW_MAJOR, FW_MINOR, FW_PATCH, zeroOffset, modelName(weightModel.type), weightPointCount,
+                modelName(heightModel.type), heightPointCount,
                 sources[heightSource], lastWeightKg, lastDistanceCm,
                 distanceToHeightCm(lastDistanceCm), clientConnected ? "connected" : "advertising");
 }
@@ -864,23 +1101,35 @@ static uint8_t calTare() {
   return tareWithRaw(raw) ? CAL_OK : CAL_ERR_HX711;
 }
 
-static uint8_t calWeight(float referenceKg) {
+// Adds a weight point (reference load on the platform) and refits. `single`
+// = the pre-2.3.0 one-point calibration: it replaces all weight points and
+// also becomes the saved factor used when every point is deleted.
+static uint8_t calWeight(float referenceKg, bool single) {
   if (isnan(referenceKg) || referenceKg <= 0 || referenceKg > WEIGHT_MAX_KG) return CAL_ERR_BAD_ARG;
+  if (!single && weightPointCount >= MAX_CAL_POINTS) return CAL_ERR_FULL;
   long raw = readRawAverage(20);
   if (raw == LONG_MIN) return CAL_ERR_HX711;
   lastCalMeasured = (int32_t)raw;
-  float factor = (raw - zeroOffset) / referenceKg;
+  long counts = raw - zeroOffset;
+  float factor = counts / referenceKg;
   if (fabsf(factor) < 1) return CAL_ERR_NO_LOAD;
-  calFactor = factor;
-  weightCalibrated = true;
+  if (single) {
+    calFactor = factor;
+    factorCalibrated = true;
+    weightPointCount = 0;
+  }
+  weightPoints[weightPointCount++] = {(int32_t)counts, referenceKg};
+  rebuildWeightModel();
   saveCalibration();
   resetFilters();
   return CAL_OK;
 }
 
-static uint8_t calHeight(float referenceCm) {
+// Adds a height point (reference height under the head board) and refits.
+static uint8_t calHeight(float referenceCm, bool single) {
   if (isnan(referenceCm) || referenceCm <= 0 || referenceCm > CAL_HEIGHT_MAX_REF_CM) return CAL_ERR_BAD_ARG;
   if (heightSource == HEIGHT_NONE) return CAL_ERR_NO_HEIGHT_SENSOR;
+  if (!single && heightPointCount >= MAX_CAL_POINTS) return CAL_ERR_FULL;
   float sum = 0;
   int got = 0;
   unsigned long start = millis();
@@ -892,13 +1141,42 @@ static uint8_t calHeight(float referenceCm) {
   if (got < 10) return CAL_ERR_HEIGHT_READING;
   float distance = sum / got;
   lastCalMeasured = (int32_t)lroundf(distance * 100.0f);
-#if HEIGHT_MOUNT == HEIGHT_MOUNT_DOWN
-  heightOffsetCm = referenceCm + distance;
-#else
-  heightOffsetCm = referenceCm - distance;
-#endif
-  heightCalibrated = true;
+  if (single) {
+    heightOffsetCm = referenceCm - HEIGHT_MOUNT_SLOPE * distance;
+    offsetCalibrated = true;
+    heightPointCount = 0;
+  }
+  heightPoints[heightPointCount++] = {distance, referenceCm};
+  rebuildHeightModel();
   saveCalibration();
+  return CAL_OK;
+}
+
+// `arg` = kind * 256 + index (POINT_INDEX_ALL = every point of that kind).
+static uint8_t calDeletePoint(float arg) {
+  if (arg < 0) return CAL_ERR_BAD_ARG;
+  int kind = (int)arg / 256;
+  int index = (int)arg % 256;
+  uint8_t* count = kind == POINT_KIND_WEIGHT ? &weightPointCount
+                   : kind == POINT_KIND_HEIGHT ? &heightPointCount
+                                               : nullptr;
+  if (!count) return CAL_ERR_BAD_ARG;
+  if (index == POINT_INDEX_ALL) {
+    *count = 0;
+  } else if (index < *count) {
+    if (kind == POINT_KIND_WEIGHT) {
+      for (int i = index; i < *count - 1; i++) weightPoints[i] = weightPoints[i + 1];
+    } else {
+      for (int i = index; i < *count - 1; i++) heightPoints[i] = heightPoints[i + 1];
+    }
+    (*count)--;
+  } else {
+    return CAL_ERR_BAD_ARG;
+  }
+  rebuildWeightModel();
+  rebuildHeightModel();
+  saveCalibration();
+  resetFilters();
   return CAL_OK;
 }
 
@@ -906,12 +1184,35 @@ static uint8_t calReset() {
   zeroOffset = DEFAULT_ZERO_OFFSET;
   calFactor = DEFAULT_CAL_FACTOR;
   heightOffsetCm = DEFAULT_HEIGHT_OFFSET_CM;
-  weightCalibrated = false;
-  heightCalibrated = false;
+  factorCalibrated = false;
+  offsetCalibrated = false;
+  weightPointCount = 0;
+  heightPointCount = 0;
+  rebuildWeightModel();
+  rebuildHeightModel();
   saveCalibration();
   resetFilters();
   lastCalMeasured = 0;
   return CAL_OK;
+}
+
+static void printModels() {
+  Serial.printf("weight model %s: kg = %.8f * counts + %.3f, rmse %.3f kg, %u points\n",
+                modelName(weightModel.type), weightModel.slope, weightModel.intercept, weightModel.rmse,
+                weightPointCount);
+  for (int i = 0; i < weightPointCount; i++) {
+    float predicted = weightFromCounts(weightPoints[i].counts);
+    Serial.printf("  w%d: counts %ld ref %.2f kg -> %.2f (%+.2f)\n", i, (long)weightPoints[i].counts,
+                  weightPoints[i].referenceKg, predicted, predicted - weightPoints[i].referenceKg);
+  }
+  Serial.printf("height model %s: cm = %.4f * distance + %.2f, rmse %.2f cm, %u points\n",
+                modelName(heightModel.type), heightModel.slope, heightModel.intercept, heightModel.rmse,
+                heightPointCount);
+  for (int i = 0; i < heightPointCount; i++) {
+    float predicted = distanceToHeightCm(heightPoints[i].distanceCm);
+    Serial.printf("  h%d: distance %.1f ref %.1f cm -> %.1f (%+.1f)\n", i, heightPoints[i].distanceCm,
+                  heightPoints[i].referenceCm, predicted, predicted - heightPoints[i].referenceCm);
+  }
 }
 
 // Publishes the result on the Calibration characteristic (seq + 1).
@@ -920,6 +1221,7 @@ static void finishCalibration(uint8_t op, uint8_t result) {
   lastCalResult = result;
   calSequence++;
   calBusy = false;
+  updateModelChar();  // before the notify: the app re-reads it on that notification
   updateCalibrationChar(true);
 }
 
@@ -934,14 +1236,29 @@ static void runCalibration(uint8_t op, float arg, bool force) {
       // Forced tare: the app wizard has the operator confirm the platform is empty.
       result = (force || state == STATE_EMPTY) ? calTare() : CAL_ERR_NOT_EMPTY;
       break;
-    case CMD_CAL_WEIGHT: result = calWeight(arg); break;
-    case CMD_CAL_HEIGHT: result = calHeight(arg); break;
+    case CMD_CAL_WEIGHT: result = calWeight(arg, true); break;
+    case CMD_CAL_HEIGHT: result = calHeight(arg, true); break;
+    case CMD_CAL_ADD_WEIGHT: result = calWeight(arg, false); break;
+    case CMD_CAL_ADD_HEIGHT: result = calHeight(arg, false); break;
+    case CMD_CAL_DELETE_POINT: result = calDeletePoint(arg); break;
     case CMD_CAL_RESET: result = arg == 1.0f ? calReset() : CAL_ERR_BAD_ARG; break;
     default: result = CAL_ERR_UNKNOWN; break;
   }
-  Serial.printf("calibration (BLE) op=0x%02X result=%u zero=%ld factor=%.2f hoffset=%.1f\n",
-                op, result, zeroOffset, calFactor, heightOffsetCm);
+  Serial.printf("calibration (BLE) op=0x%02X result=%u zero=%ld\n", op, result, zeroOffset);
+  printModels();
   finishCalibration(op, result);
+}
+
+static void printCalResult(uint8_t result) {
+  switch (result) {
+    case CAL_OK: printModels(); break;
+    case CAL_ERR_HX711: Serial.println("HX711 not responding"); break;
+    case CAL_ERR_NO_LOAD: Serial.println("no load detected, tare first and put the weight on"); break;
+    case CAL_ERR_BAD_ARG: Serial.println("reference / point out of range"); break;
+    case CAL_ERR_FULL: Serial.println("all point slots used, delete one first (xw / xh)"); break;
+    case CAL_ERR_NO_HEIGHT_SENSOR: Serial.println("no height sensor"); break;
+    default: Serial.println("height sensor gives no stable reading"); break;
+  }
 }
 
 static void handleSerialCommand(String line) {
@@ -949,6 +1266,26 @@ static void handleSerialCommand(String line) {
   if (line.length() == 0) return;
   char cmd = line.charAt(0);
   float arg = line.length() > 1 ? line.substring(1).toFloat() : 0;
+
+  // Two-letter commands: pw/ph <ref> add a point, xw/xh <index|*> delete.
+  char sub = line.length() > 1 ? line.charAt(1) : 0;
+  if ((cmd == 'p' || cmd == 'x') && (sub == 'w' || sub == 'h')) {
+    String param = line.substring(2);
+    param.trim();
+    uint8_t result;
+    if (cmd == 'p') {
+      float reference = param.toFloat();
+      result = sub == 'w' ? calWeight(reference, false) : calHeight(reference, false);
+      finishCalibration(sub == 'w' ? CMD_CAL_ADD_WEIGHT : CMD_CAL_ADD_HEIGHT, result);
+    } else {
+      int kind = sub == 'w' ? POINT_KIND_WEIGHT : POINT_KIND_HEIGHT;
+      int index = param == "*" ? POINT_INDEX_ALL : (isDigit(param.charAt(0)) ? param.toInt() : 256);
+      result = index > POINT_INDEX_ALL ? CAL_ERR_BAD_ARG : calDeletePoint(kind * 256.0f + index);
+      finishCalibration(CMD_CAL_DELETE_POINT, result);
+    }
+    printCalResult(result);
+    return;
+  }
 
   switch (cmd) {
     case 't': {
@@ -959,36 +1296,30 @@ static void handleSerialCommand(String line) {
     }
     case 'c': {
       if (arg <= 0) { Serial.println("usage: c <reference kg>"); break; }
-      uint8_t result = calWeight(arg);
-      if (result == CAL_ERR_HX711) Serial.println("HX711 not responding");
-      else if (result == CAL_ERR_NO_LOAD) Serial.println("no load detected, tare first and put the weight on");
-      else if (result == CAL_ERR_BAD_ARG) Serial.println("reference out of range");
-      else Serial.printf("weight calibrated: factor=%.2f\n", calFactor);
+      uint8_t result = calWeight(arg, true);
+      printCalResult(result);
       finishCalibration(CMD_CAL_WEIGHT, result);
       break;
     }
     case 'h': {
       if (arg <= 0) { Serial.println("usage: h <reference cm>"); break; }
-      uint8_t result = calHeight(arg);
-      if (result == CAL_OK) {
-        Serial.printf("height calibrated: distance=%.1f offset=%.1f\n", lastCalMeasured / 100.0f, heightOffsetCm);
-      } else if (result == CAL_ERR_BAD_ARG) {
-        Serial.println("reference out of range");
-      } else {
-        Serial.println("height sensor gives no stable reading");
-      }
+      uint8_t result = calHeight(arg, true);
+      printCalResult(result);
       finishCalibration(CMD_CAL_HEIGHT, result);
       break;
     }
     case 'r':
       finishCalibration(CMD_CAL_RESET, calReset());
-      Serial.println("calibration reset to defaults");
+      Serial.println("calibration reset to defaults (points deleted)");
       break;
     case 'i':
       printStatus();
       break;
+    case 'l':
+      printModels();
+      break;
     default:
-      Serial.println("commands: t | c <kg> | h <cm> | r | i");
+      Serial.println("commands: t | pw <kg> | ph <cm> | l | xw <i|*> | xh <i|*> | c <kg> | h <cm> | r | i");
   }
 }
 
@@ -1030,7 +1361,7 @@ void setup() {
   long raw = readRawAverage(10);
   if (raw == LONG_MIN) {
     Serial.println("HX711 not responding, check wiring");
-  } else if (fabsf((raw - zeroOffset) / calFactor) < AUTO_TARE_MAX_KG) {
+  } else if (fabsf(weightFromCounts(raw - zeroOffset)) < AUTO_TARE_MAX_KG) {
     tare();
     Serial.println("auto tare ok");
   } else {
