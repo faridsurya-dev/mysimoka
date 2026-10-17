@@ -6,9 +6,12 @@ import React, {
   useState,
 } from 'react';
 import {
+  Alert,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -564,6 +567,99 @@ export function StudentMeasurementScreen({
     setSaveError(null);
   };
 
+  // Android back in the form: first hides the keyboard, then asks before
+  // dropping values that were typed but not saved yet.
+  const requestCloseMeasurementForm = () => {
+    if (Keyboard.isVisible()) {
+      Keyboard.dismiss();
+      return;
+    }
+    const hasUnsavedInput =
+      heightValue !== (selectedStudent?.heightCm ?? '') ||
+      weightValue !== (selectedStudent?.weightKg ?? '') ||
+      referenceHeightValue !== '' ||
+      referenceWeightValue !== '';
+    if (!hasUnsavedInput) {
+      closeMeasurementForm();
+      return;
+    }
+    Alert.alert(
+      'Tutup input pengukuran?',
+      `Angka untuk ${selectedStudent?.name ?? 'siswa ini'} belum disimpan.`,
+      [
+        { text: 'Lanjut mengisi', style: 'cancel' },
+        { text: 'Tutup', style: 'destructive', onPress: closeMeasurementForm },
+      ],
+    );
+  };
+
+  // Height of the form hidden by the keyboard. Android draws edge-to-edge and
+  // does not resize the modal window, so the form makes room by itself.
+  const modalContainerRef = useRef<View>(null);
+  const modalScrollRef = useRef<ScrollView>(null);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const isMeasurementFormOpen = selectedStudent !== null;
+
+  useEffect(() => {
+    if (!isMeasurementFormOpen) {
+      setKeyboardInset(0);
+      return;
+    }
+    const showEvent =
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, event => {
+      const { height: keyboardHeight, screenY: keyboardTop } =
+        event.endCoordinates;
+      const container = modalContainerRef.current;
+      if (!container) {
+        setKeyboardInset(keyboardHeight);
+        return;
+      }
+      container.measureInWindow((_x, y, _width, height) => {
+        setKeyboardInset(
+          Math.min(keyboardHeight, Math.max(0, y + height - keyboardTop)),
+        );
+      });
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () =>
+      setKeyboardInset(0),
+    );
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [isMeasurementFormOpen]);
+
+  // Once the form made room, bring the focused field (e.g. "Data pembanding")
+  // up so it is not left behind the keyboard.
+  useEffect(() => {
+    if (keyboardInset === 0) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      const input = TextInput.State.currentlyFocusedInput();
+      const scroll = modalScrollRef.current;
+      if (!input || !scroll) {
+        return;
+      }
+      // getInnerViewRef exists at runtime but is missing from the typings;
+      // getInnerViewNode returns a numeric tag, which Fabric cannot measure.
+      const content = (
+        scroll as unknown as {
+          getInnerViewRef: () => Parameters<typeof input.measureLayout>[0];
+        }
+      ).getInnerViewRef();
+      input.measureLayout(
+        content,
+        (_x, y) => scroll.scrollTo({ y: Math.max(0, y - 96), animated: true }),
+        () => undefined,
+      );
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [keyboardInset]);
+
   /**
    * `values` overrides the form (auto-save runs before the fields re-render).
    * Reference values are always read from the form: whatever the operator
@@ -1013,10 +1109,13 @@ export function StudentMeasurementScreen({
         presentationStyle="fullScreen"
         statusBarTranslucent
         visible={selectedStudent !== null}
-        onRequestClose={closeMeasurementForm}
+        onRequestClose={requestCloseMeasurementForm}
       >
         <ModalSafeArea>
-          <View style={styles.modalContainer}>
+          <View
+            ref={modalContainerRef}
+            style={[styles.modalContainer, { paddingBottom: keyboardInset }]}
+          >
             <ModalHeader
               eyebrow={`Siswa ${selectedStudentIndex + 1} dari ${
                 students.length
@@ -1026,6 +1125,7 @@ export function StudentMeasurementScreen({
             />
 
             <Screen
+              ref={modalScrollRef}
               contentContainerStyle={styles.modalContent}
               keyboardShouldPersistTaps="handled"
             >

@@ -1,4 +1,4 @@
-import React, { PropsWithChildren } from 'react';
+import React, { PropsWithChildren, Ref } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -30,6 +30,7 @@ type ScreenProps = PropsWithChildren<{
    */
   onRefresh?: () => void | Promise<void>;
   refreshing?: boolean;
+  ref?: Ref<ScrollView>;
 }> &
   Omit<ScrollViewProps, 'contentContainerStyle'>;
 
@@ -41,12 +42,14 @@ export function Screen({
   onRefresh,
   refreshing = false,
   style,
+  ref,
   ...scrollViewProps
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
 
   const scroll = (
     <ScrollView
+      ref={ref}
       keyboardDismissMode="on-drag"
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
