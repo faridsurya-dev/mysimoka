@@ -119,6 +119,39 @@ export type DeviceCalibrationValues = {
   heightOffsetCm: number;
 };
 
+/** One measure of the device's sensor stabiliser (firmware >= 2.3), as logged in `model`. */
+export type CalibrationModelPart = {
+  type: 'default' | 'single' | 'regression';
+  slope: number;
+  intercept: number;
+  rmse: number | null;
+  /** raw = HX711 counts above tare (weight) or sensor distance in cm (height). */
+  points: Array<{ raw: number; reference: number; predicted: number }>;
+};
+
+/** Model snapshot after a calibration command (column `device_calibrations.model`). */
+export type CalibrationModelSnapshot = {
+  weight: CalibrationModelPart;
+  height: CalibrationModelPart;
+};
+
+function roundTo(value: number, digits: number) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+/**
+ * Average |predicted - reference| of a model's points, or null without points:
+ * how far the trained device still is from the reference on its own data.
+ */
+export function modelMeanAbsError(part: CalibrationModelPart) {
+  if (part.points.length === 0) {
+    return null;
+  }
+  const sum = part.points.reduce((total, point) => total + Math.abs(point.predicted - point.reference), 0);
+  return roundTo(sum / part.points.length, 3);
+}
+
 /** Row for `insert_device_calibrations_one` minus school/performer (added by the service). */
 export type DeviceCalibrationRowInput = {
   bleId: string;
@@ -136,6 +169,8 @@ export type DeviceCalibrationRowInput = {
   measuredRaw?: number | null;
   result: string;
   firmwareVersion?: string | null;
+  /** Sensor stabiliser after the command (fw >= 2.3). */
+  model?: CalibrationModelSnapshot | null;
 };
 
 export type DeviceCalibrationInsertObject = {
@@ -165,6 +200,8 @@ export type DeviceCalibrationInsertObject = {
   previous_values: Record<string, number> | null;
   result: string;
   firmware_version: string | null;
+  /** Only sent when present: servers without the column still accept the row. */
+  model?: CalibrationModelSnapshot;
 };
 
 function finiteOrNull(value: number | null | undefined) {
@@ -214,6 +251,7 @@ export function buildCalibrationInsertObject(
     previous_values: valuesToJson(input.previous),
     result: input.result,
     firmware_version: input.firmwareVersion ?? null,
+    ...(input.model ? { model: input.model } : {}),
   };
 }
 

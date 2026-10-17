@@ -14,6 +14,8 @@ export const SMARTGROWTH_CONTROL_CHAR_UUID = '519e0004-59fe-44b5-828f-34822e2361
 export const SMARTGROWTH_STATUS_CHAR_UUID = '519e0005-59fe-44b5-828f-34822e2361a9';
 /** Calibration values + last calibration result (read + notify), protocol section 6b. Firmware >= 2.1. */
 export const SMARTGROWTH_CALIBRATION_CHAR_UUID = '519e0006-59fe-44b5-828f-34822e2361a9';
+/** Sensor stabiliser model + calibration points (read), protocol section 6c. Firmware >= 2.3. */
+export const SMARTGROWTH_MODEL_CHAR_UUID = '519e0007-59fe-44b5-828f-34822e2361a9';
 
 export const SMARTGROWTH_NAME_PATTERN = /^(smartgrowth|mysimoka)-/i;
 
@@ -36,7 +38,16 @@ export const SMARTGROWTH_COMMANDS = {
   calibrateHeight: 0x21,
   /** Reset calibration to defaults, param 0xA5 (confirm) (firmware >= 2.1). */
   resetCalibration: 0x22,
+  /** Add a weight calibration point, param float32 LE reference kg (firmware >= 2.3). */
+  addWeightPoint: 0x23,
+  /** Add a height calibration point, param float32 LE reference cm (firmware >= 2.3). */
+  addHeightPoint: 0x24,
+  /** Delete calibration point(s), params u8 kind (1 weight, 2 height), u8 index (0xFF = all) (firmware >= 2.3). */
+  deletePoint: 0x25,
 } as const;
+
+export const SMARTGROWTH_POINT_KIND = { weight: 1, height: 2 } as const;
+export const SMARTGROWTH_POINT_INDEX_ALL = 0xff;
 
 export type SmartGrowthCommand = (typeof SMARTGROWTH_COMMANDS)[keyof typeof SMARTGROWTH_COMMANDS];
 
@@ -235,6 +246,7 @@ export const SMARTGROWTH_CALIBRATION_RESULTS: Record<number, string> = {
   0x06: 'no_height_sensor',
   0x07: 'busy',
   0x08: 'unknown_command',
+  0x09: 'points_full',
   0xff: 'none',
 };
 
@@ -303,6 +315,107 @@ export function parseSmartGrowthCalibration(bytes: Uint8Array): SmartGrowthCalib
 export function parseSmartGrowthCalibrationBase64(base64Value: string) {
   try {
     return parseSmartGrowthCalibration(base64ToBytes(base64Value));
+  } catch {
+    return null;
+  }
+}
+
+/** default: no points (factory / single factor) · single: offset only · regression: slope + intercept. */
+export type SmartGrowthModelType = 'default' | 'single' | 'regression';
+
+const MODEL_TYPES: SmartGrowthModelType[] = ['default', 'single', 'regression'];
+
+export type SmartGrowthLinearModel = {
+  type: SmartGrowthModelType;
+  slope: number;
+  intercept: number;
+  /** Root mean square error over the points (kg / cm); null without points. */
+  rmse: number | null;
+};
+
+export type SmartGrowthWeightPoint = {
+  /** HX711 raw minus the tare at the time of the point. */
+  counts: number;
+  referenceKg: number;
+  /** Model output for this point (kg). */
+  predictedKg: number;
+};
+
+export type SmartGrowthHeightPoint = {
+  distanceCm: number;
+  referenceCm: number;
+  /** Model output for this point (cm). */
+  predictedCm: number;
+};
+
+export type SmartGrowthModelState = {
+  version: number;
+  zeroOffset: number;
+  weight: SmartGrowthLinearModel;
+  height: SmartGrowthLinearModel;
+  weightPoints: SmartGrowthWeightPoint[];
+  heightPoints: SmartGrowthHeightPoint[];
+};
+
+function linearModel(bytes: Uint8Array, typeIndex: number, offset: number): SmartGrowthLinearModel {
+  const rmse = readFloat32LE(bytes, offset + 8);
+  return {
+    type: MODEL_TYPES[bytes[typeIndex]] ?? 'default',
+    slope: readFloat32LE(bytes, offset),
+    intercept: readFloat32LE(bytes, offset + 4),
+    rmse: Number.isFinite(rmse) ? rmse : null,
+  };
+}
+
+/**
+ * Model frame (little-endian): [0] version (=1) | [1] weight type | [2] weight points
+ * | [3] height type | [4] height points | [5-16] weight slope, intercept, rmse f32
+ * | [17-28] height slope, intercept, rmse f32 | [29-32] zero i32
+ * | weight points (counts i32, reference kg f32) | height points (distance f32, reference cm f32).
+ */
+export function parseSmartGrowthModel(bytes: Uint8Array): SmartGrowthModelState | null {
+  if (bytes.length < 33 || bytes[0] !== 1) {
+    return null;
+  }
+  const weightCount = bytes[2];
+  const heightCount = bytes[4];
+  if (bytes.length < 33 + (weightCount + heightCount) * 8) {
+    return null;
+  }
+  const weight = linearModel(bytes, 1, 5);
+  const height = linearModel(bytes, 3, 17);
+  const weightPoints: SmartGrowthWeightPoint[] = [];
+  let offset = 33;
+  for (let i = 0; i < weightCount; i += 1, offset += 8) {
+    const counts = readInt32LE(bytes, offset);
+    weightPoints.push({
+      counts,
+      referenceKg: readFloat32LE(bytes, offset + 4),
+      predictedKg: weight.slope * counts + weight.intercept,
+    });
+  }
+  const heightPoints: SmartGrowthHeightPoint[] = [];
+  for (let i = 0; i < heightCount; i += 1, offset += 8) {
+    const distanceCm = readFloat32LE(bytes, offset);
+    heightPoints.push({
+      distanceCm,
+      referenceCm: readFloat32LE(bytes, offset + 4),
+      predictedCm: height.slope * distanceCm + height.intercept,
+    });
+  }
+  return {
+    version: bytes[0],
+    zeroOffset: readInt32LE(bytes, 29),
+    weight,
+    height,
+    weightPoints,
+    heightPoints,
+  };
+}
+
+export function parseSmartGrowthModelBase64(base64Value: string) {
+  try {
+    return parseSmartGrowthModel(base64ToBytes(base64Value));
   } catch {
     return null;
   }

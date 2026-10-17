@@ -5,13 +5,18 @@ import { getDeviceSessionSnapshot } from './deviceSession';
 import {
   SMARTGROWTH_CALIBRATION_CHAR_UUID,
   SMARTGROWTH_COMMANDS,
+  SMARTGROWTH_MODEL_CHAR_UUID,
+  SMARTGROWTH_POINT_INDEX_ALL,
+  SMARTGROWTH_POINT_KIND,
   SMARTGROWTH_RESET_CONFIRM,
   SMARTGROWTH_SERVICE_UUID,
   SMARTGROWTH_TARE_FORCE,
   float32LEBytes,
   parseSmartGrowthCalibrationBase64,
+  parseSmartGrowthModelBase64,
   subscribeSmartGrowthFrames,
   type SmartGrowthCalibrationState,
+  type SmartGrowthModelState,
   type SmartGrowthMeasurement,
 } from './smartGrowth';
 import type { CalibrationMeasure } from './calibration';
@@ -47,6 +52,42 @@ export async function hasSmartGrowthCalibrationSupport() {
   }
 }
 
+/** Firmware with the sensor stabiliser model (Model characteristic 519e0007, fw >= 2.3)? */
+export async function hasSmartGrowthModelSupport() {
+  const deviceId = connectedSmartGrowthId();
+  const manager = getBleManager();
+  if (!deviceId || !manager) {
+    return false;
+  }
+  try {
+    const characteristics = await manager.characteristicsForDevice(deviceId, SMARTGROWTH_SERVICE_UUID);
+    return characteristics.some(
+      characteristic => characteristic.uuid.toLowerCase() === SMARTGROWTH_MODEL_CHAR_UUID,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Current model + calibration points; null when not supported / not connected. */
+export async function readSmartGrowthModel(): Promise<SmartGrowthModelState | null> {
+  const deviceId = connectedSmartGrowthId();
+  const manager = getBleManager();
+  if (!deviceId || !manager) {
+    return null;
+  }
+  try {
+    const characteristic = await manager.readCharacteristicForDevice(
+      deviceId,
+      SMARTGROWTH_SERVICE_UUID,
+      SMARTGROWTH_MODEL_CHAR_UUID,
+    );
+    return characteristic.value ? parseSmartGrowthModelBase64(characteristic.value) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function readSmartGrowthCalibration(): Promise<SmartGrowthCalibrationState | null> {
   const deviceId = connectedSmartGrowthId();
   const manager = getBleManager();
@@ -70,6 +111,11 @@ export type CalibrationAction =
   | { type: 'tare'; force: boolean }
   | { type: 'weight'; referenceKg: number }
   | { type: 'height'; referenceCm: number }
+  /** Training point for the sensor stabiliser (fw >= 2.3); weight/height replace all points. */
+  | { type: 'add_weight_point'; referenceKg: number }
+  | { type: 'add_height_point'; referenceCm: number }
+  /** index null = every point of that measure. */
+  | { type: 'delete_point'; measure: CalibrationMeasure; index: number | null }
   | { type: 'reset' };
 
 export type CalibrationCommandResult = {
@@ -96,6 +142,24 @@ function commandFor(action: CalibrationAction): { command: number; params: numbe
       return {
         command: SMARTGROWTH_COMMANDS.calibrateHeight,
         params: float32LEBytes(action.referenceCm),
+      };
+    case 'add_weight_point':
+      return {
+        command: SMARTGROWTH_COMMANDS.addWeightPoint,
+        params: float32LEBytes(action.referenceKg),
+      };
+    case 'add_height_point':
+      return {
+        command: SMARTGROWTH_COMMANDS.addHeightPoint,
+        params: float32LEBytes(action.referenceCm),
+      };
+    case 'delete_point':
+      return {
+        command: SMARTGROWTH_COMMANDS.deletePoint,
+        params: [
+          SMARTGROWTH_POINT_KIND[action.measure],
+          action.index ?? SMARTGROWTH_POINT_INDEX_ALL,
+        ],
       };
     case 'reset':
       return { command: SMARTGROWTH_COMMANDS.resetCalibration, params: [SMARTGROWTH_RESET_CONFIRM] };

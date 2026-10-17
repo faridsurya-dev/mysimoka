@@ -12,7 +12,11 @@ import {
 } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
-import { getSmartGrowthDeviceInfo, type SmartGrowthCalibrationState } from '../../features/device/smartGrowth';
+import {
+  getSmartGrowthDeviceInfo,
+  type SmartGrowthCalibrationState,
+  type SmartGrowthModelState,
+} from '../../features/device/smartGrowth';
 import { getRegisteredDevice } from '../../features/device/deviceRegistry';
 import {
   CHECK_READINGS_COUNT,
@@ -21,11 +25,14 @@ import {
   computeCheckStats,
   createBatchId,
   describeCheck,
+  modelMeanAbsError,
   parseReferenceInput,
   toleranceFor,
   unitFor,
   type CalibrationKind,
   type CalibrationMeasure,
+  type CalibrationModelPart,
+  type CalibrationModelSnapshot,
   type CalibrationTolerances,
   type CheckStats,
   type DeviceCalibrationRowInput,
@@ -34,7 +41,9 @@ import {
 import {
   collectStableReading,
   hasSmartGrowthCalibrationSupport,
+  hasSmartGrowthModelSupport,
   readSmartGrowthCalibration,
+  readSmartGrowthModel,
   runSmartGrowthCalibration,
   type CalibrationAction,
 } from '../../features/device/smartGrowthCalibration';
@@ -83,17 +92,98 @@ const RESULT_MESSAGES: Record<string, string> = {
   no_height_sensor: 'Alat ini tidak punya sensor tinggi.',
   busy: 'Alat masih memproses perintah sebelumnya. Tunggu sebentar lalu coba lagi.',
   unknown_command: 'Firmware alat tidak mengenal perintah ini. Perbarui firmware.',
+  points_full: 'Titik kalibrasi sudah penuh (maks. 10). Hapus titik lama dulu.',
   timeout: 'Alat tidak menjawab. Coba lagi.',
   write_failed: 'Perintah gagal dikirim ke alat.',
   not_connected: 'Alat tidak terhubung.',
 };
 
-const KIND_BY_ACTION: Record<CalibrationAction['type'], CalibrationKind> = {
-  tare: 'tare',
-  weight: 'adjust_weight',
-  height: 'adjust_height',
-  reset: 'reset',
-};
+function kindFor(action: CalibrationAction): CalibrationKind {
+  switch (action.type) {
+    case 'tare':
+      return 'tare';
+    case 'weight':
+    case 'add_weight_point':
+      return 'adjust_weight';
+    case 'height':
+    case 'add_height_point':
+      return 'adjust_height';
+    case 'delete_point':
+      return action.measure === 'weight' ? 'adjust_weight' : 'adjust_height';
+    case 'reset':
+      return 'reset';
+  }
+}
+
+function measureFor(action: CalibrationAction): CalibrationMeasure | null {
+  switch (action.type) {
+    case 'weight':
+    case 'add_weight_point':
+      return 'weight';
+    case 'height':
+    case 'add_height_point':
+      return 'height';
+    case 'delete_point':
+      return action.measure;
+    default:
+      return null;
+  }
+}
+
+function referenceFor(action: CalibrationAction): number | null {
+  switch (action.type) {
+    case 'weight':
+    case 'add_weight_point':
+      return action.referenceKg;
+    case 'height':
+    case 'add_height_point':
+      return action.referenceCm;
+    default:
+      return null;
+  }
+}
+
+function toSnapshot(model: SmartGrowthModelState | null): CalibrationModelSnapshot | null {
+  if (!model) {
+    return null;
+  }
+  return {
+    weight: {
+      ...model.weight,
+      points: model.weightPoints.map(point => ({
+        raw: point.counts,
+        reference: point.referenceKg,
+        predicted: point.predictedKg,
+      })),
+    },
+    height: {
+      ...model.height,
+      points: model.heightPoints.map(point => ({
+        raw: point.distanceCm,
+        reference: point.referenceCm,
+        predicted: point.predictedCm,
+      })),
+    },
+  };
+}
+
+/** Plain-language status of the trained model for one measure. */
+function describeModel(measure: CalibrationMeasure, part: CalibrationModelPart) {
+  const unit = unitFor(measure);
+  const digits = measure === 'weight' ? 2 : 1;
+  const error = modelMeanAbsError(part);
+  const errorText = error === null ? '' : ` Rata-rata selisih titik ±${error.toFixed(digits)} ${unit}.`;
+  switch (part.type) {
+    case 'regression':
+      return `Regresi linier dari ${part.points.length} titik.${errorText}`;
+    case 'single':
+      return measure === 'weight'
+        ? `${part.points.length} titik, beban acuan belum cukup berbeda (min. 10 kg) untuk regresi: dihitung lewat titik nol.${errorText}`
+        : `${part.points.length} titik, tinggi acuan belum cukup berbeda (min. 20 cm) untuk regresi: hanya offset yang disesuaikan.${errorText}`;
+    default:
+      return 'Belum dilatih: alat masih memakai nilai kalibrasi lama (1 titik).';
+  }
+}
 
 const SAVE_FAILED_NOTICE =
   'Hasil belum tersimpan ke server (offline atau tidak ada akses). Hasil di layar tetap berlaku.';
@@ -126,6 +216,9 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
   const [checkError, setCheckError] = useState<string | null>(null);
   const [calSupported, setCalSupported] = useState<boolean | null>(null);
   const [calState, setCalState] = useState<SmartGrowthCalibrationState | null>(null);
+  const [modelSupported, setModelSupported] = useState(false);
+  const [modelState, setModelState] = useState<SmartGrowthModelState | null>(null);
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
   const [adjusting, setAdjusting] = useState<CalibrationAction['type'] | null>(null);
   const [adjustResult, setAdjustResult] = useState<AdjustResult | null>(null);
   const [adjustedThisSession, setAdjustedThisSession] = useState(false);
@@ -157,6 +250,12 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
         const state = await readSmartGrowthCalibration();
         if (active) {
           setCalState(state);
+        }
+        const withModel = await hasSmartGrowthModelSupport();
+        const model = withModel ? await readSmartGrowthModel() : null;
+        if (active) {
+          setModelSupported(withModel);
+          setModelState(model);
         }
       }
     });
@@ -275,11 +374,16 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
     setAdjusting(action.type);
     setAdjustResult(null);
     const outcome = await runSmartGrowthCalibration(action);
-    setAdjusting(null);
     const after = outcome.after ?? (await readSmartGrowthCalibration());
     if (after) {
       setCalState(after);
     }
+    const model = modelSupported ? await readSmartGrowthModel() : null;
+    if (model) {
+      setModelState(model);
+    }
+    setAdjusting(null);
+    setDeletingIndex(null);
     setAdjustResult({
       label,
       ok: outcome.ok,
@@ -294,26 +398,49 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
       return; // never reached the device: nothing to log
     }
     saveRow({
-      kind: KIND_BY_ACTION[action.type],
-      measure: action.type === 'weight' ? 'weight' : action.type === 'height' ? 'height' : null,
-      referenceValue:
-        action.type === 'weight' ? action.referenceKg : action.type === 'height' ? action.referenceCm : null,
+      kind: kindFor(action),
+      measure: measureFor(action),
+      referenceValue: referenceFor(action),
       after: toValues(after),
+      model: toSnapshot(model),
       previous: toValues(outcome.before),
       measuredRaw:
-        outcome.ok && after
-          ? action.type === 'height'
+        outcome.ok && after && action.type !== 'delete_point' && action.type !== 'reset'
+          ? action.type === 'height' || action.type === 'add_height_point'
             ? after.lastMeasuredRaw / 100
             : after.lastMeasuredRaw
           : null,
-      result: outcome.result,
+      result: action.type === 'delete_point' && outcome.ok ? 'point_deleted' : outcome.result,
     });
+  };
+
+  const confirmDeletePoint = (index: number | null) => {
+    const what = measure === 'weight' ? 'berat' : 'tinggi';
+    Alert.alert(
+      index === null ? `Hapus semua titik ${what}?` : `Hapus titik ${index + 1}?`,
+      index === null
+        ? 'Tanpa titik, alat kembali memakai nilai kalibrasi lama.'
+        : 'Model langsung dihitung ulang dari titik yang tersisa.',
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Hapus',
+          style: 'destructive',
+          onPress: () => {
+            setDeletingIndex(index ?? -1);
+            runAdjust({ type: 'delete_point', measure, index }, 'Hapus titik').catch(() => undefined);
+          },
+        },
+      ],
+    );
   };
 
   const confirmReset = () => {
     Alert.alert(
       'Reset kalibrasi?',
-      'Nilai kalibrasi alat dikembalikan ke bawaan pabrik. Setelah itu alat perlu dikalibrasi ulang.',
+      modelSupported
+        ? 'Nilai kalibrasi dan semua titik latih dikembalikan ke bawaan pabrik. Setelah itu alat perlu dilatih ulang.'
+        : 'Nilai kalibrasi alat dikembalikan ke bawaan pabrik. Setelah itu alat perlu dikalibrasi ulang.',
       [
         { text: 'Batal', style: 'cancel' },
         {
@@ -443,7 +570,9 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
 
           {/* 2. Optional adjustment */}
           <View style={[styles.card, needsAdjustment && styles.cardHighlight]}>
-            <Text style={styles.stepTitle}>2. Penyesuaian alat (opsional)</Text>
+            <Text style={styles.stepTitle}>
+              {modelSupported ? '2. Latih penstabil sensor (opsional)' : '2. Penyesuaian alat (opsional)'}
+            </Text>
             {needsAdjustment ? (
               <Text style={styles.warningText}>
                 Hasil cek di luar toleransi. Sesuaikan alat di bawah, lalu tekan "Cek ulang akurasi"
@@ -473,7 +602,29 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
                   </Text>
                 ) : null}
 
-                {measure === 'weight' ? (
+                {modelSupported ? (
+                  <TrainingSection
+                    adjusting={adjusting}
+                    busy={busy}
+                    connected={!!bleId}
+                    deletingIndex={deletingIndex}
+                    measure={measure}
+                    model={modelState}
+                    onAddPoint={value => {
+                      runAdjust(
+                        measure === 'weight'
+                          ? { type: 'add_weight_point', referenceKg: value }
+                          : { type: 'add_height_point', referenceCm: value },
+                        'Tambah titik',
+                      ).catch(() => undefined);
+                    }}
+                    onDeletePoint={confirmDeletePoint}
+                    onTare={() => {
+                      runAdjust({ type: 'tare', force: true }, 'Tare').catch(() => undefined);
+                    }}
+                    reference={referenceValid ? reference : null}
+                  />
+                ) : measure === 'weight' ? (
                   <>
                     <Text style={styles.body}>a. Kosongkan timbangan (tidak ada beban apa pun), lalu tekan Tare.</Text>
                     <PrimaryButton
@@ -534,7 +685,7 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
                       title={adjustResult.label}
                       tone={adjustResult.ok ? 'success' : 'error'}
                     />
-                    {adjustResult.before && adjustResult.after ? (
+                    {adjustResult.before && adjustResult.after && !modelSupported ? (
                       <Text style={styles.caption}>
                         Sebelum: nol {adjustResult.before.zeroOffset} • faktor{' '}
                         {formatFactor(adjustResult.before.calFactor)} • offset tinggi{' '}
@@ -544,7 +695,7 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
                         {adjustResult.after.heightOffsetCm.toFixed(1)} cm
                       </Text>
                     ) : null}
-                    {adjustResult.ok && adjustResult.label !== 'Tare' ? (
+                    {adjustResult.ok && adjustResult.label !== 'Tare' && adjustResult.label !== 'Hapus titik' ? (
                       <Text style={styles.body}>
                         Sekarang tekan "Cek ulang akurasi" di langkah 1 dengan beban/balok acuan yang sama.
                       </Text>
@@ -569,7 +720,166 @@ export function SmartGrowthCalibrationModal({ visible, onClose }: SmartGrowthCal
   );
 }
 
+type TrainingSectionProps = {
+  measure: CalibrationMeasure;
+  model: SmartGrowthModelState | null;
+  /** Valid reference value typed in step 1, else null. */
+  reference: number | null;
+  busy: boolean;
+  connected: boolean;
+  adjusting: CalibrationAction['type'] | null;
+  /** Index being deleted, -1 = all. */
+  deletingIndex: number | null;
+  onTare: () => void;
+  onAddPoint: (reference: number) => void;
+  onDeletePoint: (index: number | null) => void;
+};
+
+// Firmware >= 2.3: the device fits a linear regression on reference points
+// (sensor value + reference value) instead of one fixed factor. Points are
+// added and removed here over Bluetooth, no USB cable needed.
+function TrainingSection({
+  measure,
+  model,
+  reference,
+  busy,
+  connected,
+  adjusting,
+  deletingIndex,
+  onTare,
+  onAddPoint,
+  onDeletePoint,
+}: TrainingSectionProps) {
+  const unit = unitFor(measure);
+  const digits = measure === 'weight' ? 2 : 1;
+  const part = model ? toSnapshot(model)?.[measure] ?? null : null;
+  const points = part?.points ?? [];
+  const isWeight = measure === 'weight';
+
+  return (
+    <View style={styles.training}>
+      <Text style={styles.body}>
+        Alat menghitung sendiri rumus koreksi (regresi linier) dari beberapa titik acuan, sehingga tepat dari
+        {isWeight ? ' anak ringan sampai berat' : ' anak pendek sampai tinggi'}. Gunakan minimal 3 titik yang
+        berjauhan{isWeight ? ', mis. 10, 30 dan 60 kg' : ', mis. 80, 120 dan 160 cm'}.
+      </Text>
+      {part ? (
+        <InlineAlert
+          message={describeModel(measure, part)}
+          title={part.type === 'regression' ? 'Penstabil aktif' : 'Penstabil belum lengkap'}
+          tone={part.type === 'regression' ? 'success' : 'info'}
+        />
+      ) : (
+        <Text style={styles.caption}>Membaca model dari alat…</Text>
+      )}
+
+      {isWeight ? (
+        <>
+          <Text style={styles.body}>a. Kosongkan timbangan, lalu tekan Tare.</Text>
+          <PrimaryButton
+            disabled={busy || !connected}
+            label="Tare (nol-kan)"
+            loading={adjusting === 'tare'}
+            onPress={onTare}
+            size="sm"
+            variant="outline"
+          />
+          <Text style={styles.body}>
+            b. Letakkan beban acuan (orang/benda yang beratnya sudah ditimbang dengan timbangan terkalibrasi),
+            isi beratnya di langkah 1, lalu tekan Tambah titik. Ulangi untuk beban lain.
+          </Text>
+        </>
+      ) : (
+        <Text style={styles.body}>
+          Berdirikan balok acuan atau orang yang tingginya sudah diukur dengan meteran, turunkan papan kepala
+          sampai menempel, isi tingginya di langkah 1, lalu tekan Tambah titik. Ulangi dengan tinggi lain.
+        </Text>
+      )}
+      <PrimaryButton
+        disabled={busy || !connected || reference === null}
+        label={reference !== null ? `Tambah titik (${reference} ${unit})` : 'Tambah titik'}
+        loading={adjusting === (isWeight ? 'add_weight_point' : 'add_height_point')}
+        onPress={() => {
+          if (reference !== null) {
+            onAddPoint(reference);
+          }
+        }}
+        size="sm"
+        variant="outline"
+      />
+
+      {points.length > 0 ? (
+        <View style={styles.pointList}>
+          <Text style={styles.stepSubtitle}>Titik latih ({points.length}/10)</Text>
+          {points.map((point, index) => {
+            const diff = point.predicted - point.reference;
+            return (
+              <View key={`${index}-${point.raw}`} style={styles.pointRow}>
+                <View style={styles.pointText}>
+                  <Text style={styles.pointLabel}>
+                    {index + 1}. Acuan {point.reference.toFixed(digits)} {unit}
+                  </Text>
+                  <Text style={styles.caption}>
+                    Alat {point.predicted.toFixed(digits)} {unit} (selisih {diff >= 0 ? '+' : '−'}
+                    {Math.abs(diff).toFixed(digits)})
+                  </Text>
+                </View>
+                <PrimaryButton
+                  disabled={busy || !connected}
+                  label="Hapus"
+                  loading={adjusting === 'delete_point' && deletingIndex === index}
+                  onPress={() => onDeletePoint(index)}
+                  size="sm"
+                  variant="dangerOutline"
+                />
+              </View>
+            );
+          })}
+          <Text style={styles.caption}>
+            Titik dengan selisih jauh lebih besar dari yang lain kemungkinan salah ketik atau beban bergerak:
+            hapus lalu ulangi.
+          </Text>
+          <PrimaryButton
+            disabled={busy || !connected}
+            label={`Hapus semua titik ${isWeight ? 'berat' : 'tinggi'}`}
+            loading={adjusting === 'delete_point' && deletingIndex === -1}
+            onPress={() => onDeletePoint(null)}
+            size="sm"
+            variant="dangerOutline"
+          />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  training: {
+    gap: spacing[10],
+  },
+  stepSubtitle: {
+    ...typography.labelLg,
+    color: colors.text.primary,
+  },
+  pointList: {
+    gap: spacing[8],
+  },
+  pointRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+    paddingVertical: spacing[8],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.subtle,
+  },
+  pointText: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  pointLabel: {
+    ...typography.labelMd,
+    color: colors.text.primary,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.surface.app,

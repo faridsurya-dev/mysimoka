@@ -3188,19 +3188,27 @@ export async function insertDeviceCalibration(
       }
     }
   `;
-  const responseBody = (await apiRequest(GRAPHQL_URL, {
-    method: 'POST',
-    requiresAuth: true,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query: mutation, variables: { object } }),
-  })) as
-    | {
-        data?: { insert_device_calibrations_one?: Record<string, unknown> | null };
-        errors?: Array<{ message?: string }>;
-      }
-    | null;
+  const send = async (value: typeof object) =>
+    (await apiRequest(GRAPHQL_URL, {
+      method: 'POST',
+      requiresAuth: true,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query: mutation, variables: { object: value } }),
+    })) as
+      | {
+          data?: { insert_device_calibrations_one?: Record<string, unknown> | null };
+          errors?: Array<{ message?: string }>;
+        }
+      | null;
+
+  let responseBody = await send(object);
+  // Server without the `model` column (backend not updated yet): keep the log, drop the model.
+  if (object.model && responseBody?.errors?.some(error => /\bmodel\b/.test(error.message ?? ''))) {
+    const { model: _model, ...withoutModel } = object;
+    responseBody = await send(withoutModel);
+  }
 
   if (Array.isArray(responseBody?.errors) && responseBody.errors.length > 0) {
     throw new Error(responseBody.errors[0]?.message || 'Gagal menyimpan riwayat kalibrasi.');
