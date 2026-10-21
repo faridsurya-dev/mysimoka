@@ -27,6 +27,11 @@ import {
   getDeviceDisplayName,
 } from '../../features/device/deviceStatus';
 import { useDeviceSession } from '../../features/device/useDeviceSession';
+import { sendSmartGrowthControl } from '../../features/device/deviceManager';
+import {
+  isSmartGrowthName,
+  SMARTGROWTH_COMMANDS,
+} from '../../features/device/smartGrowth';
 import {
   saveStudentMeasurementRecord,
   type SaveStudentMeasurementRecordPayload,
@@ -486,6 +491,39 @@ export function StudentMeasurementScreen({
     }
     const timer = setTimeout(() => setDeviceFilled(false), 3000);
     return () => clearTimeout(timer);
+  }, [deviceFilled]);
+
+  // "Ukur ulang": SmartGrowth membuang hasil yang terkunci dan membaca ulang berat + tinggi
+  // selama anak masih berdiri di alat (perintah start 0x02, firmware >= 2.0). Dipakai bila
+  // papan kepala belum turun saat hasil terkunci.
+  const canRemeasure =
+    measurementMode === 'auto' &&
+    isScaleConnected &&
+    isSmartGrowthName(deviceSession.connectedDeviceName);
+  const [remeasureNotice, setRemeasureNotice] = useState<string | null>(null);
+  const remeasure = () => {
+    setDeviceFilled(false);
+    sendSmartGrowthControl(SMARTGROWTH_COMMANDS.startMeasurement)
+      .then(sent =>
+        setRemeasureNotice(
+          sent
+            ? 'Mengukur ulang… tahan papan di kepala sampai bunyi bip.'
+            : 'Gagal mengirim perintah ke alat. Coba lagi.',
+        ),
+      )
+      .catch(() => setRemeasureNotice('Gagal mengirim perintah ke alat. Coba lagi.'));
+  };
+  useEffect(() => {
+    if (!remeasureNotice) {
+      return;
+    }
+    const timer = setTimeout(() => setRemeasureNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [remeasureNotice]);
+  useEffect(() => {
+    if (deviceFilled) {
+      setRemeasureNotice(null);
+    }
   }, [deviceFilled]);
 
   useEffect(() => {
@@ -1316,6 +1354,20 @@ export function StudentMeasurementScreen({
                   {autoSave ? 'Menyimpan otomatis…' : 'Periksa lalu tekan Simpan.'}
                 </Text>
               ) : null}
+              {canRemeasure ? (
+                <View style={styles.remeasureRow}>
+                  <PrimaryButton
+                    label="Ukur ulang"
+                    onPress={remeasure}
+                    size="sm"
+                    variant="outline"
+                  />
+                  <Text style={styles.remeasureHint}>
+                    {remeasureNotice ??
+                      'Tinggi/berat kurang pas? Anak tetap berdiri, rapikan papan, lalu tekan.'}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={styles.fieldHint}>
                 Gunakan titik atau koma untuk desimal (maks. 2 angka), contoh
                 125,55 cm atau 24,85 kg.
@@ -1870,6 +1922,16 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.feedback.successBorder,
     backgroundColor: colors.feedback.successBackground,
+  },
+  remeasureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+  },
+  remeasureHint: {
+    ...typography.caption,
+    color: colors.text.muted,
+    flex: 1,
   },
   deviceFilledText: {
     ...typography.caption,
