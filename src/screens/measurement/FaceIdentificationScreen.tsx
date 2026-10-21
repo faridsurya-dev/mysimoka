@@ -27,6 +27,13 @@ import {
   decideFaceMatch,
   type FaceMatchDecision,
 } from '../../features/face/faceMatch';
+import {
+  advanceLiveness,
+  currentLivenessStep,
+  LIVENESS_PROMPT,
+  newLivenessChallenge,
+  type LivenessState,
+} from '../../features/face/liveness';
 import { isNetworkError, loadSessionStudents } from '../../features/offline';
 import { searchStudentFaces, type FaceSearchMatch } from '../../services/auth';
 import { deleteTempPhoto } from '../../shared/tempFiles';
@@ -108,6 +115,29 @@ export function FaceIdentificationScreen({
   const lastFacesUpdateAtRef = useRef(0);
   const isCameraReady = hasPermission && !!device && isAppActive;
   const [search, setSearch] = useState<SearchState>({ kind: 'idle' });
+  // Liveness: blink (+ random head turn) before the photo, so a printed photo
+  // or a picture on another screen cannot be used.
+  const livenessRef = useRef<LivenessState>(newLivenessChallenge(Date.now()));
+  const [livenessPrompt, setLivenessPromptState] = useState<string | null>(null);
+  const [livenessNotice, setLivenessNoticeState] = useState<string | null>(null);
+  // Frame callbacks run ~30x/s: only re-render when the text changes.
+  const livenessTextRef = useRef<{ prompt: string | null; notice: string | null }>({ prompt: null, notice: null });
+  const setLivenessPrompt = useCallback((value: string | null) => {
+    if (livenessTextRef.current.prompt !== value) {
+      livenessTextRef.current.prompt = value;
+      setLivenessPromptState(value);
+    }
+  }, []);
+  const setLivenessNotice = useCallback((value: string | null) => {
+    if (livenessTextRef.current.notice !== value) {
+      livenessTextRef.current.notice = value;
+      setLivenessNoticeState(value);
+    }
+  }, []);
+  const restartLiveness = useCallback(() => {
+    livenessRef.current = newLivenessChallenge(Date.now());
+    setLivenessPrompt(null);
+  }, [setLivenessPrompt]);
   // Students of the session: only they can be opened from a face match.
   const [sessionStudentIds, setSessionStudentIds] = useState<ReadonlySet<string>>(new Set());
 
@@ -133,7 +163,9 @@ export function FaceIdentificationScreen({
     setSearch({ kind: 'idle' });
     setCameraErrorText(null);
     hasCapturedFaceRef.current = false;
-  }, []);
+    setLivenessNotice(null);
+    restartLiveness();
+  }, [restartLiveness, setLivenessNotice]);
 
   useEffect(() => {
     if (hasPermission) {
@@ -177,7 +209,8 @@ export function FaceIdentificationScreen({
     setIsCapturingFace(false);
     isCapturingFaceRef.current = false;
     hasCapturedFaceRef.current = false;
-  }, [device?.id]);
+    restartLiveness();
+  }, [device?.id, restartLiveness]);
 
   const onPreviewLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -192,7 +225,8 @@ export function FaceIdentificationScreen({
       performanceMode: 'fast',
       contourMode: 'none',
       landmarkMode: 'none',
-      classificationMode: 'none',
+      // Eye-open probabilities for the blink check (liveness).
+      classificationMode: 'all',
       minFaceSize: 0.15,
       trackingEnabled: true,
       autoMode: true,
@@ -271,12 +305,6 @@ export function FaceIdentificationScreen({
 
   const handleFacesDetected = useCallback((faces: Face[], frame: Frame) => {
     const now = Date.now();
-    const elapsed = now - lastFacesUpdateAtRef.current;
-
-    if (elapsed < 100) {
-      return;
-    }
-
     const sourceWidth = Math.max(frame.height, 1);
     const sourceHeight = Math.max(frame.width, 1);
     latestFrameSizeRef.current = {
@@ -284,8 +312,12 @@ export function FaceIdentificationScreen({
       height: sourceHeight,
     };
 
-    lastFacesUpdateAtRef.current = now;
-    setDetectedFaces(faces);
+    // Face boxes are redrawn at most 10x/s; liveness below sees every frame
+    // (a child's blink can be shorter than 150 ms).
+    if (now - lastFacesUpdateAtRef.current >= 100) {
+      lastFacesUpdateAtRef.current = now;
+      setDetectedFaces(faces);
+    }
 
     if (
       !isCameraReady ||
@@ -301,15 +333,6 @@ export function FaceIdentificationScreen({
     }
 
     const candidateFace = faces[0];
-    const isFrontalFace =
-      Math.abs(candidateFace.yawAngle) <= 12 &&
-      Math.abs(candidateFace.rollAngle) <= 12 &&
-      Math.abs(candidateFace.pitchAngle) <= 10;
-
-    if (!isFrontalFace) {
-      return;
-    }
-
     const projectedBounds = projectBoundsToPreview(candidateFace.bounds);
     if (!projectedBounds) {
       return;
@@ -323,6 +346,34 @@ export function FaceIdentificationScreen({
       return;
     }
 
+    // Liveness first (same tracked face); the photo is taken only afterwards.
+    const update = advanceLiveness(livenessRef.current, candidateFace, now);
+    livenessRef.current = update.state;
+    if (update.reset) {
+      setLivenessNotice(
+        update.reset === 'timeout'
+          ? 'Waktu habis, ulangi gerakan.'
+          : 'Wajah berganti, ulangi gerakan.',
+      );
+    }
+    if (!update.passed) {
+      const step = currentLivenessStep(update.state);
+      setLivenessPrompt(step ? LIVENESS_PROMPT[step] : null);
+      return;
+    }
+    setLivenessPrompt(null);
+
+    const isFrontalFace =
+      Math.abs(candidateFace.yawAngle) <= 12 &&
+      Math.abs(candidateFace.rollAngle) <= 12 &&
+      Math.abs(candidateFace.pitchAngle) <= 10;
+
+    if (!isFrontalFace) {
+      setLivenessPrompt('Lihat lurus ke kamera');
+      return;
+    }
+    setLivenessNotice(null);
+
     isCapturingFaceRef.current = true;
     captureFaceSnapshot().catch(() => undefined);
   }, [
@@ -330,6 +381,8 @@ export function FaceIdentificationScreen({
     isCameraInitialized,
     isCameraReady,
     projectBoundsToPreview,
+    setLivenessNotice,
+    setLivenessPrompt,
   ]);
 
   const statusText = useMemo(() => {
@@ -357,6 +410,10 @@ export function FaceIdentificationScreen({
       return 'Wajah frontal terdeteksi. Mengambil crop wajah...';
     }
 
+    if (livenessPrompt) {
+      return `Cek wajah asli: ${livenessPrompt.toLowerCase()}`;
+    }
+
     if (detectedFaces.length > 0) {
       return `Wajah terdeteksi: ${detectedFaces.length}`;
     }
@@ -370,6 +427,7 @@ export function FaceIdentificationScreen({
     isAppActive,
     isCapturingFace,
     isCameraInitialized,
+    livenessPrompt,
   ]);
 
   const handleRequestPermission = async () => {
@@ -632,8 +690,8 @@ export function FaceIdentificationScreen({
         {showCameraGuide ? (
           <View pointerEvents="none" style={styles.guideLayer}>
             <View style={styles.guideHint}>
-              <Text style={styles.guideHintText}>
-                Satu wajah di dalam bingkai, menghadap lurus ke kamera
+              <Text style={[styles.guideHintText, livenessPrompt ? styles.livenessPromptText : null]}>
+                {livenessPrompt ?? 'Satu wajah di dalam bingkai, menghadap lurus ke kamera'}
               </Text>
             </View>
             <View style={styles.faceGuideFrame}>
@@ -683,9 +741,10 @@ export function FaceIdentificationScreen({
           )}
           <Text style={styles.statusText}>{statusText}</Text>
         </View>
+        {livenessNotice ? <InlineAlert message={livenessNotice} tone="warning" /> : null}
         <Text style={styles.helperText}>
-          Foto diambil otomatis saat wajah terlihat jelas, lalu dicocokkan dengan wajah
-          siswa yang sudah didaftarkan.
+          Siswa diminta berkedip (kadang menoleh) untuk memastikan wajah asli, bukan foto.
+          Foto lalu diambil otomatis dan dicocokkan dengan wajah yang sudah didaftarkan.
         </Text>
         <PrimaryButton
           fullWidth
@@ -747,6 +806,10 @@ const styles = StyleSheet.create({
     ...typography.labelSm,
     color: colors.text.inverse,
     textAlign: 'center',
+  },
+  livenessPromptText: {
+    ...typography.headingSm,
+    color: colors.text.inverse,
   },
   faceGuideFrame: {
     width: '68%',
