@@ -11,6 +11,11 @@ import {
   type DashboardStudentListItem,
 } from './auth';
 import { GRAPHQL_URL } from './environment';
+import {
+  emptyNutritionCounts,
+  nutritionStatus,
+  type NutritionStatus,
+} from '../features/growth/nutritionStatus';
 
 type UnknownRecord = Record<string, unknown>;
 type GraphqlResponse<TData> = {
@@ -20,7 +25,8 @@ type GraphqlResponse<TData> = {
 
 export type SchoolRole = 'school_admin' | 'teacher' | 'user';
 
-export type BmiCategory = 'Kurus' | 'Normal' | 'Gemuk' | 'Obes';
+/** Status gizi IMT/U WHO 2007 + Permenkes 2/2020 (features/growth/nutritionStatus). */
+export type BmiCategory = NutritionStatus;
 
 export type StudentMeasurementEntry = {
   id: string;
@@ -204,21 +210,16 @@ export function computeBmi(heightCm: number | null, weightKg: number | null): nu
   return weightKg / (heightM * heightM);
 }
 
-/** Kategori sama dengan analitik dashboard (ambang dewasa sederhana). */
-export function getBmiCategory(bmi: number | null): BmiCategory | null {
-  if (bmi === null) {
-    return null;
-  }
-  if (bmi < 18.5) {
-    return 'Kurus';
-  }
-  if (bmi < 25) {
-    return 'Normal';
-  }
-  if (bmi < 30) {
-    return 'Gemuk';
-  }
-  return 'Obes';
+/** Data siswa pada record pengukuran (relasi `student`) untuk status gizi. */
+const RECORD_STUDENT_FIELDS = 'student { gender date_of_birth }';
+
+function recordNutritionStatus(source: UnknownRecord | null, bmi: number | null, measuredAt: string | null) {
+  const student = asRecord(source?.student);
+  return nutritionStatus(
+    bmi,
+    student ? { gender: readString(student.gender), dateOfBirth: readString(student.date_of_birth) } : null,
+    measuredAt,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +470,7 @@ export async function getStudentMeasurementHistory(
         created_at
         capture_method
         notes
+        ${RECORD_STUDENT_FIELDS}
       }
     }
   `;
@@ -487,13 +489,14 @@ export async function getStudentMeasurementHistory(
       const heightCm = readNumber(source?.height_cm);
       const weightKg = readNumber(source?.weight_kg);
       const bmi = computeBmi(heightCm, weightKg);
+      const measuredAt = readString(source?.measured_at) ?? readString(source?.created_at);
       return {
         id,
-        measuredAt: readString(source?.measured_at) ?? readString(source?.created_at),
+        measuredAt,
         heightCm,
         weightKg,
         bmi,
-        bmiCategory: getBmiCategory(bmi),
+        bmiCategory: recordNutritionStatus(source, bmi, measuredAt),
         captureMethod: readString(source?.capture_method),
         notes: readString(source?.notes),
       } satisfies StudentMeasurementEntry;
@@ -610,7 +613,7 @@ export async function getClassMeasurementSummary(
     sessionCount: sessionIds.length,
     measuredStudentCount: 0,
     lastMeasuredAt: null,
-    bmiDistribution: { Kurus: 0, Normal: 0, Gemuk: 0, Obes: 0 },
+    bmiDistribution: emptyNutritionCounts(),
     averageHeightCm: null,
     averageWeightKg: null,
   };
@@ -628,6 +631,7 @@ export async function getClassMeasurementSummary(
         height_cm
         weight_kg
         measured_at
+        ${RECORD_STUDENT_FIELDS}
       }
     }
   `;
@@ -638,7 +642,10 @@ export async function getClassMeasurementSummary(
   );
 
   // Ambil pengukuran terakhir per siswa (urutan asc -> timpa).
-  const latestByStudent = new Map<string, { height: number | null; weight: number | null }>();
+  const latestByStudent = new Map<
+    string,
+    { height: number | null; weight: number | null; category: BmiCategory | null }
+  >();
   (recordData.student_measurement_records ?? []).forEach(row => {
     const source = asRecord(row);
     const studentId = readString(source?.student_id);
@@ -649,22 +656,24 @@ export async function getClassMeasurementSummary(
     if (measuredAt && (!summary.lastMeasuredAt || measuredAt > summary.lastMeasuredAt)) {
       summary.lastMeasuredAt = measuredAt;
     }
+    const height = readNumber(source?.height_cm);
+    const weight = readNumber(source?.weight_kg);
     latestByStudent.set(studentId, {
-      height: readNumber(source?.height_cm),
-      weight: readNumber(source?.weight_kg),
+      height,
+      weight,
+      category: recordNutritionStatus(source, computeBmi(height, weight), measuredAt),
     });
   });
 
   const heights: number[] = [];
   const weights: number[] = [];
-  latestByStudent.forEach(({ height, weight }) => {
+  latestByStudent.forEach(({ height, weight, category }) => {
     if (height !== null) {
       heights.push(height);
     }
     if (weight !== null) {
       weights.push(weight);
     }
-    const category = getBmiCategory(computeBmi(height, weight));
     if (category) {
       summary.bmiDistribution[category] += 1;
     }

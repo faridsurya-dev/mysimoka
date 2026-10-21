@@ -2,15 +2,12 @@ import React, { useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { BarChart, LineChart } from 'react-native-gifted-charts';
 import { colors, radius, spacing, typography } from '../../../theme';
+import { NUTRITION_STATUS_COLORS } from '../../../features/growth/nutritionStatus';
 
 const Y_AXIS_WIDTH = 36;
 
-export const BMI_COLORS: Record<string, string> = {
-  Kurus: colors.accent.amber,
-  Normal: colors.accent.teal,
-  Gemuk: colors.brand.primary500,
-  Obes: colors.accent.red,
-};
+/** Warna status gizi (IMT/U, sama dengan dashboard web), per label lengkap. */
+export const BMI_COLORS: Record<string, string> = NUTRITION_STATUS_COLORS;
 
 function useChartWidth() {
   const [width, setWidth] = useState(0);

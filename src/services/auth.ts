@@ -14,6 +14,13 @@ import {
   type DeviceCalibrationRowInput,
 } from '../features/device/calibration';
 import type { TechnicianPinConfig } from '../features/device/technicianMode';
+import {
+  emptyNutritionCounts,
+  NUTRITION_STATUS_COLORS,
+  NUTRITION_STATUSES,
+  nutritionStatus,
+  type NutritionStatus,
+} from '../features/growth/nutritionStatus';
 import type {
   AverageMetricItem,
   ImmunizationSessionListItem,
@@ -1847,12 +1854,7 @@ function buildEmptyMeasurementAnalytics(): DashboardMeasurementAnalytics {
       { label: 'Rata-rata Berat', value: '0', unit: 'kg' },
       { label: 'Rata-rata BMI', value: '0', unit: '' },
     ],
-    bmiCategoryData: [
-      { value: 0, label: 'Kurus', frontColor: '#E2A93B' },
-      { value: 0, label: 'Normal', frontColor: '#27AE60' },
-      { value: 0, label: 'Gemuk', frontColor: '#2D9CDB' },
-      { value: 0, label: 'Obes', frontColor: '#EB5757' },
-    ],
+    bmiCategoryData: nutritionBars(emptyNutritionCounts()),
     heightTrend: [{ value: 0, label: '-' }],
     weightTrend: [{ value: 0, label: '-' }],
     measuredRecordCount: 0,
@@ -1867,27 +1869,21 @@ function formatDecimal(value: number, fractionDigits = 1): string {
   return value.toFixed(fractionDigits).replace(/\.0$/, '');
 }
 
-function getBmiCategory(heightCm: number | null, weightKg: number | null) {
-  if (!heightCm || !weightKg || heightCm <= 0 || weightKg <= 0) {
-    return null;
-  }
+/** Label batang grafik dashboard (pendek agar 5 batang muat). */
+const NUTRITION_BAR_LABEL: Record<NutritionStatus, string> = {
+  'Gizi buruk': 'Buruk',
+  'Gizi kurang': 'Kurang',
+  'Gizi baik': 'Baik',
+  'Gizi lebih': 'Lebih',
+  Obesitas: 'Obesitas',
+};
 
-  const heightM = heightCm / 100;
-  const bmi = weightKg / (heightM * heightM);
-  if (!Number.isFinite(bmi)) {
-    return null;
-  }
-
-  if (bmi < 18.5) {
-    return 'Kurus';
-  }
-  if (bmi < 25) {
-    return 'Normal';
-  }
-  if (bmi < 30) {
-    return 'Gemuk';
-  }
-  return 'Obes';
+function nutritionBars(counts: Record<NutritionStatus, number>): CategoryBarItem[] {
+  return NUTRITION_STATUSES.map(status => ({
+    value: counts[status],
+    label: NUTRITION_BAR_LABEL[status],
+    frontColor: NUTRITION_STATUS_COLORS[status],
+  }));
 }
 
 function getMonthKey(value: string | null): string | null {
@@ -1990,6 +1986,7 @@ export async function getDashboardMeasurementAnalytics(payload: {
         height_cm
         weight_kg
         measured_at
+        student { gender date_of_birth }
       }
     }
   `;
@@ -2023,12 +2020,7 @@ export async function getDashboardMeasurementAnalytics(payload: {
   const heights: number[] = [];
   const weights: number[] = [];
   const bmis: number[] = [];
-  const categoryCounts: Record<string, number> = {
-    Kurus: 0,
-    Normal: 0,
-    Gemuk: 0,
-    Obes: 0,
-  };
+  const categoryCounts = emptyNutritionCounts();
   const monthlyBuckets: Record<string, { heights: number[]; weights: number[] }> = {};
 
   records.forEach(row => {
@@ -2045,14 +2037,26 @@ export async function getDashboardMeasurementAnalytics(payload: {
     if (weightKg !== null) {
       weights.push(weightKg);
     }
+    let bmi: number | null = null;
     if (heightCm !== null && weightKg !== null && heightCm > 0 && weightKg > 0) {
       const heightM = heightCm / 100;
-      bmis.push(weightKg / (heightM * heightM));
+      bmi = weightKg / (heightM * heightM);
+      bmis.push(bmi);
     }
 
-    const category = getBmiCategory(heightCm, weightKg);
+    const student = asObject(source?.student);
+    const category = nutritionStatus(
+      bmi,
+      student
+        ? {
+            gender: readNullableString(student.gender),
+            dateOfBirth: readNullableString(student.date_of_birth),
+          }
+        : null,
+      measuredAt ?? (sessionId ? sessionDateById[sessionId] : null),
+    );
     if (category) {
-      categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+      categoryCounts[category] += 1;
     }
 
     if (monthKey) {
@@ -2086,12 +2090,7 @@ export async function getDashboardMeasurementAnalytics(payload: {
       { label: 'Rata-rata Berat', value: formatDecimal(average(weights) ?? 0), unit: 'kg' },
       { label: 'Rata-rata BMI', value: formatDecimal(average(bmis) ?? 0), unit: '' },
     ],
-    bmiCategoryData: [
-      { value: categoryCounts.Kurus, label: 'Kurus', frontColor: '#E2A93B' },
-      { value: categoryCounts.Normal, label: 'Normal', frontColor: '#27AE60' },
-      { value: categoryCounts.Gemuk, label: 'Gemuk', frontColor: '#2D9CDB' },
-      { value: categoryCounts.Obes, label: 'Obes', frontColor: '#EB5757' },
-    ],
+    bmiCategoryData: nutritionBars(categoryCounts),
     heightTrend: heightTrend.length > 0 ? heightTrend : [{ value: 0, label: '-' }],
     weightTrend: weightTrend.length > 0 ? weightTrend : [{ value: 0, label: '-' }],
     measuredRecordCount: records.length,

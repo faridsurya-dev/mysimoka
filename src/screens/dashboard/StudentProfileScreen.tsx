@@ -527,7 +527,7 @@ function GrowthSection({ state, latest, heightTrend, weightTrend, onRetry }: Gro
               {entry.bmiCategory ? (
                 <Badge
                   label={entry.bmiCategory}
-                  tone={entry.bmiCategory === 'Normal' ? 'success' : 'warning'}
+                  tone={entry.bmiCategory === 'Gizi baik' ? 'success' : 'warning'}
                 />
               ) : null}
             </View>
