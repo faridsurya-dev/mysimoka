@@ -849,6 +849,16 @@ export function RootNavigator() {
             schoolId: selectedMembership.school_id,
             schoolName: selectedMembership.school_name,
           });
+          if (!selectedMembership.is_active) {
+            // Sekolah dari cache belum terpilih di server (is_active): samakan di latar belakang.
+            setActiveSchool(selectedMembership.school_id, normalizeRoleKey(selectedMembership.role)).catch(
+              error => {
+                if (__DEV__) {
+                  console.log('[bootstrap][warn][setActiveSchool]', String(error));
+                }
+              },
+            );
+          }
         } else {
           setCurrentSchool(extractSchoolNameFromLoginUser(restoredSession.user) ?? DEFAULT_SCHOOL_NAME);
           setCurrentSchoolId(null);

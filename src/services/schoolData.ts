@@ -321,9 +321,10 @@ export async function searchStudentsWithClass(
     return [];
   }
   const query = `
-    query SearchStudentsWithClass($keyword: String!) {
+    query SearchStudentsWithClass($keyword: String!, $schoolId: uuid!) {
       students(
         where: {
+          enrollments: { class: { school_id: { _eq: $schoolId } } }
           _or: [
             { full_name: { _ilike: $keyword } },
             { student_number: { _ilike: $keyword } },
@@ -346,21 +347,20 @@ export async function searchStudentsWithClass(
   try {
     const data = await graphql<{ students?: unknown[] }>(
       query,
-      { keyword: `%${trimmed}%` },
+      { keyword: `%${trimmed}%`, schoolId },
       'Gagal mencari siswa.',
     );
     const rows = Array.isArray(data.students) ? data.students : [];
     return rows
       .filter(row => {
-        // Pastikan siswa terdaftar di kelas sekolah aktif bila informasi tersedia.
+        // Hanya siswa yang terdaftar di kelas sekolah aktif (server sudah memfilter; jaga-jaga).
         const enrollments = asRecord(row)?.enrollments;
-        if (!Array.isArray(enrollments) || enrollments.length === 0) {
-          return true;
+        if (!Array.isArray(enrollments)) {
+          return false;
         }
-        return enrollments.some(item => {
-          const classSchoolId = readString(asRecord(asRecord(item)?.class)?.school_id);
-          return !classSchoolId || classSchoolId === schoolId;
-        });
+        return enrollments.some(
+          item => readString(asRecord(asRecord(item)?.class)?.school_id) === schoolId,
+        );
       })
       .map(normalizeStudent)
       .filter((item): item is StudentDetail => item !== null);

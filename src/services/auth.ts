@@ -4600,9 +4600,10 @@ export async function searchStudentsBySchool(
   }
 
   const query = `
-    query SearchStudents($keyword: String!) {
+    query SearchStudents($keyword: String!, $schoolId: uuid!) {
       students(
         where: {
+          enrollments: { class: { school_id: { _eq: $schoolId } } }
           _or: [
             { full_name: { _ilike: $keyword } },
             { student_number: { _ilike: $keyword } },
@@ -4637,7 +4638,7 @@ export async function searchStudentsBySchool(
     },
     body: JSON.stringify({
       query,
-      variables: { keyword: normalizedKeyword },
+      variables: { keyword: normalizedKeyword, schoolId: normalizedSchoolId },
     }),
   })) as
     | {
@@ -4994,6 +4995,22 @@ export async function setActiveSchool(schoolId: string, role = 'teacher'): Promi
     }
   `;
 
+  // Server (face search, data sekolah aktif) membaca sekolah terpilih dari is_active.
+  const activateSelectedMembershipMutation = `
+    mutation ActivateSelectedMembership($userId: uuid!, $schoolId: uuid!) {
+      update_school_memberships(
+        where: {
+          user_id: { _eq: $userId }
+          school_id: { _eq: $schoolId }
+          is_active: { _eq: false }
+        }
+        _set: { is_active: true }
+      ) {
+        affected_rows
+      }
+    }
+  `;
+
   const membershipHeaders = {
     'Content-Type': 'application/json',
     'x-hasura-role': 'user',
@@ -5069,6 +5086,30 @@ export async function setActiveSchool(schoolId: string, role = 'teacher'): Promi
       console.log(
         '[setActiveSchool][warn][deactivate]',
         deactivateResponse.errors[0]?.message || 'unknown error',
+      );
+    }
+  }
+
+  const activateResponse = (await apiRequest(GRAPHQL_URL, {
+    method: 'POST',
+    requiresAuth: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: activateSelectedMembershipMutation,
+      variables: {
+        userId,
+        schoolId: normalizedSchoolId,
+      },
+    }),
+  })) as { errors?: Array<{ message?: string }> } | null;
+
+  if (Array.isArray(activateResponse?.errors) && activateResponse.errors.length > 0) {
+    if (__DEV__) {
+      console.log(
+        '[setActiveSchool][warn][activate]',
+        activateResponse.errors[0]?.message || 'unknown error',
       );
     }
   }
