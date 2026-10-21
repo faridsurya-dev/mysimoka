@@ -12,6 +12,8 @@ import {
 } from './auth';
 import { GRAPHQL_URL } from './environment';
 import {
+  ageInMonths,
+  bmiForAgeZ,
   emptyNutritionCounts,
   nutritionStatus,
   type NutritionStatus,
@@ -35,6 +37,8 @@ export type StudentMeasurementEntry = {
   weightKg: number | null;
   bmi: number | null;
   bmiCategory: BmiCategory | null;
+  /** z-score IMT/U WHO 2007 (null di luar 5–19 th / data kurang). */
+  bmiZ: number | null;
   captureMethod: string | null;
   notes: string | null;
 };
@@ -497,6 +501,11 @@ export async function getStudentMeasurementHistory(
         weightKg,
         bmi,
         bmiCategory: recordNutritionStatus(source, bmi, measuredAt),
+        bmiZ: bmiForAgeZ(
+          bmi,
+          readString(asRecord(source?.student)?.gender),
+          ageInMonths(readString(asRecord(source?.student)?.date_of_birth), measuredAt),
+        ),
         captureMethod: readString(source?.capture_method),
         notes: readString(source?.notes),
       } satisfies StudentMeasurementEntry;

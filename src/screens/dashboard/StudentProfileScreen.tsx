@@ -522,6 +522,10 @@ function GrowthSection({ state, latest, heightTrend, weightTrend, onRetry }: Gro
                 <Text style={styles.recordMeta}>
                   TB {formatNumber(entry.heightCm)} cm • BB {formatNumber(entry.weightKg)} kg • BMI{' '}
                   {formatNumber(entry.bmi)}
+                  {/* Cache offline versi lama tidak punya bmiZ. */}
+                  {typeof entry.bmiZ === 'number'
+                    ? ` • z IMT/U ${entry.bmiZ > 0 ? '+' : ''}${entry.bmiZ.toFixed(2).replace('.', ',')}`
+                    : ''}
                 </Text>
               </View>
               {entry.bmiCategory ? (
