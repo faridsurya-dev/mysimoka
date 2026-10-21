@@ -4135,8 +4135,8 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
   }
 
   const query = `
-    query GetStudentEnrollments {
-      student_enrollments {
+    query GetStudentEnrollments($schoolId: uuid!) {
+      student_enrollments(where: { class: { school_id: { _eq: $schoolId } } }) {
         enrolled_at
         created_at
         updated_at
@@ -4173,6 +4173,7 @@ export async function listStudentsBySchool(schoolId: string): Promise<DashboardS
     },
     body: JSON.stringify({
       query,
+      variables: { schoolId: normalizedSchoolId },
     }),
   })) as
     | {
