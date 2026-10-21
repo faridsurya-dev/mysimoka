@@ -99,7 +99,8 @@ const MODE_OPTIONS = [
   { value: 'auto' as const, label: 'Alat ukur (opsional)' },
 ];
 
-// Accepts "25,5" or "25.5"; keeps a single decimal separator and one decimal digit.
+// Accepts "25,55" or "25.55"; keeps a single decimal separator and two decimal
+// digits (DB columns are numeric(5,2) / numeric(6,2)).
 export function sanitizeDecimalInput(value: string): string {
   const normalized = value.replace(',', '.').replace(/[^0-9.]/g, '');
   const dotIndex = normalized.indexOf('.');
@@ -110,8 +111,13 @@ export function sanitizeDecimalInput(value: string): string {
   const decimalPart = normalized
     .slice(dotIndex + 1)
     .replace(/\./g, '')
-    .slice(0, 1);
+    .slice(0, 2);
   return `${integerPart}.${decimalPart}`;
+}
+
+/** Device reading for the form: up to two decimals, trailing zeros dropped ("92.2", "125.55"). */
+export function formatMeasurementNumber(value: number): string {
+  return String(Math.round(value * 100) / 100);
 }
 
 function parseMeasurementNumber(value: string): number | null {
@@ -124,7 +130,7 @@ function parseMeasurementNumber(value: string): number | null {
 }
 
 function formatReading(value: number | null) {
-  return value === null ? null : value.toFixed(1).replace(/\.0$/, '');
+  return value === null ? null : formatMeasurementNumber(value);
 }
 
 // "Data pembanding" section open/closed, kept while the app runs so testers
@@ -145,9 +151,9 @@ export function describeReferenceDifference(
   if (measuredNumber === null || referenceNumber === null) {
     return null;
   }
-  const diff = Math.round((measuredNumber - referenceNumber) * 10) / 10;
+  const diff = Math.round((measuredNumber - referenceNumber) * 100) / 100;
   const sign = diff > 0 ? '+' : diff < 0 ? '−' : '±';
-  const text = Math.abs(diff).toFixed(1).replace('.', ',');
+  const text = String(Math.abs(diff)).replace('.', ',');
   return `Selisih ${sign}${text} ${unit}`;
 }
 
@@ -442,6 +448,45 @@ export function StudentMeasurementScreen({
     // Fires once per new reading (latestReadingKey); the latest form values are read then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canAutoSave, latestReadingKey]);
+
+  // Tanda "hasil stabil masuk ke form": satu bip pendek + getar + kotak hijau, sekali per
+  // pembacaan stabil baru. Dengan "Simpan otomatis" bunyi simpan (bip ganda) sudah cukup.
+  const signaledReadingRef = useRef<string | null>(null);
+  const [deviceFilled, setDeviceFilled] = useState(false);
+  useEffect(() => {
+    if (!deviceSession.latestReadingStable) {
+      // Anak turun / pengukuran baru: nilai yang sama boleh ditandai lagi.
+      signaledReadingRef.current = null;
+      return;
+    }
+    if (
+      measurementMode !== 'auto' ||
+      !hasFreshStableReading ||
+      latestReadingKey === null ||
+      signaledReadingRef.current === latestReadingKey
+    ) {
+      return;
+    }
+    signaledReadingRef.current = latestReadingKey;
+    setDeviceFilled(true);
+    if (!autoSave) {
+      signalFeedback('stable');
+    }
+  }, [
+    autoSave,
+    deviceSession.latestReadingStable,
+    hasFreshStableReading,
+    latestReadingKey,
+    measurementMode,
+  ]);
+
+  useEffect(() => {
+    if (!deviceFilled) {
+      return;
+    }
+    const timer = setTimeout(() => setDeviceFilled(false), 3000);
+    return () => clearTimeout(timer);
+  }, [deviceFilled]);
 
   useEffect(() => {
     if (measurementMode !== 'auto' || latestWeightDisplay === null) {
@@ -1250,6 +1295,7 @@ export function StudentMeasurementScreen({
                   label="Tinggi badan"
                   unit="cm"
                   value={heightValue}
+                  highlighted={deviceFilled && latestHeightDisplay !== null}
                   onChangeText={value =>
                     setHeightValue(sanitizeDecimalInput(value))
                   }
@@ -1258,14 +1304,21 @@ export function StudentMeasurementScreen({
                   label="Berat badan"
                   unit="kg"
                   value={weightValue}
+                  highlighted={deviceFilled && latestWeightDisplay !== null}
                   onChangeText={value =>
                     setWeightValue(sanitizeDecimalInput(value))
                   }
                 />
               </View>
+              {deviceFilled ? (
+                <Text accessibilityLiveRegion="polite" style={styles.deviceFilledText}>
+                  ✓ Hasil stabil dari alat sudah masuk.{' '}
+                  {autoSave ? 'Menyimpan otomatis…' : 'Periksa lalu tekan Simpan.'}
+                </Text>
+              ) : null}
               <Text style={styles.fieldHint}>
-                Gunakan titik atau koma untuk desimal, contoh 125,5 cm atau 24,8
-                kg.
+                Gunakan titik atau koma untuk desimal (maks. 2 angka), contoh
+                125,55 cm atau 24,85 kg.
               </Text>
 
               <View style={styles.referenceCard}>
@@ -1437,6 +1490,8 @@ type MeasurementFieldProps = {
   unit: string;
   value: string;
   onChangeText: (value: string) => void;
+  /** Baru saja diisi dari pembacaan stabil alat. */
+  highlighted?: boolean;
 };
 
 function MeasurementField({
@@ -1444,15 +1499,18 @@ function MeasurementField({
   unit,
   value,
   onChangeText,
+  highlighted = false,
 }: MeasurementFieldProps) {
   return (
-    <View style={styles.fieldCard}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={[styles.fieldCard, highlighted && styles.fieldCardFilled]}>
+      <Text style={styles.fieldLabel}>
+        {highlighted ? `${label} ✓` : label}
+      </Text>
       <TextInput
         accessibilityLabel={`${label} (${unit})`}
         inputMode="decimal"
         keyboardType="decimal-pad"
-        maxLength={5}
+        maxLength={6}
         onChangeText={onChangeText}
         placeholder="0"
         placeholderTextColor={colors.text.muted}
@@ -1484,7 +1542,7 @@ function ReferenceField({
           accessibilityLabel={`${label} (${unit})`}
           inputMode="decimal"
           keyboardType="decimal-pad"
-          maxLength={5}
+          maxLength={6}
           onChangeText={onChangeText}
           placeholder="—"
           placeholderTextColor={colors.text.muted}
@@ -1807,6 +1865,17 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.text.muted,
     textAlign: 'center',
+  },
+  fieldCardFilled: {
+    borderWidth: 2,
+    borderColor: colors.feedback.successBorder,
+    backgroundColor: colors.feedback.successBackground,
+  },
+  deviceFilledText: {
+    ...typography.caption,
+    color: colors.feedback.successText,
+    textAlign: 'center',
+    fontWeight: '600',
   },
   referenceCard: {
     borderRadius: radius.md,

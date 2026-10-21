@@ -9,6 +9,7 @@ import { Screen } from '../../shared/components';
 import { colors, radius, spacing, typography } from '../../theme';
 import { DeviceManagerSheet } from './DeviceManagerSheet';
 import { DeviceStatusCard } from './DeviceStatusCard';
+import { formatMeasurementNumber } from './StudentMeasurementScreen';
 
 type BatchMeasurementScreenProps = {
   activeStudentName?: string;
@@ -72,14 +73,14 @@ export function BatchMeasurementScreen({
     if (!stableWeightKg) {
       return;
     }
-    setWeightValue(stableWeightKg.toFixed(1).replace(/\.0$/, ''));
+    setWeightValue(formatMeasurementNumber(stableWeightKg));
   }, [stableWeightKg]);
 
   useEffect(() => {
     if (!stableHeightCm) {
       return;
     }
-    setHeightValue(stableHeightCm.toFixed(1).replace(/\.0$/, ''));
+    setHeightValue(formatMeasurementNumber(stableHeightCm));
   }, [stableHeightCm]);
 
   return (

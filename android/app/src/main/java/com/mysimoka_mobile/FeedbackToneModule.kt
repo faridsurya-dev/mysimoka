@@ -20,14 +20,20 @@ class FeedbackToneModule(reactContext: ReactApplicationContext) :
 
   override fun getName() = NAME
 
-  /** kind: "success" (short double beep) or "error" (low long tone). */
+  /**
+   * kind: "success" (short double beep, saved), "error" (low long tone) or
+   * "stable" (single short beep: the device's stable reading filled the form).
+   */
   @ReactMethod
   fun play(kind: String) {
     try {
       val generator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, VOLUME)
       val (tone, durationMs) =
-        if (kind == "error") ToneGenerator.TONE_PROP_NACK to 400
-        else ToneGenerator.TONE_PROP_ACK to 250
+        when (kind) {
+          "error" -> ToneGenerator.TONE_PROP_NACK to 400
+          "stable" -> ToneGenerator.TONE_PROP_BEEP to 150
+          else -> ToneGenerator.TONE_PROP_ACK to 250
+        }
       generator.startTone(tone, durationMs)
       // Release after the tone has played; a ToneGenerator holds an audio track.
       android.os.Handler(android.os.Looper.getMainLooper())
