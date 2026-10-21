@@ -41,6 +41,7 @@ import {
   ScreenHeader,
   SegmentedControl,
   StatusPill,
+  TextField,
   type SegmentedOption,
 } from '../../shared/components';
 import { deleteTempPhoto } from '../../shared/tempFiles';
@@ -228,6 +229,18 @@ export function FaceRegistrationScreen({
   const [students, setStudents] = useState<DashboardStudentListItem[]>([]);
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [studentsError, setStudentsError] = useState<string | null>(null);
+  const [studentQuery, setStudentQuery] = useState('');
+  // Cari siswa (nama, NISN, kelas) agar cepat memasangkan wajah di sekolah dengan banyak siswa.
+  const filteredStudents = useMemo(() => {
+    const words = studentQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      return students;
+    }
+    return students.filter(student => {
+      const haystack = `${student.name} ${student.nisn} ${student.className}`.toLowerCase();
+      return words.every(word => haystack.includes(word));
+    });
+  }, [studentQuery, students]);
   const [sliderWidth, setSliderWidth] = useState(1);
   const cameraRef = useRef<VisionCamera | null>(null);
   const faceSliderRef = useRef<FlatList<CapturedFaceCrop> | null>(null);
@@ -1314,9 +1327,25 @@ export function FaceRegistrationScreen({
           </View>
 
           <View style={styles.stepTwoListSection}>
+            {students.length > 0 ? (
+              <TextField
+                accessibilityLabel="Cari siswa"
+                autoCapitalize="none"
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+                containerStyle={styles.studentSearch}
+                label="Cari siswa"
+                leftIcon={<Icon color={colors.text.muted} name="search" size={18} />}
+                onChangeText={setStudentQuery}
+                placeholder="Nama, NISN, atau kelas"
+                returnKeyType="search"
+                value={studentQuery}
+              />
+            ) : null}
             <FlatList
-              data={students}
+              data={filteredStudents}
               keyExtractor={student => student.id}
+              keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.studentListContent}
               ListEmptyComponent={
@@ -1324,6 +1353,13 @@ export function FaceRegistrationScreen({
                   <LoadingState label="Memuat siswa..." />
                 ) : studentsError ? (
                   <InlineAlert message={studentsError} title="Daftar siswa gagal dimuat" tone="error" />
+                ) : students.length > 0 ? (
+                  <EmptyState
+                    compact
+                    icon="search"
+                    title="Siswa tidak ditemukan"
+                    description={`Tidak ada siswa yang cocok dengan "${studentQuery.trim()}".`}
+                  />
                 ) : (
                   <EmptyState
                     compact
@@ -1728,6 +1764,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     paddingHorizontal: layout.screenPaddingX,
+  },
+  studentSearch: {
+    marginBottom: spacing[8],
   },
   stepTwoFooter: {
     paddingTop: spacing[12],
